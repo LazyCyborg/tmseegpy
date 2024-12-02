@@ -21,10 +21,11 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
   5. [Bad Channel and Epoch Detection](#5-bad-channel-and-epoch-detection)
   6. [ICA and Artifact Removal](#6-ica-and-artifact-removal)
   7. [Baseline Correction and Referencing](#7-baseline-correction-and-referencing)
-  8. [Current Source Density (CSD) Transformation](#8-current-source-density-csd-transformation)
-  9. [Downsampling](#9-downsampling)
-  10. [Final Quality Check](#10-final-quality-check)
-  11. [PCIst Analysis](#11-pcist-analysis)
+  8. [Signal Space Projection (SSP)  Transformation](#8-current-source-density-csd-transformation)
+  9. [Current Source Density (CSD) Transformation](#9-current-source-density-csd-transformation)
+  10. [Downsampling](#10-downsampling)
+  11. [Final Quality Check](#11-final-quality-check)
+  12. [PCIst Analysis](#12-pcist-analysis)
 - [Modules and Classes](#modules-and-classes)
   - [TMSEEGPreprocessor](#tmseepreprocessor)
   - [TMSArtifactCleaner](#tmsartifactcleaner)
@@ -246,22 +247,22 @@ Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact
 - Functions: `apply_ssp`
 - Description: Computes and applies Signal Space Projection (SSP) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html).
 
-### 8. Current Source Density (CSD) Transformation (optional)
+### 9. Current Source Density (CSD) Transformation (optional)
 
 - Function: `apply_csd`
 - Description: Enhances spatial resolution by applying the CSD transformation.
 
-### 9. Downsampling
+### 10. Downsampling
 
 - Function: `downsample`
 - Description: Reduces the sampling frequency.
 
-### 10. Final Quality Check
+### 11. Final Quality Check
 
 - Function: `plot_evoked_response`
 - Description: Plots the averaged evoked response for visual inspection.
 
-### 11. PCIst Analysis
+### 12. PCIst Analysis
 
 - Class: `PCIst`
 - Description: Calculates the Perturbational Complexity Index based on State transitions, providing a measure of brain response complexity.
