@@ -202,12 +202,20 @@ data/
 
 ## Processing Pipeline
 
-The pipeline processes TMS-EEG data through the fo stages:
+The pipeline processes TMS-EEG data through these stages which are roughly modelled from the reccomendations in:
+
+Brancaccio, A., Tabarelli, D., Zazio, A., Bertazzoli, G., Metsomaa, J., Ziemann, U., Bortoletto, M., & Belardinelli, P. (2024). Towards the definition of a standard in TMS-EEG data preprocessing. NeuroImage, 301. https://doi.org/10.1016/j.neuroimage.2024.120874
+
+And the custom functions (TMS-artifact removal and classification of ICA components) are modelled after the TESA toolbox:
+
+Rogasch NC, Sullivan C, Thomson RH, Rose NS, Bailey NW, Fitzgerald PB, Farzan F, Hernandez-Pavon JC. Analysing concurrent transcranial magnetic stimulation and electroencephalographic data: a review and introduction to the open-source TESA software. NeuroImage. 2017; 147:934-951.
+
+Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact-rejection techniques available in TESA, an open-source TMS-EEG toolbox. Brain Stimulation. 2020; In press.
 
 ### 1. Data Loading
 
-- Function: Loads raw EEG data using MNE.
-- Description: Reads the EEG recordings from the specified data directory and prepares them for preprocessing.
+- Function: Loads raw EEG data and converts it to a mne.raw object.
+- Description: Utlises the modifed version of the neurone_loader and is currently only tested on .ses files.
 
 ### 2. TMS Artifact Removal
 
@@ -233,7 +241,7 @@ The pipeline processes TMS-EEG data through the fo stages:
 
 - Functions: `run_ica`, `run_second_ica`, `clean_muscle_artifacts`
 - Description:
-  - First ICA: Focuses on TMS-evoked muscle artifacts.
+  - First ICA: Aims to classify TMS-evoked muscle artifacts using Z-score threshold of independent components.
   - Second ICA: Removes remaining artifacts such as eye blinks and heartbeats using ICLabel.
   - Muscle Artifact Cleaning: Optionally cleans muscle artifacts using tensor decomposition (se bellow).
 
@@ -242,12 +250,12 @@ The pipeline processes TMS-EEG data through the fo stages:
 - Functions: `set_average_reference`, `apply_baseline_correction`
 - Description: Applies average referencing, baseline correction, and Signal Space Projection (SSP).
 
-### 8. Signal Space Projection (SSP)
+### 8. Signal Space Projection (SSP) (optional)
 
 - Functions: `apply_ssp`
 - Description: Computes and applies Signal Space Projection (SSP) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html).
 
-### 8. Current Source Density (CSD) Transformation
+### 8. Current Source Density (CSD) Transformation (optional)
 
 - Function: `apply_csd`
 - Description: Enhances spatial resolution by applying the CSD transformation.
@@ -255,7 +263,7 @@ The pipeline processes TMS-EEG data through the fo stages:
 ### 9. Downsampling
 
 - Function: `downsample`
-- Description: Reduces the sampling frequency to the desired rate to save computational resources.
+- Description: Reduces the sampling frequency.
 
 ### 10. Final Quality Check
 
@@ -266,11 +274,6 @@ The pipeline processes TMS-EEG data through the fo stages:
 
 - Class: `PCIst`
 - Description: Calculates the Perturbational Complexity Index based on State transitions, providing a measure of brain response complexity.
-
-### 12. Microstate Analysis
-
-- Class: `Microstate`
-- Description: Performs microstate analysis across sessions, including global clustering and pre/post-TMS comparisons.
 
 ## Modules and Classes
 
