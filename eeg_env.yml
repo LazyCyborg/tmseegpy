@@ -1,0 +1,17 @@
+name: eeg
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - scipy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - mne
+  - tensorly
+  - tqdm
+  - ipython
+  - jupyter
+  - pip

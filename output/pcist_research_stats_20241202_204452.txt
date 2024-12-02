@@ -1,0 +1,96 @@
+PCIst Research Statistics Report
+==================================================
+
+1. POOLED STATISTICS ACROSS ALL SESSIONS
+----------------------------------------
+Number of sessions: 8
+Mean PCIst: 39.7293
+Median PCIst: 39.0945
+Standard deviation: 14.1965
+Coefficient of variation: 35.73%
+Range: 17.5329 - 67.3451
+
+Distribution Statistics:
+Skewness: 0.3555
+Kurtosis: -0.3133
+Shapiro-Wilk test (normality): W=0.9777, p=0.9504
+
+Quartile Statistics:
+Q1 (25th percentile): 32.4289
+Q2 (median): 39.0945
+Q3 (75th percentile): 46.3684
+IQR: 13.9394
+
+Outlier Analysis:
+Lower bound: 11.5198
+Upper bound: 67.2775
+Number of outliers: 1
+Outlier sessions:
+  2023-12-15T121633: 67.3451
+
+2. INDIVIDUAL SESSION STATISTICS
+----------------------------------------
+
+Session: 2023-11-30T150853
+PCIst value: 41.6998
+
+SNR Statistics:
+Mean SNR: 2.6931
+Max SNR: 5.3123
+
+Session: 2023-12-15T121633
+PCIst value: 67.3451
+
+SNR Statistics:
+Mean SNR: 2.1832
+Max SNR: 4.4417
+
+Session: 2023-12-19T143454
+PCIst value: 36.4892
+
+SNR Statistics:
+Mean SNR: 3.2115
+Max SNR: 5.8524
+
+Session: 2023-12-19T150539
+PCIst value: 34.6989
+
+SNR Statistics:
+Mean SNR: 1.9678
+Max SNR: 2.8580
+
+Session: 2023-12-19T152518
+PCIst value: 17.5329
+
+SNR Statistics:
+Mean SNR: 2.0825
+Max SNR: 3.6837
+
+Session: 2024-05-31T143456
+PCIst value: 25.6189
+
+SNR Statistics:
+Mean SNR: 2.1379
+Max SNR: 3.9606
+
+Session: 2024-10-16T145951LMC
+PCIst value: 45.5120
+
+SNR Statistics:
+Mean SNR: 3.9282
+Max SNR: 15.5113
+
+Session: 2024-10-16T151006LPFC
+PCIst value: 48.9375
+
+SNR Statistics:
+Mean SNR: 4.2507
+Max SNR: 6.4825
+
+3. QUALITY CONTROL SUMMARY
+----------------------------------------
+Mean SNR across sessions: 2.8069
+Mean variance explained: 0.00%
+
+Overall Quality Assessment: 0.3852
+WARNING: Quality metrics below threshold - review data carefully
