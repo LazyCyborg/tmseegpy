@@ -382,28 +382,6 @@ Methods:
 - `state_transition_quantification`: Quantifies state transitions in the signal.
 - `plot_analysis`: Plots the analysis steps for visualization.
 
-## Dependencies
-
-- Python 3.6 or higher
-- Required Libraries:
-  - NumPy
-  - SciPy
-  - MNE
-  - scikit-learn
-  - tensorly
-  - matplotlib
-  - seaborn
-  - tqdm
-  - mne-icalabel
-  - mne-faster
-
-Install the dependencies using:
-
-```bash
-pip install -r requirements.txt
-```
-
-Note: Some libraries may require additional system packages.
 
 ## Contributing
 
