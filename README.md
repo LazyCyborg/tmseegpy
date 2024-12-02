@@ -1,6 +1,8 @@
 # TMS-EEG Preprocessing and Analysis Pipeline
 
-This repository provides a comprehensive pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data. The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning, and advanced analyses such as the Perturbational Complexity Index based on State transitions (PCIst) and microstate analysis.
+This repository provides some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data. The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019).
+
+Currently the code is only tested on TMS-EEG data recorded in .ses format from the Bittium NeurOne 5kHz sampliing rate amplifier. Feel free to modify the preproc module to fit other types of recorded TMS-EEG data. If you create a dataloader that is compatible with multiple systems feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. 
 
 ## Table of Contents
 
@@ -55,20 +57,20 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
 - Visualization: Provides plotting functions for quality checks and result visualization.
 - Optional GUI with the gui.py
 
+
 ## Installation
 
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/tms-eeg-pipeline.git
-   cd tms-eeg-pipeline
-   ```
+   git clone https://github.com/LazyCyborg/tmseegpy.git
+   cd tmseegpy
 
 2. Create a virtual environment (optional but recommended):
 
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows, use venv\Scripts\activate
+    conda env create -f eeg_env.yml
+    conda activate eeg
    ```
 
 3. Install the required packages:
@@ -77,7 +79,7 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
    pip install -r requirements.txt
    ```
 
-   Note: Required libraries:
+   Required libraries:
 
    - NumPy
    - SciPy
@@ -301,12 +303,6 @@ The TMSArtifactCleaner class is designed to detect and clean transcranial magnet
 - Parallel Processing: Implements parallel computation to speed up artifact detection across multiple epochs.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
 
-#### Initialization
-
-```python
-def __init__(self, epochs: mne.Epochs, verbose: bool = True):
-    """Initialize the TMS artifact cleaner."""
-```
 
 #### Parameters:
 - epochs (mne.Epochs): The EEG/MEG epochs to process.
@@ -379,7 +375,7 @@ Validates the cleaning results
 
 Class implementation of PCIst for calculating the Perturbational Complexity Index.
 
-Key Methods:
+Methods:
 
 - `calc_PCIst`: Calculates the PCIst value.
 - `dimensionality_reduction`: Performs dimensionality reduction using SVD.

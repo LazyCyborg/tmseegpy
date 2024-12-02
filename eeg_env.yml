@@ -14,4 +14,9 @@ dependencies:
   - tqdm
   - ipython
   - jupyter
+  - pandas
+  - joblib
+  - statsmodels
+  - scikit-image
+  - h5py
   - pip
