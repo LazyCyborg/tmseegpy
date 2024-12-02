@@ -397,7 +397,9 @@ The PCIst implementation is based on:
 
 - Comolatti R et al., "A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations" Brain Stimulation (2019)
 
-The pipeline uses the MNE-Python library for EEG data processing.
+The pipeline uses the MNE-Python library for EEG data processing:
+
+- Gramfort, A., Luessi, M., Larson, E., Engemann, D. A., Strohmeier, D., Brodbeck, C., Goj, R., Jas, M., Brooks, T., Parkkonen, L., & Hämäläinen, M. (2013). MEG and EEG data analysis with MNE-Python. Frontiers in Neuroscience, 7 DEC. https://doi.org/10.3389/fnins.2013.00267
 
 The bad channel, and epoch detection uses MNE-FASTER:
 
