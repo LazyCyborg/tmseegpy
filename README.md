@@ -21,7 +21,7 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
   5. [Bad Channel and Epoch Detection](#5-bad-channel-and-epoch-detection)
   6. [ICA and Artifact Removal](#6-ica-and-artifact-removal)
   7. [Baseline Correction and Referencing](#7-baseline-correction-and-referencing)
-  8. [Signal Space Projection (SSP)  Transformation](#8-current-source-density-csd-transformation)
+  8. [Signal Space Projection (SSP)](#8-current-source-density-csd-transformation)
   9. [Current Source Density (CSD) Transformation](#9-current-source-density-csd-transformation)
   10. [Downsampling](#10-downsampling)
   11. [Final Quality Check](#11-final-quality-check)
