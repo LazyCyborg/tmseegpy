@@ -107,8 +107,10 @@ The pipeline is designed to be run from the command line or through the simple G
 For GUI run:
 
    ```bash
+   cd tms_eeg_analysis
    python gui.py 
    ```
+The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
 ### Command-Line Arguments
 
@@ -243,8 +245,13 @@ The pipeline processes TMS-EEG data through the fo stages:
 
 ### 7. Baseline Correction and Referencing
 
-- Functions: `set_average_reference`, `apply_baseline_correction`, `apply_ssp`
+- Functions: `set_average_reference`, `apply_baseline_correction`
 - Description: Applies average referencing, baseline correction, and Signal Space Projection (SSP).
+
+### 8. Signal Space Projection (SSP)
+
+- Functions: `apply_ssp`
+- Description: Computes and applies Signal Space Projection (SSP) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html).
 
 ### 8. Current Source Density (CSD) Transformation
 
@@ -280,13 +287,16 @@ Class for preprocessing TMS-EEG data.
  Methods:
 
 - `remove_tms_artifact`: Removes TMS artifacts from raw data.
-- `interpolate_tms_artifact`: Interpolates removed TMS artifacts using specified methods.
+- `interpolate_tms_artifact`: Interpolates removed TMS artifacts using MNE-FASTER.
 - `filter_raw`: Applies bandpass and notch filters to raw data.
 - `create_epochs`: Creates epochs from continuous data.
-- `remove_bad_channels`: Identifies and interpolates bad channels.
+- `remove_bad_channels`: Identifies and interpolates bad channels using MNE-FASTER.
 - `remove_bad_epochs`: Removes bad epochs based on amplitude criteria.
-- `run_ica`: Runs ICA to identify and remove artifacts.
-- `clean_muscle_artifacts`: Cleans TMS-evoked muscle artifacts.
+- `run_ica`: Runs ICA and attempts to classify components as TMS-evoked muscle activity using Z-core threshold.
+- `run_second_ica`: Runs ICA to identify and remove residual physiological artifacts using MNE-ICALabel.
+- `clean_muscle_artifacts`: Cleans TMS-evoked muscle artifacts using non-negative tensor decomposition.
+- `apply_ssp`: Aplies signal-space projection (SSP) to epochs .
+- `apply_csd`: Applies current Source Density transformation.
 - `set_average_reference`: Sets the EEG reference to average.
 - `apply_baseline_correction`: Applies baseline correction to epochs.
 - `apply_csd`: Applies Current Source Density transformation.
