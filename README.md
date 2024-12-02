@@ -25,7 +25,6 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
   9. [Downsampling](#9-downsampling)
   10. [Final Quality Check](#10-final-quality-check)
   11. [PCIst Analysis](#11-pcist-analysis)
-  12. [Microstate Analysis](#12-microstate-analysis)
 - [Modules and Classes](#modules-and-classes)
   - [TMSEEGPreprocessor](#tmseepreprocessor)
   - [TMSArtifactCleaner](#tmsartifactcleaner)
@@ -42,19 +41,13 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
 - TMS artifact removal and interpolation
 - Filtering and downsampling
 - Bad channel and epoch detection using the FASTER algorithm
-- Independent Component Analysis (ICA) for artifact removal
+- Independent Component Analysis (ICA) for artifact removal with automatic component classification 
 - Muscle artifact cleaning using tensor decomposition
-- Baseline correction and referencing
-- Current Source Density (CSD) transformation
-- Advanced analyses such as PCIst and microstate analysis
+- PCIst analysis
 
 ## Features
 
-- Automated Preprocessing: Streamlines the preprocessing steps required for TMS-EEG data.
-- Artifact Removal: Implements both traditional and advanced methods for artifact detection and removal.
-- Flexible Configuration: Allows customization of preprocessing parameters through command-line arguments.
-- Advanced Analysis: Includes PCIst calculation and microstate analysis for in-depth data interpretation.
-- Visualization: Provides plotting functions for quality checks and result visualization.
+- Visualization: Provides plotting functions and summary statistics
 - Optional GUI with the gui.py
 
 
@@ -167,6 +160,7 @@ The GUI is basically a wrapper for the argparser bellow and is intended as the m
 | --min_peak_distance         | int   | 1        | Minimum peak distance for microstate analysis.                                            |
 | --preproc_qc                | bool  | False    | Generate preprocessing quality control statistics.                                        |
 | --research                  | bool  | False    | Output summary statistics of measurements.                                                |
+
 
 
 ### Example Usage
