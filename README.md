@@ -29,7 +29,6 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
   - [TMSEEGPreprocessor](#tmseepreprocessor)
   - [TMSArtifactCleaner](#tmsartifactcleaner)
   - [PCIst](#pcist)
-- [Dependencies](#dependencies)
 - [Contributing](#contributing)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
