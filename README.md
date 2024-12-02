@@ -395,7 +395,7 @@ This project is licensed under the MIT License.
 
 The PCIst implementation is based on:
 
-- Comolatti R et al., "A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations" Brain Stimulation (2019)
+- Comolatti, R., Pigorini, A., Casarotto, S., Fecchio, M., Faria, G., Sarasso, S., Rosanova, M., Gosseries, O., Boly, M., Bodart, O., Ledoux, D., Brichant, J. F., Nobili, L., Laureys, S., Tononi, G., Massimini, M., & Casali, A. G. (2019). A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations. Brain Stimulation, 12(5), 1280–1289. https://doi.org/10.1016/j.brs.2019.05.013
 
 The pipeline uses the MNE-Python library for EEG data processing:
 
