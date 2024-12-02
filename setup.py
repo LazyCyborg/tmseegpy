@@ -4,9 +4,9 @@ setup(
     name='tmseeg_preprocessing',
     version='0.1.0',
     description='A Python package for preprocessing TMS-EEG data using MNE',
-    author='Your Name',
-    author_email='your.email@example.com',
-    url='https://github.com/yourusername/tmseeg_preprocessing',
+    author='Alexander Engelmark',
+    author_email='hjarneko@gmail.com',
+    url='https://github.com/LazyCyborgtmseeg_preprocessing',
     packages=find_packages(),
     install_requires=[
         'numpy',
