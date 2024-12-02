@@ -135,7 +135,7 @@ The GUI is basically a wrapper for the argparser bellow and is intended as the m
 | --muscle_window_end         | float | 0.030    | End time (s) for muscle artifact detection window.                                        |
 | --threshold_factor          | float | 1.0      | Threshold factor for muscle artifact detection.                                           |
 | --n_components              | int   | 5        | Number of components for tensor decomposition during muscle artifact cleaning.            |
-| --second_ica_method         | str   | 'infomax'| ICA method for the second ICA pass.                                                       |
+| --second_ica_method         | str   | 'infomax'| ICA method for the second ICA pass ('infomax' or 'fastica' ).                             |
 | --ssp_n_eeg                 | int   | 2        | Number of SSP components to apply.                                                        |
 | --apply_csd                 | flag  | False    | Apply Current Source Density (CSD) transformation.                                        |
 | --lambda2                   | float | 1e-5     | Lambda2 parameter for CSD transformation.                                                 |
@@ -149,14 +149,6 @@ The GUI is basically a wrapper for the argparser bellow and is intended as the m
 | --max_var                   | float | 99.0     | Maximum variance percentage to retain in PCA during PCIst.                                |
 | --embed                     | flag  | False    | Enable time-delay embedding in PCIst analysis.                                            |
 | --n_steps                   | int   | 100      | Number of steps for threshold optimization in PCIst analysis.                             |
-| --pre_window_start          | int   | -400     | Start time (ms) for the pre-TMS window in microstate analysis.                            |
-| --pre_window_end            | int   | -50      | End time (ms) for the pre-TMS window in microstate analysis.                              |
-| --post_window_start         | int   | 0        | Start time (ms) for the post-TMS window in microstate analysis.                           |
-| --post_window_end           | int   | 300      | End time (ms) for the post-TMS window in microstate analysis.                             |
-| --n_clusters                | int   | 4        | Number of clusters for global microstate analysis.                                        |
-| --n_resamples               | int   | 20       | Number of resamples for microstate analysis.                                              |
-| --n_samples                 | int   | 1000     | Number of samples for microstate analysis.                                                |
-| --min_peak_distance         | int   | 1        | Minimum peak distance for microstate analysis.                                            |
 | --preproc_qc                | bool  | False    | Generate preprocessing quality control statistics.                                        |
 | --research                  | bool  | False    | Output summary statistics of measurements.                                                |
 
