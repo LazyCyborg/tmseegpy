@@ -1,4 +1,4 @@
-# TMS-EEG Preprocessing and Analysis Pipeline
+# tmseegpy
 
 This repository provides some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data. The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019).
 
