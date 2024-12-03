@@ -51,7 +51,7 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
 - Optional GUI with the gui.py
 
 
-## Installation
+## Installation (use the scripts)
 
 1. Clone the repository:
 
@@ -85,9 +85,22 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
    - mne-icalabel
    - mne-faster
 
-4. Install the package (if applicable):
+## Install as a package 
 
-   If the code is organized as a package, you can install it locally:
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/LazyCyborg/tmseegpy.git
+   cd tmseegpy
+
+2. Create a virtual environment (optional but recommended):
+
+   ```bash
+    conda env create -f eeg_env.yml
+    conda activate eeg
+   ```
+
+3. Install the package:
 
    ```bash
    pip install -e .
