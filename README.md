@@ -306,13 +306,12 @@ Class for preprocessing TMS-EEG data.
 
 ### TMSArtifactCleaner Class
 
-The TMSArtifactCleaner class is designed to detect and clean transcranial magnetic stimulation (TMS)-evoked muscle artifacts in EEG/MEG data using tensor decomposition techniques. It leverages the tensorly library for tensor operations and mne for handling electrophysiological data.
+The TMSArtifactCleaner class is designed to detect and clean transcranial magnetic stimulation (TMS)-evoked muscle artifacts in EEG/MEG data using tensor decomposition techniques. It uses the tensorly library for tensor operations and mne for handling eeg data.
 
 #### Features
 
 - Artifact Detection: Utilizes Non-negative PARAFAC tensor decomposition to detect muscle artifacts in EEG/MEG epochs.
-- Artifact Cleaning: Employs Tucker decomposition to clean the detected artifacts while preserving the underlying neural signals.
-- Parallel Processing: Implements parallel computation to speed up artifact detection across multiple epochs.
+- Artifact Cleaning: Employs Tucker decomposition to clean the detected artifacts.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
 
 
