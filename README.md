@@ -111,9 +111,9 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
 
 The pipeline is designed to be run from the command line or through the simple GUI, processing EEG data for one or multiple subjects. The main script accepts various command-line arguments to customize the preprocessing and analysis steps.
 
-### Gui
+### GUI
 
-For GUI run:
+For an graphical user interface run:
 
    ```bash
    cd tms_eeg_analysis
