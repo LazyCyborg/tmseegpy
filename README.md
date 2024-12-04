@@ -10,6 +10,7 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+  - [GUI](#gui)
   - [Command-Line Arguments](#command-line-arguments)
   - [Example Usage](#example-usage)
 - [Data Preparation](#data-preparation)
@@ -109,6 +110,8 @@ The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and stan
 ## Usage
 
 The pipeline is designed to be run from the command line or through the simple GUI, processing EEG data for one or multiple subjects. The main script accepts various command-line arguments to customize the preprocessing and analysis steps.
+
+### Gui
 
 For GUI run:
 
