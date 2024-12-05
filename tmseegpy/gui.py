@@ -10,8 +10,18 @@ class ToolTip(object):
         self.widget = widget
         self.text = text
         self.tooltip = None
-        self.widget.bind("<Enter>", self.enter)
+        self.id = None  # For scheduled showing
+        self.widget.bind("<Enter>", self.schedule)
         self.widget.bind("<Leave>", self.leave)
+
+    def schedule(self, event=None):
+        self.unschedule()
+        self.id = self.widget.after(500, self.enter)  # 500ms delay
+
+    def unschedule(self):
+        if self.id:
+            self.widget.after_cancel(self.id)
+            self.id = None
 
     def enter(self, event=None):
         x, y, _, _ = self.widget.bbox("insert")
@@ -25,6 +35,7 @@ class ToolTip(object):
         label.pack()
 
     def leave(self, event=None):
+        self.unschedule()
         if self.tooltip:
             self.tooltip.destroy()
             self.tooltip = None
@@ -273,7 +284,9 @@ class TMSEEG_GUI:
             'clean_muscle_artifacts': self.clean_muscle.get(),
             'show_evoked': self.show_evoked.get(),
             'research': self.research_stats.get(),
-            'preproc_qc': self.preproc_qc.get()
+            'preproc_qc': self.preproc_qc.get(),
+            'apply_ssp': self.apply_ssp.get(),
+            'apply_csd': self.apply_csd.get(),
         }
         
         # Add numerical parameters with proper type conversion
@@ -324,31 +337,44 @@ class TMSEEG_GUI:
         options_frame = ttk.LabelFrame(parent, text="Basic Options", padding="5")
         options_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
-        # Checkboxes for basic options
+        # First row
         self.plot_preproc = tk.BooleanVar()
-        ttk.Checkbutton(options_frame, text="Plot Preprocessing Steps", 
-                       variable=self.plot_preproc).grid(row=0, column=0, sticky=tk.W)
+        plot_button = ttk.Checkbutton(options_frame, text="Plot Preprocessing Steps", 
+                    variable=self.plot_preproc)
+        plot_button.grid(row=0, column=0, sticky=tk.W)
+        ToolTip(plot_button, "Show preprocessing visualization steps")
         
         self.clean_muscle = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Clean Muscle Artifacts with PARAFAC decomposition", 
-                       variable=self.clean_muscle).grid(row=0, column=1, sticky=tk.W)
+                    variable=self.clean_muscle).grid(row=0, column=1, sticky=tk.W)
         
+        # Second row
         self.show_evoked = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Show Evoked Plot", 
-                       variable=self.show_evoked).grid(row=1, column=0, sticky=tk.W)
+                    variable=self.show_evoked).grid(row=1, column=0, sticky=tk.W)
         
         self.research_stats = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Generate Research Statistics", 
-                       variable=self.research_stats).grid(row=1, column=1, sticky=tk.W)
+                    variable=self.research_stats).grid(row=1, column=1, sticky=tk.W)
+        
+        # Third row
+        self.apply_ssp = tk.BooleanVar(value=True)  
+        ssp_button = ttk.Checkbutton(options_frame, text="Apply SSP", 
+                    variable=self.apply_ssp)
+        ssp_button.grid(row=2, column=0, sticky=tk.W)
+        ToolTip(ssp_button, "Apply Signal Space Projection for artifact removal")
         
         self.preproc_qc = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Generate Preprocessing QC", 
-                       variable=self.preproc_qc).grid(row=2, column=1, sticky=tk.W)
+                    variable=self.preproc_qc).grid(row=2, column=1, sticky=tk.W)
         
-        plot_button = ttk.Checkbutton(options_frame, text="Plot Preprocessing Steps", 
-                variable=self.plot_preproc)
-        plot_button.grid(row=0, column=0, sticky=tk.W)
-        ToolTip(plot_button, "Show preprocessing visualization steps")
+        # Fourth row
+        self.apply_csd = tk.BooleanVar(value=False)  
+        csd_button = ttk.Checkbutton(options_frame, text="Apply CSD", 
+                    variable=self.apply_csd)
+        csd_button.grid(row=3, column=0, sticky=tk.W)
+        ToolTip(csd_button, "Apply Current Source Density transformation")
+            
         
     def create_advanced_options(self, parent):
         # Notebook for advanced parameters
@@ -366,8 +392,6 @@ class TMSEEG_GUI:
             'Random Seed': ('random_seed', 42),
             'Bad Channels Threshold': ('bad_channels_threshold', 3),
             'Bad Epochs Threshold': ('bad_epochs_threshold', 3),
-            'TMS Muscle Threshold': ('tms_muscle_thresh', 3.0),
-            'Number of PARAFAC Components': ('n_components', 5),
             'SSP EEG Components': ('ssp_n_eeg', 2),
             'Substitute Zero Events With': ('substitute_zero_events_with', 10),
         })
@@ -396,11 +420,12 @@ class TMSEEG_GUI:
         
         # Muscle Artifact Parameters
         muscle_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(muscle_frame, text="Muscle Artifacts")
+        notebook.add(muscle_frame, text="Muscle Artifacts (PARAFAC)")
         self.add_parameter_group(muscle_frame, {
             'Muscle Window Start (s)': ('muscle_window_start', 0.005),
             'Muscle Window End (s)': ('muscle_window_end', 0.030),
             'Threshold Factor': ('threshold_factor', 1.0),
+            'Number of PARAFAC Components': ('n_components', 5),
         })
         
         # ICA Parameters
@@ -408,6 +433,7 @@ class TMSEEG_GUI:
         notebook.add(ica_frame, text="ICA Settings")
         self.add_parameter_group(ica_frame, {
             'ICA Method': ('ica_method', 'fastica'),
+            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 3.0),
             'Second ICA Method': ('second_ica_method', 'infomax'),
         })
         
@@ -508,6 +534,8 @@ class TMSEEG_GUI:
             'show_evoked': self.show_evoked.get(),
             'research': self.research_stats.get(),
             'preproc_qc': self.preproc_qc.get(),
+            'apply_ssp': self.apply_ssp.get(), 
+            'apply_csd': self.apply_csd.get(),
             
             # Additional arguments with default values
             'substitute_zero_events_with': 10,
@@ -515,7 +543,6 @@ class TMSEEG_GUI:
             'second_ica_method': 'infomax',
             'interpolation_method': 'cubic',
             'no_second_ICA': False,
-            'apply_csd': False,
             'embed': False,
             'fix_artifact_window_start': -0.005,
             'fix_artifact_window_end': 0.015,
