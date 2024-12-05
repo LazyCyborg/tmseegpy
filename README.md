@@ -35,22 +35,6 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
 
-## Overview
-
-The TMS-EEG Preprocessing and Analysis Pipeline is designed to automate and standardize the preprocessing of TMS-EEG data. It includes:
-
-- TMS artifact removal and interpolation
-- Filtering and downsampling
-- Bad channel and epoch detection using the FASTER algorithm
-- Independent Component Analysis (ICA) for artifact removal with automatic component classification 
-- Muscle artifact cleaning using tensor decomposition
-- PCIst analysis
-
-## Features
-
-- Visualization: Provides plotting functions and summary statistics
-- Optional GUI with the gui.py
-
 
 ## Installation (use the scripts)
 
