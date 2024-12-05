@@ -6,8 +6,6 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
   - [GUI](#gui)
