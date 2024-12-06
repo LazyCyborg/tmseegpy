@@ -43,3 +43,5 @@ data/
 notebooks/
 simulate/
 old_code/
+output/
+output_fast/

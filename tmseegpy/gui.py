@@ -1,3 +1,4 @@
+# gui.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
@@ -341,17 +342,17 @@ class TMSEEG_GUI:
         self.plot_preproc = tk.BooleanVar()
         plot_button = ttk.Checkbutton(options_frame, text="Plot Preprocessing Steps", 
                     variable=self.plot_preproc)
-        plot_button.grid(row=0, column=0, sticky=tk.W)
+        plot_button.grid(row=4, column=1, sticky=tk.W)
         ToolTip(plot_button, "Show preprocessing visualization steps")
         
         self.clean_muscle = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Clean Muscle Artifacts with PARAFAC decomposition", 
-                    variable=self.clean_muscle).grid(row=0, column=1, sticky=tk.W)
+                    variable=self.clean_muscle).grid(row=0, column=0, sticky=tk.W)
         
         # Second row
         self.show_evoked = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Show Evoked Plot", 
-                    variable=self.show_evoked).grid(row=1, column=0, sticky=tk.W)
+                    variable=self.show_evoked).grid(row=3, column=0, sticky=tk.W)
         
         self.research_stats = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Generate Research Statistics", 
@@ -361,19 +362,32 @@ class TMSEEG_GUI:
         self.apply_ssp = tk.BooleanVar(value=True)  
         ssp_button = ttk.Checkbutton(options_frame, text="Apply SSP", 
                     variable=self.apply_ssp)
-        ssp_button.grid(row=2, column=0, sticky=tk.W)
+        ssp_button.grid(row=1, column=0, sticky=tk.W)
         ToolTip(ssp_button, "Apply Signal Space Projection for artifact removal")
         
         self.preproc_qc = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Generate Preprocessing QC", 
-                    variable=self.preproc_qc).grid(row=2, column=1, sticky=tk.W)
+                    variable=self.preproc_qc).grid(row=0, column=1, sticky=tk.W)
         
         # Fourth row
         self.apply_csd = tk.BooleanVar(value=False)  
         csd_button = ttk.Checkbutton(options_frame, text="Apply CSD", 
                     variable=self.apply_csd)
-        csd_button.grid(row=3, column=0, sticky=tk.W)
+        csd_button.grid(row=2, column=0, sticky=tk.W)
         ToolTip(csd_button, "Apply Current Source Density transformation")
+
+  
+        self.validate_teps = tk.BooleanVar()  
+        validate_button = ttk.Checkbutton(options_frame, text="Validate TEPs", 
+                    variable=self.validate_teps)
+        validate_button.grid(row=2, column=1, sticky=tk.W)
+        ToolTip(validate_button, "Perform TEP validation and generate reports")
+        
+        self.save_validation = tk.BooleanVar() 
+        save_button = ttk.Checkbutton(options_frame, text="Save Validation Reports & Plots", 
+                    variable=self.save_validation)
+        save_button.grid(row=3, column=1, sticky=tk.W)
+        ToolTip(save_button, "Save validation reports and plots to output directory")
             
         
     def create_advanced_options(self, parent):
@@ -533,6 +547,8 @@ class TMSEEG_GUI:
             'clean_muscle_artifacts': self.clean_muscle.get(),
             'show_evoked': self.show_evoked.get(),
             'research': self.research_stats.get(),
+            'validate_teps': self.validate_teps.get(),  # Add validation option
+            'save_validation': self.save_validation.get(),
             'preproc_qc': self.preproc_qc.get(),
             'apply_ssp': self.apply_ssp.get(), 
             'apply_csd': self.apply_csd.get(),
@@ -599,7 +615,28 @@ class TMSEEG_GUI:
     def analysis_complete(self, pcists):
         self.progress.stop()
         self.running = False
-        messagebox.showinfo("Complete", f"Analysis completed successfully!\nPCIst values: {pcists}")
+        
+        # Build completion message
+        message = f"Analysis completed successfully!\nPCIst values: {pcists}"
+        
+        if self.save_validation.get():
+            output_dir = self.output_dir.get()
+            message += f"\n\nValidation reports and plots saved to:\n{output_dir}"
+            
+            # Optional: List saved files
+            try:
+                validation_files = [f for f in os.listdir(output_dir) 
+                                if f.startswith(('tep_validation_', 'pcist_'))]
+                if validation_files:
+                    message += "\n\nSaved files:"
+                    for f in validation_files[:5]:  # Show first 5 files
+                        message += f"\n- {f}"
+                    if len(validation_files) > 5:
+                        message += f"\n... and {len(validation_files)-5} more files"
+            except Exception:
+                pass
+                
+        messagebox.showinfo("Complete", message)
         
     def analysis_error(self, error_msg):
         self.progress.stop()

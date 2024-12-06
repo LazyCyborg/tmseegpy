@@ -6,6 +6,7 @@ from .clean import TMSArtifactCleaner
 from .pcist import PCIst
 from .microstates import Microstate
 from .gui import ToolTip, TMSEEG_GUI
+from .validate_tep import validate_teps
 
 __all__ = [
     'TMSEEGPreprocessor',
@@ -14,5 +15,6 @@ __all__ = [
     'PCIst',
     'Microstate',
     'ToolTip', 
-    'TMSEEG_GUI'
+    'TMSEEG_GUI', 
+    'validate_teps'
 ]

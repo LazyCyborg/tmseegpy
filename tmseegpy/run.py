@@ -1,9 +1,12 @@
+# run.py
+
 import os
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from preproc import TMSEEGPreprocessor
 from pcist import PCIst
+from validate_tep import validate_teps
 import mne
 import time
 from neurone_loader import Recording
@@ -411,6 +414,19 @@ def process_subjects(args):
         epochs = processor.epochs
         if args.plot_preproc:
             plot_epochs(eeg=epochs)
+
+        if args.validate_teps:
+            print("\nValidating TEPs...")
+            baseline_window = (args.baseline_start, args.baseline_end)
+            response_window = (args.response_start, args.response_end)
+            quality_results, component_results = validate_teps(
+                evoked=epochs.average(),
+                output_dir=args.output_dir,
+                session_name=session_name,
+                baseline_window=baseline_window,
+                response_window=response_window,
+                save_outputs=getattr(args, 'save_validation', True)  
+            )
         
         # Final quality check
         fig = processor.plot_evoked_response(ylim={'eeg': [-5, 5]}, xlim=(-0.3, 0.3), title="Final Evoked Response", show=args.show_evoked)
@@ -534,6 +550,8 @@ if __name__ == "__main__":
                     help='Stiffness parameter for CSD transformation (default: 4)')
     parser.add_argument('--show_evoked', action='store_true',
                     help='Display the evoked plot with TEPs (default: False)')
+    parser.add_argument('--validate_teps', action='store_true',
+                help='Perform TEP validation against established criteria')
     parser.add_argument('--baseline_start', type=int, default=-400,
                         help='Start time for baseline in ms (default: -400)')
     parser.add_argument('--baseline_end', type=int, default=-50,

@@ -388,7 +388,7 @@ class TMSEEGPreprocessor:
         """
         self.interpolation_method = method
         self.interp_window = interp_window
-        
+
         from scipy.interpolate import interp1d
         import numpy as np
         import mne
@@ -981,6 +981,8 @@ class TMSEEGPreprocessor:
 
 
     def apply_ssp(self, n_eeg=2):
+
+        
         projs_epochs = mne.compute_proj_epochs(self.epochs, n_eeg=n_eeg, n_jobs=-1, verbose=True)
         self.epochs.add_proj(projs_epochs)
         self.epochs.apply_proj()
