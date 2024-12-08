@@ -1,0 +1,46 @@
+TMS-EEG Preprocessing Quality Control Report
+==================================================
+
+1. RECORDING INFORMATION
+----------------------------------------
+Session: 2024-12-04T170714_sleep
+Original sampling rate: 5000.0 Hz
+Downsampled to: 725.0 Hz
+Duration: 460.1 seconds
+Number of channels: 33
+
+2. TMS EVENTS ANALYSIS
+----------------------------------------
+Total TMS pulses: 147
+Inter-pulse intervals:
+  Mean: 3.057 seconds
+  Std: 1.301 seconds
+  Range: 0.100 - 9.212 seconds
+  CV: 42.5%
+
+3. DATA QUALITY METRICS
+----------------------------------------
+
+Epoch Quality:
+Total epochs created: 147
+
+4. ARTIFACT REMOVAL PERFORMANCE
+----------------------------------------
+
+TMS Artifact Removal:
+Method: cubic
+Interpolation window: (5.0, 5.0) ms
+
+First ICA:
+Method: fastica
+
+Second ICA:
+Method: fastica
+
+5. QUALITY CONTROL SUMMARY
+----------------------------------------
+Channel Quality: 100.0%
+Epoch Quality: 100.0%
+Artifact Removal Quality: 100.0%
+
+Overall Quality Score: 100.0%

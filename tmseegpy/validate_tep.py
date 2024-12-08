@@ -181,12 +181,18 @@ def plot_tep_validation(evoked: mne.Evoked,
     times = evoked.times * 1000
     data = evoked.get_data() * 1e6
     
-    fig = plt.figure(figsize=(20, 12))  # Increased width from 15 to 20
+    # Count number of valid components for grid sizing
+    n_components = len([r for r in validation_results.values() 
+                       if 'latency' in r and 'error' not in r])
     
-    gs = plt.GridSpec(2, 6)  # 2 rows, 6 columns for finer control
+    # Calculate required columns (2 columns per topomap - map and colorbar)
+    n_cols = max(6, 3 + n_components * 2)  # At least 6 columns, more if needed
     
-    # Plot 1: Average TEP with components (upper left, spanning 4 columns)
-    ax1 = fig.add_subplot(gs[0, :4])  # First row, first 4 columns
+    fig = plt.figure(figsize=(20, 12))
+    gs = plt.GridSpec(2, n_cols)
+    
+    # Plot 1: Average TEP with components (now full width)
+    ax1 = fig.add_subplot(gs[0, :])  # Use all columns
     mean_tep = np.mean(data, axis=0)
     plt.plot(times, mean_tep, 'b-', label='Global Average')
     
@@ -196,7 +202,6 @@ def plot_tep_validation(evoked: mne.Evoked,
             continue
             
         color = 'g' if results['within_amplitude'] and results['within_latency'] else 'r'
-        # Plot the average of component-specific channels
         if 'channels_used' in results:
             channel_indices = [evoked.ch_names.index(ch) for ch in results['channels_used']]
             component_data = np.mean(data[channel_indices], axis=0)
@@ -212,22 +217,10 @@ def plot_tep_validation(evoked: mne.Evoked,
     plt.title('TEP Components', fontsize=12, pad=20)
     plt.xlabel('Time (ms)')
     plt.ylabel('Amplitude (μV)')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
+    plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize='small')
     
-    # Plot 2: Channel-specific responses (upper right, spanning 2 columns)
-    ax2 = fig.add_subplot(gs[0, 4:])  # First row, last 2 columns
-    for component, results in validation_results.items():
-        if 'error' in results or 'max_channel' not in results:
-            continue
-        ch_idx = evoked.ch_names.index(results['max_channel'])
-        plt.plot(times, data[ch_idx], label=f"{component} ({results['max_channel']})")
-    plt.title('Component-specific Channel Responses', fontsize=12, pad=20)
-    plt.xlabel('Time (ms)')
-    plt.ylabel('Amplitude (μV)')
-    plt.legend(fontsize='small')
-    
-    # Plot 3: Channel contributions (lower left, spanning 3 columns)
-    ax3 = fig.add_subplot(gs[1, :3])  # Second row, first 3 columns
+    # Plot 2: Channel contributions
+    ax3 = fig.add_subplot(gs[1, :3])
     component_names = []
     channel_names = []
     amplitudes = []
@@ -249,21 +242,30 @@ def plot_tep_validation(evoked: mne.Evoked,
     plt.ylabel('Amplitude (μV)')
     plt.xticks(rotation=45)
     
-    # Plot 4: Topomap (lower right, spanning last 3 columns)
-    peak_time = max([results['latency'] for name, results in validation_results.items() 
-                    if 'latency' in results], default=0)
-    if peak_time > 0:
-        ax4 = fig.add_subplot(gs[1, 3:5])  # Map
-        ax5 = fig.add_subplot(gs[1, 5])    # Colorbar
-        evoked.plot_topomap(times=peak_time/1000, axes=[ax4, ax5], show=False,
-                           time_format='TEP peak\n%0.0f ms')
+    # Plot 3: Topomaps for each component
+    if validation_results:
+        # Get valid peak times
+        peak_times = []
+        component_names = []
+        for component, results in validation_results.items():
+            if 'latency' in results and 'error' not in results:
+                peak_times.append(results['latency'] / 1000.0)  # Convert to seconds
+                component_names.append(component)
+        
+        if peak_times:
+            for idx, (time, name) in enumerate(zip(peak_times, component_names)):
+                # Create two axes for each topomap: one for map and one for colorbar
+                ax_topo = fig.add_subplot(gs[1, 3 + idx * 2])  # Topomap
+                ax_cbar = fig.add_subplot(gs[1, 3 + idx * 2 + 1])  # Colorbar
+                
+                evoked.plot_topomap(times=time, ch_type='eeg', 
+                                  axes=[ax_topo, ax_cbar], 
+                                  show=False,
+                                  time_format=f'{name}\n{time*1000:.0f} ms')
     
-    # Adjust layout
     plt.tight_layout()
-    # Add some extra space at the top
     plt.subplots_adjust(top=0.95, right=0.95)
     
-    # Save with high DPI for better quality
     plt.savefig(f"{output_dir}/tep_validation_{session_name}.png", 
                 bbox_inches='tight', dpi=300)
     plt.close()

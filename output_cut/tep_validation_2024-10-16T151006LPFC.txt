@@ -1,0 +1,97 @@
+TEP Validation Report
+==================================================
+
+1. Signal Quality Metrics
+------------------------------
+
+Baseline:
+  Criterion: Baseline period should be stable (std < 1 μV)
+  Value: 0.19
+  Status: PASS
+
+Snr:
+  Criterion: SNR should be > 3 for reliable components
+  Value: 3.02
+  Status: PASS
+
+Artifact_Recovery:
+  Criterion: Signal should return to baseline by 8-10ms
+  Value: 0.00
+  Status: PASS
+
+2. TEP Components Analysis
+------------------------------
+
+N15-P30:
+  Latency: 16.2 ms (Valid)
+  Amplitude: -0.39 μV (Valid)
+  SNR: 2.06 (Poor)
+  Maximum response channel: FC2
+  Spatial consistency (lower is better): 0.473
+  Channel amplitudes:
+    FC1: -0.54 μV
+    FC2: -0.67 μV
+    Cz: -0.16 μV
+
+N45:
+  Latency: 42.4 ms (Valid)
+  Amplitude: -0.23 μV (Valid)
+  SNR: 1.22 (Poor)
+  Maximum response channel: FCz
+  Spatial consistency (lower is better): 0.212
+  Channel amplitudes:
+    FC1: -0.17 μV
+    FCz: -0.30 μV
+    FC2: -0.24 μV
+
+P60:
+  Latency: 56.2 ms (Valid)
+  Amplitude: 0.09 μV (Valid)
+  SNR: 0.51 (Poor)
+  Maximum response channel: FC1
+  Spatial consistency (lower is better): 0.983
+  Channel amplitudes:
+    FC1: 0.24 μV
+    FCz: 0.10 μV
+    FC2: -0.01 μV
+    Cz: 0.03 μV
+
+N100:
+  Latency: 92.1 ms (Valid)
+  Amplitude: -0.31 μV (Valid)
+  SNR: 1.71 (Poor)
+  Maximum response channel: FC2
+  Spatial consistency (lower is better): 0.184
+  Channel amplitudes:
+    FC1: -0.37 μV
+    FCz: -0.44 μV
+    FC2: -0.59 μV
+    Cz: -0.41 μV
+
+P180:
+  Latency: 249.3 ms (Valid)
+  Amplitude: 0.59 μV (Valid)
+  SNR: 3.25 (Acceptable)
+  Maximum response channel: Cz
+  Spatial consistency (lower is better): 0.222
+  Channel amplitudes:
+    FCz: 0.69 μV
+    Cz: 1.07 μV
+    FC1: 0.61 μV
+    FC2: 0.81 μV
+
+3. Overall Assessment
+------------------------------
+
+Signal Quality Score: 100.0%
+Component Quality Score: 75.0%
+Channel Utilization: 12.5%
+
+Warnings and Recommendations:
+- Low channel utilization, check electrode placement and contact quality
+
+Methodology Notes:
+- TEP criteria based on established literature
+- SNR threshold set at 3:1
+- Spatial consistency measured as coefficient of variation across channels
+- Component validation includes latency, amplitude, SNR, and spatial distribution
