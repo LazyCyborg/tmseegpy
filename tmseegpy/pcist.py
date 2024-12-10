@@ -524,50 +524,42 @@ class PCIst:
     def plot_analysis(self, details: Dict, session_name: str = None) -> plt.Figure:
         """
         Plot PCIst analysis steps with parallel plots for baseline/response periods.
-        Includes dual thresholds, enhanced projections, and visual connections.
+        
+        Parameters
+        ----------
+        details : Dict
+            Dictionary containing analysis details from calc_PCIst
+        session_name : str, optional
+            Name of the session for display purposes
+            
+        Returns
+        -------
+        plt.Figure
+            Figure containing the analysis plots
         """
-        # Create larger figure and adjust height ratios for bigger surfaces
+        # Input validation
+        required_keys = ['components', 'times', 'evoked_data', 'eigenvalues', 'var_exp']
+        if not all(key in details for key in required_keys):
+            raise ValueError("Missing required keys in details dictionary")
+        
+        # Get number of available components
+        n_components = details['components'].shape[0]
+        
+        # Create figure with dynamic GridSpec based on available data
         fig = plt.figure(figsize=(12, 20))
-        gs = plt.GridSpec(8, 2, height_ratios=[0.5, 1.5, 0.75, 0.75, 1.5, 2.5, 2, 1])
-
-        def add_connecting_lines(ax_matrix, ax_surface, fig):
-            xlim = ax_matrix.get_xlim()
-            ylim = ax_matrix.get_ylim()
-
-            # Define corners in the correct order
-            matrix_corners = [
-                [xlim[0], ylim[0]],  # Lower-left corner
-                [xlim[1], ylim[0]],  # Lower-right corner
-                [xlim[1], ylim[1]],  # Upper-right corner
-                [xlim[0], ylim[1]],  # Upper-left corner
-            ]
-            # Transform 2D data coordinates to display coordinates
-            matrix_corners_display = [ax_matrix.transData.transform(c) for c in matrix_corners]
-
-            # Project 3D corners to 2D display coordinates
-            surface_corners_display = []
-            for x3d, y3d in matrix_corners:
-                z3d = ax_surface.get_zlim()[0]  # Use the bottom z-limit
-                x2d, y2d, _ = proj3d.proj_transform(x3d, y3d, z3d, ax_surface.get_proj())
-                x_disp, y_disp = ax_surface.transData.transform((x2d, y2d))
-                surface_corners_display.append([x_disp, y_disp])
-
-            # Draw lines between corresponding corners
-            for (mx, my), (sx, sy) in zip(matrix_corners_display, surface_corners_display):
-                mx_fig, my_fig = fig.transFigure.inverted().transform((mx, my))
-                sx_fig, sy_fig = fig.transFigure.inverted().transform((sx, sy))
-                line = plt.Line2D([mx_fig, sx_fig],
-                                [my_fig, sy_fig],
-                                transform=fig.transFigure, color='gray', linestyle='--', alpha=0.5)
-                fig.lines.append(line)
-
-
-        # Add text box with analysis details at the top
+        if n_components >= 2 and 'distance_matrices' in details:
+            gs = plt.GridSpec(8, 2, height_ratios=[0.5, 1.5, 0.75, 0.75, 1.5, 2.5, 2, 1])
+        elif n_components >= 1:
+            gs = plt.GridSpec(4, 2, height_ratios=[0.5, 1.5, 0.75, 0.75])
+        else:
+            gs = plt.GridSpec(2, 2, height_ratios=[0.5, 1.5])
+        
+        # Text box with analysis details
         ax_text = fig.add_subplot(gs[0, :])
         analysis_text = (
             f"Session name: {session_name}\n"
             f"Number of non-zero singular values: {np.sum(details['eigenvalues'] > 1e-10)}\n"
-            f"Number of components retained: {details['components'].shape[0]}\n"
+            f"Number of components retained: {n_components}\n"
             f"Variance explained: {np.sum(details['var_exp']):.2f}%\n"
             f"PCI: {self.PCI:.6f}"
         )
@@ -575,7 +567,7 @@ class PCIst:
                     verticalalignment='bottom', transform=ax_text.transAxes)
         ax_text.axis('off')
         
-        # A: TMS-evoked potentials
+        # A: TMS-evoked potentials (always show)
         ax1 = fig.add_subplot(gs[1, :])
         ax1.plot(details['times'], details['evoked_data'].T, 'b-', alpha=0.3, linewidth=0.5)
         ax1.set_title('A) TMS-Evoked Potentials')
@@ -583,238 +575,158 @@ class PCIst:
         ax1.text(0, ax1.get_ylim()[1], 'TMS', ha='center', va='bottom')
         ax1.text(-350, ax1.get_ylim()[1], 'TEPs', va='center', ha='right')
         
-        # Plot first two PCs
-        for i in range(2):
-            ax_pc = fig.add_subplot(gs[2 + i, :])
-            if i == 0:
-                ax_pc.plot(details['times'], details['components'][i], 'k-')
-            else:
-                ax_pc.plot(details['times'], details['components'][i], 'b-')
-            if i == 0:
-                ax_pc.text(-350, ax_pc.get_ylim()[1], 'Principal\nComponents', va='center', ha='right')
-            ax_pc.text(-300, ax_pc.get_ylim()[1], f'PC{i+1}', va='top')
+        # Plot available PCs
+        if n_components > 0:
+            for i in range(min(2, n_components)):
+                try:
+                    ax_pc = fig.add_subplot(gs[2 + i, :])
+                    ax_pc.plot(details['times'], details['components'][i], 
+                            'k-' if i == 0 else 'b-')
+                    if i == 0:
+                        ax_pc.text(-350, ax_pc.get_ylim()[1], 'Principal\nComponents', 
+                                va='center', ha='right')
+                    ax_pc.text(-300, ax_pc.get_ylim()[1], f'PC{i+1}', va='top')
+                    ax_pc.axvline(x=0, color='k', linestyle='--', alpha=0.5)
+                except Exception as e:
+                    print(f"Error plotting PC{i+1}: {str(e)}")
         
-        # Get common scale for distance matrices and surfaces
-        baseline_dist, response_dist = details['distance_matrices'][0]
-        vmin = min(baseline_dist.min(), response_dist.min())
-        vmax = max(baseline_dist.max(), response_dist.max())
-        
-        # Get thresholds
-        optimal_threshold = details['optimal_thresholds'][0]
-        lower_threshold = optimal_threshold * 0.6
-        
-        # B: Distance matrices
-        # Baseline distance matrix
-        # Baseline distance matrix
-        ax3 = fig.add_subplot(gs[4, 0])
-        im1 = ax3.imshow(baseline_dist, aspect='equal', cmap='viridis',
-                        extent=[-300, 0, -300, 0], vmin=vmin, vmax=vmax, origin='lower')
-        ax3.set_xlim(-300, 0)
-        ax3.set_ylim(-300, 0)
-        ax3.set_aspect('equal')
-        ax3.set_title('B) Baseline Distance Matrix')
-        plt.colorbar(im1, ax=ax3)
+        # If we have distance matrices, plot additional analysis
+        if 'distance_matrices' in details and len(details['distance_matrices']) > 0:
+            try:
+                baseline_dist, response_dist = details['distance_matrices'][0]
+                vmin = min(baseline_dist.min(), response_dist.min())
+                vmax = max(baseline_dist.max(), response_dist.max())
+                optimal_threshold = details['optimal_thresholds'][0]
+                lower_threshold = optimal_threshold * 0.6
+                
+                # B: Distance matrices
+                ax3 = fig.add_subplot(gs[4, 0])
+                im1 = ax3.imshow(baseline_dist, aspect='equal', cmap='viridis',
+                                extent=[-300, 0, -300, 0], vmin=vmin, vmax=vmax, origin='lower')
+                ax3.set_xlim(-300, 0)
+                ax3.set_ylim(-300, 0)
+                ax3.set_aspect('equal')
+                ax3.set_title('B) Baseline Distance Matrix')
+                plt.colorbar(im1, ax=ax3)
 
-        # Response distance matrix
-        ax4 = fig.add_subplot(gs[4, 1])
-        im2 = ax4.imshow(response_dist, aspect='equal', cmap='viridis',
-                        extent=[0, 300, 0, 300], vmin=vmin, vmax=vmax, origin='lower')
-        ax4.set_xlim(0, 300)
-        ax4.set_ylim(0, 300)
-        ax4.set_aspect('equal')
-        ax4.set_title('B) Response Distance Matrix')
-        plt.colorbar(im2, ax=ax4)
+                ax4 = fig.add_subplot(gs[4, 1])
+                im2 = ax4.imshow(response_dist, aspect='equal', cmap='viridis',
+                                extent=[0, 300, 0, 300], vmin=vmin, vmax=vmax, origin='lower')
+                ax4.set_xlim(0, 300)
+                ax4.set_ylim(0, 300)
+                ax4.set_aspect('equal')
+                ax4.set_title('B) Response Distance Matrix')
+                plt.colorbar(im2, ax=ax4)
 
-        
-        # Add connecting boxes
-        for ax in [ax3, ax4]:
-            box = plt.Rectangle(
-                (ax.get_xlim()[0], ax.get_ylim()[0]),
-                ax.get_xlim()[1] - ax.get_xlim()[0],
-                ax.get_ylim()[1] - ax.get_ylim()[0],
-                fill=False, color='pink', linewidth=1.5
-            )
-            ax.add_patch(box)
-        
+                # Add boundary boxes
+                for ax in [ax3, ax4]:
+                    box = plt.Rectangle(
+                        (ax.get_xlim()[0], ax.get_ylim()[0]),
+                        ax.get_xlim()[1] - ax.get_xlim()[0],
+                        ax.get_ylim()[1] - ax.get_ylim()[0],
+                        fill=False, color='pink', linewidth=1.5
+                    )
+                    ax.add_patch(box)
 
+                # C: 3D surfaces
+                ax5 = fig.add_subplot(gs[5, 0], projection='3d')
+                x = np.linspace(-300, 0, baseline_dist.shape[0])
+                X, Y = np.meshgrid(x, x)
+                surf1 = ax5.plot_surface(X, Y, baseline_dist, cmap='viridis',
+                                    vmin=vmin, vmax=vmax, alpha=0.8)
+                zz = np.full_like(X, optimal_threshold)
+                ax5.plot_surface(X, Y, zz, alpha=0.2, color='gray')
+                ax5.set_title('C) Baseline Threshold Surface')
+                ax5.view_init(elev=20, azim=-45)
+                ax5.set_zlim(vmin, vmax)
+                ax5.set_xlim(-300, 0)
+                ax5.set_ylim(-300, 0)
 
-        def add_projection_shadow(ax_3d, dist_matrix, is_baseline=True):
-            """Create visual connection between matrix and surface."""
-            # Get the matrix corner points
-            if is_baseline:
-                x = np.linspace(-300, 0, dist_matrix.shape[0])
-            else:
-                x = np.linspace(0, 300, dist_matrix.shape[0])
-            X, Y = np.meshgrid(x, x)
-            vmin = dist_matrix.min()
-            vmax = dist_matrix.max()
-            
-            # Project on walls and bottom
-            ax_3d.contourf(X, Y, dist_matrix, 
-                        zdir='z', offset=vmin,
-                        levels=np.linspace(vmin, vmax, 20), 
-                        cmap='viridis', alpha=0.3)
-            
-            if is_baseline:
-                ax_3d.contourf(X, np.full_like(Y, Y.min()), dist_matrix,
-                            zdir='y', offset=Y.min(),
-                            levels=np.linspace(vmin, vmax, 20),
-                            cmap='viridis', alpha=0.3)
-                ax_3d.contourf(np.full_like(X, X.min()), Y, dist_matrix,
-                            zdir='x', offset=X.min(),
-                            levels=np.linspace(vmin, vmax, 20),
-                            cmap='viridis', alpha=0.3)
-            else:
-                ax_3d.contourf(X, np.full_like(Y, Y.max()), dist_matrix,
-                            zdir='y', offset=Y.max(),
-                            levels=np.linspace(vmin, vmax, 20),
-                            cmap='viridis', alpha=0.3)
-                ax_3d.contourf(np.full_like(X, X.max()), Y, dist_matrix,
-                            zdir='x', offset=X.max(),
-                            levels=np.linspace(vmin, vmax, 20),
-                            cmap='viridis', alpha=0.3)
+                ax6 = fig.add_subplot(gs[5, 1], projection='3d')
+                x = np.linspace(0, 300, response_dist.shape[0])
+                X, Y = np.meshgrid(x, x)
+                surf2 = ax6.plot_surface(X, Y, response_dist, cmap='viridis',
+                                    vmin=vmin, vmax=vmax, alpha=0.8)
+                xx, yy = np.meshgrid([0, 300], [0, 300])
+                zz = np.full_like(xx, optimal_threshold)
+                ax6.plot_surface(xx, yy, zz, alpha=0.2, color='gray')
+                ax6.set_title('C) Response Threshold Surface')
+                ax6.view_init(elev=20, azim=-45)
+                ax6.set_zlim(vmin, vmax)
+                ax6.set_xlim(0, 300)
+                ax6.set_ylim(0, 300)
 
-        
-        # C: 3D representation
-        # Baseline surface
-        ax5 = fig.add_subplot(gs[5, 0], projection='3d')
-        x = np.linspace(-300, 0, baseline_dist.shape[0])
-        X, Y = np.meshgrid(x, x)
-        # Main surface plot
-        surf1 = ax5.plot_surface(X, Y, baseline_dist, cmap='viridis',
-                                vmin=vmin, vmax=vmax, alpha=0.8)
-        
-        
-        # Add threshold plane
-        xx, yy = np.meshgrid([-300, 0], [-300, 0])
-        zz = np.full_like(X, optimal_threshold)
-        ax5.plot_surface(X, Y, zz, alpha=0.2, color='gray')
-        
-        # Enhanced shadow projections
-        ax5.contourf(X, Y, baseline_dist, zdir='z', offset=optimal_threshold,
-                    levels=np.linspace(vmin, vmax, 20), cmap='viridis', alpha=0.5)
-        
-        ax5.set_title('C) Baseline Threshold Surface')
-        ax5.view_init(elev=20, azim=-45)
-        ax5.set_zlim(vmin, vmax)
-        ax5.set_xlim(-300, 0)
-        ax5.set_ylim(-300, 0)
+                # D: Transition matrices
+                baseline_trans_low = self.distance2transition(baseline_dist, lower_threshold)
+                response_trans_low = self.distance2transition(response_dist, lower_threshold)
+                baseline_trans_opt = self.distance2transition(baseline_dist, optimal_threshold)
+                response_trans_opt = self.distance2transition(response_dist, optimal_threshold)
 
-        # Response surface
-        ax6 = fig.add_subplot(gs[5, 1], projection='3d')
-        x = np.linspace(0, 300, response_dist.shape[0])
-        X, Y = np.meshgrid(x, x)
-        
-        # Main surface plot
-        surf2 = ax6.plot_surface(X, Y, response_dist, cmap='viridis',
-                            vmin=vmin, vmax=vmax, alpha=0.8)
-        
-        # Add threshold plane
-        xx, yy = np.meshgrid([0, 300], [0, 300])
-        zz = np.full_like(xx, optimal_threshold)
-        ax6.plot_surface(xx, yy, zz, alpha=0.2, color='gray')
-        
-        ax6.contourf(X, Y, response_dist, zdir='z', offset=optimal_threshold,
-                    levels=np.linspace(vmin, vmax, 20), cmap='viridis', alpha=0.5)
-        
-        ax6.set_title('C) Response Threshold Surface')
-        ax6.view_init(elev=20, azim=-45)
-        ax6.set_zlim(vmin, vmax)
-        ax6.set_xlim(0, 300)
-        ax6.set_ylim(0, 300)
-        
-        fig.canvas.draw()
-        
-        # Add connecting lines
-        #add_connecting_lines(ax3, ax5, fig)
-        #add_connecting_lines(ax4, ax6, fig)
+                max_size = max(baseline_trans_low.shape[0], 
+                            response_trans_low.shape[0],
+                            baseline_trans_opt.shape[0], 
+                            response_trans_opt.shape[0])
 
-        add_projection_shadow(ax5, baseline_dist, is_baseline=True)
-        add_projection_shadow(ax6, response_dist, is_baseline=False)
+                def pad_matrix(matrix, target_size):
+                    pad_width = target_size - matrix.shape[0]
+                    if pad_width > 0:
+                        return np.pad(matrix, ((0, pad_width), (0, pad_width)), mode='constant')
+                    return matrix
 
-        
-        # D: Transition matrices
-        # Calculate transition matrices for both thresholds
-        baseline_trans_low = self.distance2transition(baseline_dist, lower_threshold)
-        response_trans_low = self.distance2transition(response_dist, lower_threshold)
-        baseline_trans_opt = self.distance2transition(baseline_dist, optimal_threshold)
-        response_trans_opt = self.distance2transition(response_dist, optimal_threshold)
+                baseline_trans_low = pad_matrix(baseline_trans_low, max_size)
+                response_trans_low = pad_matrix(response_trans_low, max_size)
+                baseline_trans_opt = pad_matrix(baseline_trans_opt, max_size)
+                response_trans_opt = pad_matrix(response_trans_opt, max_size)
 
-        # Get maximum size to pad all matrices to same size
-        max_size = max(baseline_trans_low.shape[0], 
-                    response_trans_low.shape[0],
-                    baseline_trans_opt.shape[0], 
-                    response_trans_opt.shape[0])
+                n = max_size
+                full_size = n * 2
+                full_trans = np.zeros((full_size, full_size))
+                full_trans[:n, :n] = baseline_trans_low
+                full_trans[:n, n:] = baseline_trans_opt
+                full_trans[n:, :n] = response_trans_low
+                full_trans[n:, n:] = response_trans_opt
 
-        # Function to pad matrix to target size
-        def pad_matrix(matrix, target_size):
-            pad_width = target_size - matrix.shape[0]
-            if pad_width > 0:
-                return np.pad(matrix, ((0, pad_width), (0, pad_width)), mode='constant')
-            return matrix
+                ax_trans = fig.add_subplot(gs[6, :])
+                im = ax_trans.imshow(full_trans, cmap='binary')
+                ax_trans.axhline(y=n-0.5, color='r', linestyle='-', linewidth=0.5)
+                ax_trans.axvline(x=n-0.5, color='r', linestyle='-', linewidth=0.5)
+                ax_trans.text(-n/4, n/2, f'ε\' = {lower_threshold:.3f}', 
+                            rotation=90, ha='center', va='center')
+                ax_trans.text(-n/4, n*1.5, f'ε* = {optimal_threshold:.3f}', 
+                            rotation=90, ha='center', va='center')
+                ax_trans.text(n/2, -n/4, 'Baseline', ha='center', va='center')
+                ax_trans.text(n*1.5, -n/4, 'Response', ha='center', va='center')
+                ax_trans.set_title('D) Transition Matrices')
 
-        # Pad all matrices to same size
-        baseline_trans_low = pad_matrix(baseline_trans_low, max_size)
-        response_trans_low = pad_matrix(response_trans_low, max_size)
-        baseline_trans_opt = pad_matrix(baseline_trans_opt, max_size)
-        response_trans_opt = pad_matrix(response_trans_opt, max_size)
+                # E: NST analysis
+                ax11 = fig.add_subplot(gs[7, :])
+                ax11.plot(details['thresholds'][0], details['nst_resp_values'][0],
+                        'b-', label='NST Response (NSTres)')
+                ax11.plot(details['thresholds'][0], details['nst_base_values'][0],
+                        'k-', label='NST Baseline (NSTbase)')
+                ax11.plot(details['thresholds'][0], details['diff_values'][0],
+                        'r-', label='ΔNST = NSTres - k × NSTbase')
+                ax11.axvline(x=lower_threshold, color='gray', linestyle='--', label='ε\'')
+                ax11.axvline(x=optimal_threshold, color='r', linestyle='--', label='ε*')
+                ax11.set_xlabel('Threshold (ε)')
+                ax11.set_ylabel('Number of State Transitions')
+                ax11.legend()
+                ax11.set_title('E) State Transitions')
+                ax11.text(0.95, 0.95, 'PCIst = ∑ΔNSTn', transform=ax11.transAxes,
+                        ha='right', va='top', fontsize=10)
 
-        # Calculate sizes for the grid
-        n = max_size
-        full_size = n * 2  # Total size for 2x2 grid
-
-        # Create empty array for full grid
-        full_trans = np.zeros((full_size, full_size))
-
-        # Fill in the quadrants
-        full_trans[:n, :n] = baseline_trans_low
-        full_trans[:n, n:] = baseline_trans_opt
-        full_trans[n:, :n] = response_trans_low
-        full_trans[n:, n:] = response_trans_opt
-        
-        # Create a new subplot for the consolidated transition matrices
-        ax_trans = fig.add_subplot(gs[6, :])  # Use one row instead of two
-        
-        # Plot the consolidated matrix
-        im = ax_trans.imshow(full_trans, cmap='binary')
-        
-        # Add grid lines to separate quadrants
-        ax_trans.axhline(y=n-0.5, color='r', linestyle='-', linewidth=0.5)
-        ax_trans.axvline(x=n-0.5, color='r', linestyle='-', linewidth=0.5)
-        
-        # Add labels
-        ax_trans.text(-n/4, n/2, f'ε\' = {lower_threshold:.3f}', 
-                    rotation=90, ha='center', va='center')
-        ax_trans.text(-n/4, n*1.5, f'ε* = {optimal_threshold:.3f}', 
-                    rotation=90, ha='center', va='center')
-        ax_trans.text(n/2, -n/4, 'Baseline', ha='center', va='center')
-        ax_trans.text(n*1.5, -n/4, 'Response', ha='center', va='center')
-        ax_trans.set_title('D) Transition Matrices')
-        
-        # E: NST analysis
-        ax11 = fig.add_subplot(gs[7, :])
-        ax11.plot(details['thresholds'][0], details['nst_resp_values'][0],
-                'b-', label='NST Response (NSTres)')
-        ax11.plot(details['thresholds'][0], details['nst_base_values'][0],
-                'k-', label='NST Baseline (NSTbase)')
-        ax11.plot(details['thresholds'][0], details['diff_values'][0],
-                'r-', label='ΔNST = NSTres - k × NSTbase')
-        
-        # Add both threshold lines
-        ax11.axvline(x=lower_threshold, color='gray', linestyle='--', label='ε\'')
-        ax11.axvline(x=optimal_threshold, color='r', linestyle='--', label='ε*')
-        
-        ax11.set_xlabel('Threshold (ε)')
-        ax11.set_ylabel('Number of State Transitions')
-        ax11.legend()
-        ax11.set_title('E) State Transitions')
-        
-        # Add PCIst equation
-        ax11.text(0.95, 0.95, 'PCIst = ∑ΔNSTn', transform=ax11.transAxes,
-                ha='right', va='top', fontsize=10)
+            except Exception as e:
+                print(f"Error in advanced analysis plotting: {str(e)}")
+                # Add message if analysis fails
+                ax_message = fig.add_subplot(gs[4:, :])
+                ax_message.text(0.5, 0.5, 
+                            f'Error in advanced analysis:\n{str(e)}\n' +
+                            'Try adjusting analysis parameters or check data quality',
+                            ha='center', va='center', fontsize=12)
+                ax_message.axis('off')
         
         plt.subplots_adjust(hspace=0.4)
         plt.tight_layout()
         return fig
-        
+            
 

@@ -367,14 +367,17 @@ def process_subjects(args):
 
         # Preprocessing
         processor = TMSEEGPreprocessor(raw, ds_sfreq=args.ds_sfreq)
-        print("\nRemoving TMS artifact...")
-        processor.remove_tms_artifact(cut_times_tms=(args.cut_times_tms_start, args.cut_times_tms_end))
-        processor.interpolate_tms_artifact(method=args.interpolation_method, interp_window=(args.interp_window_start, args.interp_window_end),  cut_times_tms=(args.cut_times_tms_start, args.cut_times_tms_end))
-        # 2. Fix stimulus artifact with native mne.fix_stim_artifact
-        print("\nFixing stimulus artifact...")
+        print("\nRemoving TMS artifact and muscle peaks...")
+        processor.remove_tms_artifact(cut_times_tms=(-2, 10))  # Step 8
+
+        print("\nInterpolating TMS artifact...")
+        processor.interpolate_tms_artifact(method='cubic', 
+                                        interp_window=1.0,  # 1ms window for initial interpolation
+                                        cut_times_tms=(-2, 10))  # Step 9
+
         events = processor._get_events()
         event_id = processor._get_event_ids()
-        processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
+        #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
         processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width, plot_psd=False) 
         print("\nCreating epochs...")
         processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None)
@@ -397,6 +400,14 @@ def process_subjects(args):
                 n_components=args.n_components,
                 verbose=True
             )
+        if not args.skip_second_artifact_removal:
+            print("\nExtending TMS artifact removal window...")
+            processor.remove_tms_artifact(cut_times_tms=(-2, 15))  
+            
+            print("\nInterpolating extended TMS artifact...")
+            processor.interpolate_tms_artifact(method='cubic',
+                                            interp_window=5.0,  
+                                            cut_times_tms=(-2, 15))
         if not args.no_second_ICA:
             print("\nRunning second ICA...")
             processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact"])
@@ -492,20 +503,24 @@ if __name__ == "__main__":
                         help='Value to substitute zero events with (default: 10)')
     parser.add_argument('--ds_sfreq', type=float, default=725,
                         help='Downsampling frequency (default: 725)')
-    parser.add_argument('--cut_times_tms_start', type=float, default=-2,
-                        help='Start time for cutting TMS artifact (default: -2)')
-    parser.add_argument('--cut_times_tms_end', type=float, default=10,
-                        help='End time for cutting TMS artifact (default: 10)')
+    # Trying to match TESA
+    parser.add_argument('--initial_window_start', type=float, default=-2,
+                    help='Initial TMS artifact window start (TESA default: -2)')
+    parser.add_argument('--initial_window_end', type=float, default=10,
+                        help='Initial TMS artifact window end (TESA default: 10)')
+    parser.add_argument('--extended_window_start', type=float, default=-2,
+                        help='Extended TMS artifact window start (TESA default: -2)')
+    parser.add_argument('--extended_window_end', type=float, default=15,
+                        help='Extended TMS artifact window end (TESA default: 15)')
+    parser.add_argument('--initial_interp_window', type=float, default=1.0,
+                        help='Initial interpolation window (TESA default: 1.0)')
+    parser.add_argument('--extended_interp_window', type=float, default=5.0,
+                        help='Extended interpolation window (TESA default: 5.0)')
     parser.add_argument('--interpolation_method', type=str, default='cubic',
-                        help='Interpolation method (default: cubic)')
-    parser.add_argument('--interp_window_start', type=float, default=20,
-                        help='Start time for interpolation window (default: 20)')
-    parser.add_argument('--interp_window_end', type=float, default=20,
-                        help='End time for interpolation window (default: 20)')
-    parser.add_argument('--fix_artifact_window_start', type=float, default=-0.005,
-                        help='Start time for fixing artifact window (default: -0.005)')
-    parser.add_argument('--fix_artifact_window_end', type=float, default=0.015,
-                        help='End time for fixing artifact window (default: 0.015)')
+                        choices=['cubic'],
+                        help='Interpolation method (TESA requires cubic)')
+    parser.add_argument('--skip_second_artifact_removal', action='store_true',
+                    help='Skip the second stage of TMS artifact removal')
     parser.add_argument('--l_freq', type=float, default=0.1,
                         help='Lower frequency for filtering (default: 0.1)')
     parser.add_argument('--h_freq', type=float, default=45,

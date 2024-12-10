@@ -84,6 +84,14 @@ class TMSEEGPreprocessor:
         self.epochs = None
         self.evoked = None
         self.ds_sfreq = ds_sfreq
+
+        self.processing_stage = {
+        'initial_removal': False,
+        'first_interpolation': False,
+        'artifact_cleaning': False,
+        'extended_removal': False,
+        'final_interpolation': False
+    }
         
         # Set montage
         if isinstance(montage, str):
@@ -283,196 +291,183 @@ class TMSEEGPreprocessor:
             print("No bad epochs detected")
 
     def remove_tms_artifact(self, 
-                            cut_times_tms: Tuple[float, float] = (-2, 10), 
-                            replace_times: Optional[Tuple[float, float]] = None,
-                            verbose: bool = True) -> None:
+                        cut_times_tms: Tuple[float, float] = (-2, 10), 
+                        replace_times: Optional[Tuple[float, float]] = None,
+                        verbose: bool = True) -> None:
         """
-        Remove TMS artifacts from raw data while preserving existing annotations.
+        Remove TMS artifacts exactly following TESA implementation.
         
         Parameters
         ----------
-        cut_times_tms : tuple or list
+        cut_times_tms : tuple
             Time window to cut around TMS pulse in ms [start, end]
-            e.g., [-10, 10] cuts from -10ms to +10ms around the pulse
-        replace_times : tuple or list, optional
-            Time window to use for calculating replacement data in ms [start, end]
-            e.g., [-500, -100] uses -500ms to -100ms for calculating mean
-            If None, replaced with zeros
-        verbose : bool
-            Print debugging information
+            Default is [-2, 10] following TESA
+        replace_times : tuple, optional
+            Time window for calculating average to replace removed data in ms [start, end]
+            If None (default), data will be replaced with 0s
         """
-        # Make a copy to avoid modifying original
         raw_out = self.raw.copy()
-        # Get the original annotations
-        original_annotations = raw_out.annotations
-        # Get data
         data = raw_out.get_data()
-        # Get sampling rate
         sfreq = raw_out.info['sfreq']
-        # Convert time windows to samples with proper rounding
+        
+        # Store original info about cut (like TESA's EEG.tmscut)
+        if not hasattr(self, 'tmscut'):
+            self.tmscut = []
+        
+        tmscut_info = {
+            'cut_times_tms': cut_times_tms,
+            'replace_times': replace_times,
+            'sfreq': sfreq,
+            'interpolated': 'no'
+        }
+        
         cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-        if verbose:
-            print(f"Data shape: {data.shape}")
-            print(f"Cut window in samples: {cut_samples}")
-        if replace_times is not None:
-            replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
-            if verbose:
-                print(f"Replace window in samples: {replace_samples}")
-        # Convert annotations to samples
-        # First get the TMS pulse annotations
-        tms_annotations = [ann for ann in original_annotations 
+        
+        # Get TMS annotations
+        tms_annotations = [ann for ann in raw_out.annotations 
                         if ann['description'] == 'Stimulation']
-        if verbose:
-            print(f"Found {len(tms_annotations)} TMS pulses")
-        # Process each TMS pulse
+        
+        print(f"\nFound {len(tms_annotations)} TMS events to process")
+        print(f"Removing artifact in window {cut_times_tms} ms")
+
+        processed_count = 0
+        skipped_count = 0
+        
         for ann in tms_annotations:
-            # Convert annotation onset to samples
             event_sample = int(ann['onset'] * sfreq)
-            if verbose:
-                print(f"\nProcessing TMS at {ann['onset']:.3f}s (sample {event_sample})")
-            # Calculate window to cut
             start = event_sample + cut_samples[0]
             end = event_sample + cut_samples[1]
-            if verbose:
-                print(f"Cut window: {start} to {end}")
-            # Check if window is within data
+            
             if start < 0 or end >= data.shape[1]:
-                if verbose:
-                    print("Window outside data bounds, skipping")
+                skipped_count += 1
                 continue
+                
             if replace_times is None:
-                # Replace with zeros
                 data[:, start:end] = 0
             else:
-                # Calculate baseline period
+                # Calculate average from replace_times window
+                replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
                 baseline_start = event_sample + replace_samples[0]
                 baseline_end = event_sample + replace_samples[1]
-                
-                # Check if baseline window is within data
                 if baseline_start >= 0 and baseline_end < data.shape[1]:
                     baseline_mean = np.mean(data[:, baseline_start:baseline_end], axis=1)
                     data[:, start:end] = baseline_mean[:, np.newaxis]
+            processed_count += 1
         
-        self.preproc_stats['interpolated_times'] = [(ann['onset'], ann['onset'] + (cut_samples[1] - cut_samples[0])/sfreq) 
-                                           for ann in tms_annotations]
-        # Create output object with preserved annotations
+        print(f"Successfully removed artifacts from {processed_count} events")
+        if skipped_count > 0:
+            print(f"Skipped {skipped_count} events due to window constraints")
+        
         raw_out._data = data
-        raw_out.set_annotations(original_annotations)
+        raw_out.set_annotations(raw_out.annotations)
         self.raw = raw_out
-        if verbose:
-            print("\nArtifact removal complete")
-            print(f"Processed {len(tms_annotations)} TMS pulses")
-            print(f"Preserved {len(original_annotations)} annotations")
+        self.tmscut.append(tmscut_info)
 
     def interpolate_tms_artifact(self, 
                             method: str = 'cubic',
-                            interp_window: Tuple[float, float] = (20, 20),
-                            cut_times_tms: Tuple[float, float] = (-2, 10),
+                            interp_window: float = 1.0,
+                            cut_times_tms: Tuple[float, float] = (-2, 10),  # Add this back
                             verbose: bool = True) -> None:
         """
-        Interpolate removed TMS artifacts using linear or cubic interpolation.
+        Interpolate TMS artifacts exactly following TESA implementation.
+        Uses polynomial interpolation rather than spline interpolation.
         
         Parameters
         ----------
         method : str
-            Interpolation method: 'linear' or 'cubic'
-        interp_window : tuple
+            Interpolation method: must be 'cubic' for TESA compatibility
+        interp_window : float
             Time window (in ms) before and after artifact for fitting cubic function
-            Only used if method='cubic'
-            Default is (20, 20) for 20ms before and after
+            Default is 1.0 ms following TESA
         cut_times_tms : tuple
             Time window where TMS artifact was removed in ms [start, end]
-            e.g., (-2, 10) for -2ms to 10ms around the TMS pulse
+            Default is (-2, 10) following TESA
         verbose : bool
             Whether to print progress information
         """
-        self.interpolation_method = method
-        self.interp_window = interp_window
+        if not hasattr(self, 'tmscut') or not self.tmscut:
+            raise ValueError("Must run remove_tms_artifact first")
+        
+        print(f"\nStarting interpolation with {method} method")
+        print(f"Using interpolation window of {interp_window} ms")
+        print(f"Processing cut window {cut_times_tms} ms")
 
-        from scipy.interpolate import interp1d
-        import numpy as np
-        import mne
-        
-        # Validate inputs
-        if method not in ['linear', 'cubic']:
-            raise ValueError("Method must be 'linear' or 'cubic'")
-        # Make a copy
+        interpolated_count = 0
+        warning_count = 0
+            
         raw_out = self.raw.copy()
-        # Get data
         data = raw_out.get_data()
-        # Get sampling rate
         sfreq = raw_out.info['sfreq']
-        # Convert time windows to samples
-        cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-        interp_samples = np.round(np.array(interp_window) * sfreq / 1000).astype(int)
-        if verbose:
-            print(f"Using {method} interpolation")
-            print(f"Interpolation window: {interp_window}ms ({interp_samples} samples)")
-            print(f"Cut window: {cut_times_tms}ms ({cut_samples} samples)")
-        # Find TMS pulses from annotations
-        tms_annotations = [ann for ann in raw_out.annotations 
-                          if ann['description'] == 'Stimulation']
-        if verbose:
-            print(f"Found {len(tms_annotations)} TMS pulses to interpolate")
-        # Process each TMS pulse
-        for ann in tms_annotations:
-            # Convert annotation onset to samples
-            event_sample = int(ann['onset'] * sfreq)
-            if verbose:
-                print(f"\nProcessing TMS at {ann['onset']:.3f}s")
-            # Calculate artifact window
-            start = event_sample + cut_samples[0]
-            end = event_sample + cut_samples[1]
-            # Check if window is within data
-            if start < 0 or end >= data.shape[1]:
-                if verbose:
-                    print("Window outside data bounds, skipping")
-                continue
-            if method == 'linear':
-                # Use points just before and after artifact
-                x_fit = np.array([start-1, end+1])
-                x_interp = np.arange(start, end+1)
-                # Interpolate each channel
-                for ch in range(data.shape[0]):
-                    y_fit = data[ch, x_fit]
-                    f = interp1d(x_fit, y_fit, kind='linear')
-                    data[ch, start:end+1] = f(x_interp)    
-            else:  # cubic
-                # Use wider window for cubic fit
-                window_start = start - interp_samples[0]
-                window_end = end + interp_samples[1]
-                # Check if window is within data
-                if window_start < 0 or window_end >= data.shape[1]:
-                    if verbose:
-                        print("Interpolation window outside data bounds, skipping")
-                    continue
-                x_fit = np.concatenate([
-                    np.arange(window_start, start),
-                    np.arange(end+1, window_end+1)
-                ])
-                x_interp = np.arange(start, end+1)
-                # Interpolate each channel
-                for ch in range(data.shape[0]):
-                    # Get data excluding artifact
-                    y_fit = data[ch, x_fit]
-                    # Normalize x values to prevent numerical issues
-                    x_norm = x_fit - x_fit[0]
-                    x_interp_norm = x_interp - x_fit[0]
-                    # Create interpolation function
-                    f = interp1d(x_norm, y_fit, kind='cubic')
-                    # Apply interpolation
-                    data[ch, start:end+1] = f(x_interp_norm)
         
-        # Create output object with preserved annotations
+        cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
+        interp_samples = int(round(interp_window * sfreq / 1000))
+            
+        for tmscut in self.tmscut:
+            if tmscut['interpolated'] == 'no':
+                cut_times = tmscut['cut_times_tms']
+                cut_samples = np.round(np.array(cut_times) * sfreq / 1000).astype(int)
+                interp_samples = int(round(interp_window * sfreq / 1000))
+                
+                # Process annotations
+                tms_annotations = [ann for ann in raw_out.annotations 
+                                if ann['description'] == 'Stimulation']
+                
+                for ann in tms_annotations:
+                    event_sample = int(ann['onset'] * sfreq)
+                    start = event_sample + cut_samples[0]
+                    end = event_sample + cut_samples[1]
+                    
+                    # Calculate fitting windows
+                    window_start = start - interp_samples
+                    window_end = end + interp_samples
+                    
+                    if window_start < 0 or window_end >= data.shape[1]:
+                        warning_count += 1
+                        continue
+                    
+                    # Get time points for fitting
+                    x = np.arange(window_end - window_start + 1)
+                    x_fit = np.concatenate([
+                        x[:interp_samples],
+                        x[-interp_samples:]
+                    ])
+                    
+                    # Center x values at 0 to avoid badly conditioned warnings (TESA approach)
+                    x_fit = x_fit - x_fit[0]
+                    if len(x) <= 2 * interp_samples:
+                        print(f"Warning: Window too small for interpolation at sample {event_sample}")
+                        warning_count += 1
+                        continue
+
+                    x_interp = x[interp_samples:-interp_samples] - x_fit[0]
+
+                    # Interpolate each channel using polynomial fit
+                    for ch in range(data.shape[0]):
+                        y_full = data[ch, window_start:window_end+1]
+                        y_fit = np.concatenate([
+                            y_full[:interp_samples],
+                            y_full[-interp_samples:]
+                        ])
+                        
+                        # Use polynomial fit (like TESA) instead of spline
+                        p = np.polyfit(x_fit, y_fit, 3)
+                        data[ch, start:end+1] = np.polyval(p, x_interp)
+                    
+                    interpolated_count += 1
+
+
+                
+                tmscut['interpolated'] = 'yes'
+        
+        print(f"\nSuccessfully interpolated {interpolated_count} events")
+        if warning_count > 0:
+            print(f"Encountered {warning_count} warnings during interpolation")
+        print("TMS artifact interpolation complete")
         raw_out._data = data
         raw_out.set_annotations(raw_out.annotations)
-        
         self.raw = raw_out
-        
-        if verbose:
-            print("\nInterpolation complete")
 
-    def _apply_interpolation(self, data, epoch_idx, start_idx, end_idx, method, sfreq, window_samples):
+    '''def _apply_interpolation(self, data, epoch_idx, start_idx, end_idx, method, sfreq, window_samples):
         if method == 'linear':
             x_fit = np.array([max(0, start_idx-1), min(data.shape[2 if epoch_idx is not None else 1]-1, end_idx+1)])
             x_interp = np.arange(start_idx, end_idx+1)
@@ -502,8 +497,34 @@ class TMSEEGPreprocessor:
                 if epoch_idx is not None:
                     data[epoch_idx, ch, start_idx:end_idx+1] = f(x_interp_norm)
                 else:
-                    data[ch, start_idx:end_idx+1] = f(x_interp_norm)
+                    data[ch, start_idx:end_idx+1] = f(x_interp_norm)'''
     
+    def staged_artifact_removal(self, verbose: bool = True) -> None:
+        """
+        Perform staged TMS artifact removal following TESA pipeline.
+        """
+        # Stage 1: Initial removal (-2 to 10 ms)
+        if verbose:
+            print("Stage 1: Initial TMS artifact removal (-2 to 10 ms)")
+        self.remove_tms_artifact(cut_times_tms=(-2, 10), verbose=verbose)
+        self.interpolate_tms_artifact(method='cubic', 
+                                    interp_window=1.0,
+                                    cut_times_tms=(-2, 10),
+                                    verbose=verbose)
+        
+        self.run_ica()
+        
+        # Stage 2: Extended removal (-2 to 15 ms)
+        if verbose:
+            print("Stage 2: Extended TMS artifact removal (-2 to 15 ms)")
+        self.remove_tms_artifact(cut_times_tms=(-2, 15), verbose=verbose)
+        self.interpolate_tms_artifact(method='cubic',
+                                    interp_window=5.0,
+                                    cut_times_tms=(-2, 15),
+                                    verbose=verbose)
+
+        if verbose:
+            print("Staged artifact removal complete")
 
     def run_ica(self, method: str = "fastica", tms_muscle_thresh: float = 1.0, plot_components: bool = True) -> None:
         """
@@ -979,7 +1000,6 @@ class TMSEEGPreprocessor:
         return fig
 
 
-
     def apply_ssp(self, n_eeg=2):
 
         
@@ -1048,61 +1068,6 @@ class TMSEEGPreprocessor:
         
         if verbose:
             print("CSD transformation complete")
-
-    def enhanced_muscle_removal(self, window=(0.005, 0.050), freq_band=(30, 100), 
-                            n_components=5, threshold=2.0, verbose=True):
-        """
-        Enhanced muscle artifact removal using multi-taper decomposition.
-        
-        Parameters
-        ----------
-        window : tuple
-            Time window for muscle artifact detection in seconds
-        freq_band : tuple
-            Frequency band for muscle activity detection
-        n_components : int
-            Number of components for decomposition
-        threshold : float
-            Threshold for artifact detection in std units
-        verbose : bool
-            Print progress information
-        """
-        if self.epochs is None:
-            raise ValueError("Must create epochs before removing muscle artifacts")
-        
-        if verbose:
-            print("Running enhanced muscle artifact removal...")
-        
-        data = self.epochs.get_data()
-        sfreq = self.epochs.info['sfreq']
-        
-        # Parameters for multi-taper analysis
-        win_length = int(0.2 * sfreq)  # 200ms windows
-        n_tapers = 4
-        
-        # Create multi-tapers
-        tapers = signal.windows.dpss(win_length, n_tapers-1, n_tapers)
-        
-        for epoch in range(data.shape[0]):
-            for ch in range(data.shape[1]):
-                # Apply multi-taper decomposition
-                for i in range(n_tapers):
-                    # Apply taper and get spectrum
-                    tapered = data[epoch, ch, :] * tapers[i]
-                    spec = np.abs(np.fft.fft(tapered))
-                    
-                    # Identify and remove high-frequency components
-                    freq = np.fft.fftfreq(len(spec), 1/sfreq)
-                    mask = (np.abs(freq) > freq_band[0]) & (np.abs(freq) < freq_band[1])
-                    spec[mask] *= 0.1  # Attenuate high frequencies
-                    
-                    # Inverse FFT
-                    cleaned = np.real(np.fft.ifft(spec))
-                    data[epoch, ch, :] = cleaned
-                    
-        self.epochs._data = data
-        if verbose:
-            print("Enhanced muscle artifact removal complete")
             
 
     def fix_tms_artifact(self, 

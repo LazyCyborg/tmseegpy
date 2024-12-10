@@ -76,10 +76,13 @@ class TMSEEG_GUI:
             'h_freq': {'min': 1, 'max': 1000, 'type': float},
             'notch_freq': {'min': 0, 'max': 1000, 'type': float},
             'notch_width': {'min': 0, 'max': 10, 'type': float},
-            'cut_times_tms_start': {'min': -100, 'max': 0, 'type': float},
-            'cut_times_tms_end': {'min': 0, 'max': 100, 'type': float},
-            'interp_window_start': {'min': 0, 'max': 100, 'type': float},
-            'interp_window_end': {'min': 0, 'max': 100, 'type': float},
+            'initial_cut_start': {'min': -100, 'max': 0, 'type': float},
+            'initial_cut_end': {'min': 0, 'max': 100, 'type': float},
+            'initial_interp_window': {'min': 0.1, 'max': 10.0, 'type': float},
+            'extended_cut_start': {'min': -100, 'max': 0, 'type': float},
+            'extended_cut_end': {'min': 0, 'max': 100, 'type': float},
+            'extended_interp_window': {'min': 0.1, 'max': 10.0, 'type': float},
+            'interpolation_method': {'type': 'str', 'choices': ['cubic']},
             'epochs_tmin': {'min': -2, 'max': 0, 'type': float},
             'epochs_tmax': {'min': 0, 'max': 2, 'type': float},
             'baseline_start': {'min': -1000, 'max': 0, 'type': int},
@@ -117,10 +120,13 @@ class TMSEEG_GUI:
             'h_freq': 'Upper frequency cutoff for filtering',
             'notch_freq': 'Frequency for notch filter',
             'notch_width': 'Width of the notch filter',
-            'cut_times_tms_start': 'Start time for cutting TMS artifact (ms)',
-            'cut_times_tms_end': 'End time for cutting TMS artifact (ms)',
-            'interp_window_start': 'Start time for interpolation window (ms)',
-            'interp_window_end': 'End time for interpolation window (ms)',
+            'initial_cut_start': 'Start time for initial TMS artifact removal (TESA default: -2)',
+            'initial_cut_end': 'End time for initial TMS artifact removal (TESA default: 10)',
+            'initial_interp_window': 'Initial interpolation window (TESA default: 1.0)',
+            'extended_cut_start': 'Start time for extended TMS artifact removal (TESA default: -2)',
+            'extended_cut_end': 'End time for extended TMS artifact removal (TESA default: 15)',
+            'extended_interp_window': 'Extended interpolation window (TESA default: 5.0)',
+            'interpolation_method': 'Interpolation method (TESA requires cubic)',
             'epochs_tmin': 'Start time for epochs (s)',
             'epochs_tmax': 'End time for epochs (s)',
             'baseline_start': 'Start time for baseline period (ms)',
@@ -131,8 +137,6 @@ class TMSEEG_GUI:
             'n_steps': 'Number of steps for PCIst calculation',
             'min_peak_distance': 'Minimum distance between peaks',
             'substitute_zero_events_with': 'Value to substitute zero events with in the data',
-            'fix_artifact_window_start': 'Start time for fixing TMS artifact window (s)',
-            'fix_artifact_window_end': 'End time for fixing TMS artifact window (s)',
             'threshold_factor': 'Threshold factor for muscle artifact cleaning',
             'muscle_window_start': 'Start time for muscle artifact window (s)',
             'muscle_window_end': 'End time for muscle artifact window (s)',
@@ -404,8 +408,8 @@ class TMSEEG_GUI:
         self.add_parameter_group(preproc_frame, {
             'Downsampling Frequency (Hz)': ('ds_sfreq', 725),
             'Random Seed': ('random_seed', 42),
-            'Bad Channels Threshold': ('bad_channels_threshold', 3),
-            'Bad Epochs Threshold': ('bad_epochs_threshold', 3),
+            'Bad Channels Threshold': ('bad_channels_threshold', 2),
+            'Bad Epochs Threshold': ('bad_epochs_threshold', 2),
             'SSP EEG Components': ('ssp_n_eeg', 2),
             'Substitute Zero Events With': ('substitute_zero_events_with', 10),
         })
@@ -423,14 +427,34 @@ class TMSEEG_GUI:
         # TMS Parameters
         tms_frame = ttk.Frame(notebook, padding="5")
         notebook.add(tms_frame, text="TMS Settings")
-        self.add_parameter_group(tms_frame, {
-            'Cut Times TMS Start (ms)': ('cut_times_tms_start', -2),
-            'Cut Times TMS End (ms)': ('cut_times_tms_end', 10),
-            'Interpolation Window Start (ms)': ('interp_window_start', 20),
-            'Interpolation Window End (ms)': ('interp_window_end', 20),
-            'Fix Artifact Window Start': ('fix_artifact_window_start', -0.005),
-            'Fix Artifact Window End': ('fix_artifact_window_end', 0.015),
+
+        # Create sub-frames for each stage
+        stage1_frame = ttk.LabelFrame(tms_frame, text="Stage 1 (Initial Removal)", padding="5")
+        stage1_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
+        self.add_parameter_group(stage1_frame, {
+            'Initial Cut Start (ms)': ('initial_cut_start', -2),
+            'Initial Cut End (ms)': ('initial_cut_end', 10),
+            'Initial Interp Window (ms)': ('initial_interp_window', 1.0),
         })
+
+        stage2_frame = ttk.LabelFrame(tms_frame, text="Stage 2 (Extended Removal)", padding="5")
+        stage2_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        self.add_parameter_group(stage2_frame, {
+            'Extended Cut Start (ms)': ('extended_cut_start', -2),
+            'Extended Cut End (ms)': ('extended_cut_end', 15),
+            'Extended Interp Window (ms)': ('extended_interp_window', 5.0),
+        })
+
+        # Common parameters
+        common_frame = ttk.LabelFrame(tms_frame, text="Common Settings", padding="5")
+        common_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        self.add_parameter_group(common_frame, {
+            'Interpolation Method': ('interpolation_method', 'cubic')
+        })
+
+        self.skip_second_artifact_removal = tk.BooleanVar()
+        ttk.Checkbutton(stage2_frame, text="Skip Second TMS Artifact Removal", 
+                        variable=self.skip_second_artifact_removal).grid(row=0, column=2, padx=5, pady=2, sticky=tk.W)
         
         # Muscle Artifact Parameters
         muscle_frame = ttk.Frame(notebook, padding="5")
@@ -447,8 +471,8 @@ class TMSEEG_GUI:
         notebook.add(ica_frame, text="ICA Settings")
         self.add_parameter_group(ica_frame, {
             'ICA Method': ('ica_method', 'fastica'),
-            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 3.0),
-            'Second ICA Method': ('second_ica_method', 'infomax'),
+            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 2.0),
+            'Second ICA Method': ('second_ica_method', 'fastica'),
         })
         
         # CSD Parameters
@@ -552,12 +576,14 @@ class TMSEEG_GUI:
             'preproc_qc': self.preproc_qc.get(),
             'apply_ssp': self.apply_ssp.get(), 
             'apply_csd': self.apply_csd.get(),
+            'skip_second_artifact_removal': self.skip_second_artifact_removal.get(),
             
             # Additional arguments with default values
             'substitute_zero_events_with': 10,
             'ica_method': 'fastica',
             'second_ica_method': 'infomax',
-            'interpolation_method': 'cubic',
+            'interpolation_method': 'cubic',  # Force cubic interpolation
+            'interp_window': 1.0, 
             'no_second_ICA': False,
             'embed': False,
             'fix_artifact_window_start': -0.005,
@@ -567,7 +593,7 @@ class TMSEEG_GUI:
             'muscle_window_end': 0.030,
             'lambda2': 1e-5,
             'stiffness': 4,
-            'response_start': 0,        # Add this
+            'response_start': 0,        
             'response_end': 299,   
         }
         
@@ -600,17 +626,19 @@ class TMSEEG_GUI:
         thread.start()
         
     def run_analysis_thread(self, args):
+        """Modified thread function with enhanced error capture"""
         try:
             self.redirect_output()
-            # Set matplotlib backend to avoid GUI issues in thread
             import matplotlib
             matplotlib.use('Agg')
             
             from run import process_subjects
             pcists = process_subjects(args)
             self.root.after(0, self.analysis_complete, pcists)
-        except Exception as e:
-            self.root.after(0, self.analysis_error, str(e))
+        except Exception:
+            import traceback
+            error_msg = traceback.format_exc()  # Get the full traceback as string
+            self.root.after(0, self.analysis_error, error_msg)
             
     def analysis_complete(self, pcists):
         self.progress.stop()
@@ -639,9 +667,38 @@ class TMSEEG_GUI:
         messagebox.showinfo("Complete", message)
         
     def analysis_error(self, error_msg):
+        """Enhanced error handling with full traceback"""
+        import traceback
+        import sys
+        
         self.progress.stop()
         self.running = False
-        messagebox.showerror("Error", f"An error occurred:\n{error_msg}")
+        
+        # Get the full traceback
+        exc_info = sys.exc_info()
+        
+        # Format error message with traceback
+        error_detail = "Error Traceback:\n"
+        
+        if exc_info[0] is not None:  # If we have exception info
+            exc_type, exc_value, exc_traceback = exc_info
+            tb_list = traceback.extract_tb(exc_traceback)
+            
+            for filename, line, func, text in tb_list:
+                error_detail += f"  File '{filename}', line {line}, in {func}\n"
+                if text:
+                    error_detail += f"    {text}\n"
+            error_detail += f"\nError Type: {exc_type.__name__}\n"
+        
+        # Always include the error message
+        error_detail += f"Error Message: {str(error_msg)}"
+        
+        # Show error in GUI
+        messagebox.showerror("Error", error_detail)
+        
+        # Also print to console for debugging
+        print("\nFull Error Details:")
+        print(error_detail)
         
     def stop_analysis(self):
         if self.running:
