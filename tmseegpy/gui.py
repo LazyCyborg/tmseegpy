@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 import sys
 import io
+import os
 
 class ToolTip(object):
     def __init__(self, widget, text='widget info'):
@@ -104,6 +105,7 @@ class TMSEEG_GUI:
             'interpolation_method': {'type': 'str', 'choices': ['cubic', 'linear']},
             'response_start': {'min': -1000, 'max': 1000, 'type': int},
             'response_end': {'min': -1000, 'max': 1000, 'type': int},
+            'prominence': {'min': 0.01, 'max': 1.0, 'type': float}
             
         }
 
@@ -146,6 +148,7 @@ class TMSEEG_GUI:
             'stiffness': 'Stiffness parameter for CSD transformation',
             'response_start': 'Start of response window in ms',
             'response_end': 'End of response window in ms',
+            'prominence': 'Minimum prominence for peak detection as fraction of max GFP (default: 0.01)'
         }
         
     def create_scroll_canvas(self):
@@ -408,8 +411,8 @@ class TMSEEG_GUI:
         self.add_parameter_group(preproc_frame, {
             'Downsampling Frequency (Hz)': ('ds_sfreq', 725),
             'Random Seed': ('random_seed', 42),
-            'Bad Channels Threshold': ('bad_channels_threshold', 2),
-            'Bad Epochs Threshold': ('bad_epochs_threshold', 2),
+            'Bad Channels Threshold': ('bad_channels_threshold', 3),
+            'Bad Epochs Threshold': ('bad_epochs_threshold', 3),
             'SSP EEG Components': ('ssp_n_eeg', 2),
             'Substitute Zero Events With': ('substitute_zero_events_with', 10),
         })
@@ -471,16 +474,16 @@ class TMSEEG_GUI:
         notebook.add(ica_frame, text="ICA Settings")
         self.add_parameter_group(ica_frame, {
             'ICA Method': ('ica_method', 'fastica'),
-            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 2.0),
-            'Second ICA Method': ('second_ica_method', 'fastica'),
+            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 3.0),
+            'Second ICA Method': ('second_ica_method', 'infomax'),
         })
         
         # CSD Parameters
         csd_frame = ttk.Frame(notebook, padding="5")
         notebook.add(csd_frame, text="CSD Settings")
         self.add_parameter_group(csd_frame, {
-            'Lambda2': ('lambda2', 1e-5),
-            'Stiffness': ('stiffness', 4),
+            'Lambda2': ('lambda2', 1e-3),
+            'Stiffness': ('stiffness', 3),
         })
         
         # Epoch Parameters
@@ -491,6 +494,11 @@ class TMSEEG_GUI:
             'Epoch End Time (s)': ('epochs_tmax', 0.41),
             'Baseline Start (ms)': ('baseline_start', -400),
             'Baseline End (ms)': ('baseline_end', -50),
+        })
+        tep_frame = ttk.Frame(notebook, padding="5")
+        notebook.add(tep_frame, text="TEP Analysis")
+        self.add_parameter_group(tep_frame, {
+            'Prominence': ('prominence', 0.01)  
         })
         
         # PCIst Parameters
@@ -591,7 +599,7 @@ class TMSEEG_GUI:
             'threshold_factor': 1.0,
             'muscle_window_start': 0.005,
             'muscle_window_end': 0.030,
-            'lambda2': 1e-5,
+            'lambda2': 1e-3,
             'stiffness': 4,
             'response_start': 0,        
             'response_end': 299,   

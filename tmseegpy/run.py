@@ -1,12 +1,11 @@
 # run.py
-
 import os
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from preproc import TMSEEGPreprocessor
 from pcist import PCIst
-from validate_tep import validate_teps
+from validate_tep import validate_teps, plot_tms_components
 import mne
 import time
 from neurone_loader import Recording
@@ -15,21 +14,82 @@ import argparse
 mne.viz.use_browser_backend("matplotlib")
 plt.rcParams['figure.figsize'] = [8, 6]
 
-def plot_eeg(eeg=None, duration=None, start=None):
-    with mne.viz.use_browser_backend("matplotlib"):
-        fig = eeg.copy().set_eeg_reference('average').plot(duration=duration, start=start, scalings=None)
-        for ax in fig.get_axes():
-            if hasattr(ax, 'invert_yaxis'):
-                ax.invert_yaxis()
-        fig.canvas.draw()
-        
-def plot_epochs(eeg=None):
+def plot_eeg(output_dir, eeg, session_name):
+    """
+    Plot EEG data and save to file
+    
+    Args:
+        output_dir: Directory to save the plot
+        eeg: MNE Raw object to plot
+        duration: Duration to display in seconds
+        start: Start time in seconds
+        session_name: Name of the session for the filename
+    """
+    import numpy as np
+    from pathlib import Path
+    import datetime
+    
+    # Create a more specific filename
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    save_path = Path(output_dir) / f"raw_eeg_{session_name}_{timestamp}.png"
+
     with mne.viz.use_browser_backend("matplotlib"):
         fig = eeg.copy().set_eeg_reference('average').plot(scalings=None)
         for ax in fig.get_axes():
             if hasattr(ax, 'invert_yaxis'):
                 ax.invert_yaxis()
-        fig.canvas.draw()
+        fig.savefig(save_path)
+        plt.close(fig)
+        
+def plot_epochs(output_dir, eeg, session_name):
+    """
+    Plot epoch data and save to file 
+    
+    Args:
+        output_dir: Directory to save the plot
+        eeg: MNE Epochs object to plot
+        session_name: Name of the session for the filename
+    """
+    import numpy as np
+    from pathlib import Path
+    import datetime
+    
+    # Create a more specific filename
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    save_path = Path(output_dir) / f"epochs_{session_name}_{timestamp}.png"
+
+    with mne.viz.use_browser_backend("matplotlib"):
+        fig = eeg.copy().set_eeg_reference('average').plot(scalings=None)
+        for ax in fig.get_axes():
+            if hasattr(ax, 'invert_yaxis'):
+                ax.invert_yaxis()
+        fig.savefig(save_path)
+        plt.close(fig)
+
+def plot_csd_epochs(output_dir, eeg, session_name):
+    """
+    Plot epoch data and save to file 
+    
+    Args:
+        output_dir: Directory to save the plot
+        eeg: MNE Epochs object to plot
+        session_name: Name of the session for the filename
+    """
+    import numpy as np
+    from pathlib import Path
+    import datetime
+    
+    # Create a more specific filename
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    save_path = Path(output_dir) / f"epochs_{session_name}_{timestamp}.png"
+
+    with mne.viz.use_browser_backend("matplotlib"):
+        fig = eeg.copy().plot(scalings=None)
+        for ax in fig.get_axes():
+            if hasattr(ax, 'invert_yaxis'):
+                ax.invert_yaxis()
+        fig.savefig(save_path)
+        plt.close(fig)
 
 def generate_preproc_stats(processor, session_name, output_dir):
     """
@@ -364,7 +424,8 @@ def process_subjects(args):
         if channels_to_drop:
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
-
+        if args.plot_preproc:
+            plot_eeg(eeg=raw, output_dir=args.output_dir, session_name=session_name)
         # Preprocessing
         processor = TMSEEGPreprocessor(raw, ds_sfreq=args.ds_sfreq)
         print("\nRemoving TMS artifact and muscle peaks...")
@@ -377,6 +438,8 @@ def process_subjects(args):
 
         events = processor._get_events()
         event_id = processor._get_event_ids()
+        if args.plot_preproc:
+            plot_eeg(eeg=raw, output_dir=args.output_dir, session_name=session_name)
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
         processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width, plot_psd=False) 
         print("\nCreating epochs...")
@@ -392,6 +455,8 @@ def process_subjects(args):
         else:
             plot_components=False
         processor.run_ica(method=args.ica_method, tms_muscle_thresh=args.tms_muscle_thresh, plot_components=plot_components)
+        if args.plot_preproc:
+            plot_epochs(eeg=processor.epochs, output_dir=args.output_dir, session_name=session_name)
         if args.clean_muscle_artifacts:
             print("\nCleaning muscle artifacts...")
             processor.clean_muscle_artifacts(
@@ -416,20 +481,30 @@ def process_subjects(args):
         processor.apply_ssp(n_eeg=args.ssp_n_eeg)
         print("\nApplying baseline correction...")
         processor.apply_baseline_correction(baseline=(baseline_start_sec, baseline_end_sec))
+        if args.plot_preproc:
+            plot_epochs(eeg=processor.epochs, output_dir=args.output_dir, session_name=session_name)
         if args.apply_csd:
             print("\nApplying CSD transformation...")
             processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
         print(f"\nDownsampling to {processor.ds_sfreq} Hz")
         processor.downsample()
+        if args.plot_preproc:
+            plot_csd_epochs(eeg=processor.epochs, output_dir=args.output_dir, session_name=session_name)
 
         epochs = processor.epochs
-        if args.plot_preproc:
-            plot_epochs(eeg=epochs)
 
         if args.validate_teps:
             print("\nValidating TEPs...")
             baseline_window = (args.baseline_start, args.baseline_end)
             response_window = (args.response_start, args.response_end)
+
+            plot_tms_components(
+                evoked=epochs.average(),
+                output_dir=args.output_dir,
+                session_name=session_name,
+                prominence=args.prominence,
+                save=True  
+            )
             quality_results, component_results = validate_teps(
                 evoked=epochs.average(),
                 output_dir=args.output_dir,
@@ -558,8 +633,8 @@ if __name__ == "__main__":
     parser.add_argument('--ssp_n_eeg', type=int, default=2,
                         help='Number of EEG components for SSP (default: 2)')
     parser.add_argument('--apply_csd', action='store_true',
-                    help='Apply CSD transformation (default: False)')
-    parser.add_argument('--lambda2', type=float, default=1e-5,
+                    help='Apply CSD transformation (default: True)')
+    parser.add_argument('--lambda2', type=float, default=1e-3,
                     help='Lambda2 parameter for CSD transformation (default: 1e-5)')
     parser.add_argument('--stiffness', type=int, default=4,
                     help='Stiffness parameter for CSD transformation (default: 4)')
@@ -567,6 +642,8 @@ if __name__ == "__main__":
                     help='Display the evoked plot with TEPs (default: False)')
     parser.add_argument('--validate_teps', action='store_true',
                 help='Perform TEP validation against established criteria')
+    parser.add_argument('--prominence', type=float, default=0.01,
+                    help='Minimum prominence for peak detection (default: 0.01)')
     parser.add_argument('--baseline_start', type=int, default=-400,
                         help='Start time for baseline in ms (default: -400)')
     parser.add_argument('--baseline_end', type=int, default=-50,

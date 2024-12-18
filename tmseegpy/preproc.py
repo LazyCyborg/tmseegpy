@@ -10,6 +10,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy import optimize
 import mne
 from mne.preprocessing import compute_current_source_density
+from mne.io.constants import FIFF
 
 from typing import Optional, Union, Dict, List, Tuple, Any
 import warnings
@@ -1041,7 +1042,7 @@ class TMSEEGPreprocessor:
 
     def apply_csd(self, lambda2=1e-5, stiffness=4, n_legendre_terms=50, verbose=True):
         """
-        Apply Current Source Density transformation.
+        Apply Current Source Density transformation maintaining CSD channel type.
         
         Parameters
         ----------
@@ -1057,7 +1058,7 @@ class TMSEEGPreprocessor:
         if verbose:
             print("Applying Current Source Density transformation...")
         
-        # Convert raw data to CSD
+        # Apply CSD transformation
         self.epochs = compute_current_source_density(
             self.epochs,
             lambda2=lambda2,
@@ -1066,8 +1067,14 @@ class TMSEEGPreprocessor:
             copy=True
         )
         
+        # The channels are now CSD type, so we leave them as is
         if verbose:
             print("CSD transformation complete")
+        
+        # Store the fact that we've applied CSD
+        self.csd_applied = True
+        
+        return self.epochs
             
 
     def fix_tms_artifact(self, 

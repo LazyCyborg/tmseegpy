@@ -45,4 +45,6 @@ notebooks/
 simulate/
 old_code/
 output/
-output_fast/
+output_cut/
+output_neo/
+output_test/
