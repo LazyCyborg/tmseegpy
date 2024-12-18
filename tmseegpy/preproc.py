@@ -135,9 +135,9 @@ class TMSEEGPreprocessor:
                     tmin: float = -0.5, 
                     tmax: float = 1,
                     baseline: Optional[Tuple[float, float]] = None,
-                    reject: Optional[Dict[str, float]] = None) -> None:
+                    amplitude_threshold: float = 300.0) -> None:
         """
-        Create epochs from the continuous data with optional rejection criteria.
+        Create epochs from the continuous data with amplitude rejection criteria.
         
         Parameters
         ----------
@@ -147,15 +147,13 @@ class TMSEEGPreprocessor:
             End time of epoch in seconds
         baseline : tuple or None
             Baseline period (start, end) in seconds. None for no baseline correction
-        reject : dict or None
-            Rejection parameters based on peak-to-peak amplitude.
-            For example: dict(eeg=200e-6) to reject epochs with peak-to-peak
-            amplitude > 200 µV in any EEG channel
+        amplitude_threshold : float
+            Threshold for rejecting epochs based on peak-to-peak amplitude in µV.
+            Default is 300 µV.
         """
-        # Default rejection criteria if none provided
-        #if reject is None:
-           # reject = dict(eeg=200e-6)  # 200 µV for EEG
-            
+        # Convert µV to V for MNE
+        reject = dict(eeg=amplitude_threshold * 1e-6)
+                
         self.events, self.event_id = mne.events_from_annotations(self.raw)
         
         self.epochs = mne.Epochs(self.raw, 
@@ -164,16 +162,16 @@ class TMSEEGPreprocessor:
                             tmin=tmin, 
                             tmax=tmax, 
                             baseline=baseline,
-                            reject=reject,  # Add rejection criteria
+                            reject=reject,
                             reject_by_annotation=True,
-                            detrend=0,  # Remove mean
+                            detrend=0,
                             preload=True,
                             verbose=True)
         
         print(f"Created {len(self.epochs)} epochs")
         if len(self.events) > len(self.epochs):
             n_rejected = len(self.events) - len(self.epochs)
-            print(f"Rejected {n_rejected} epochs based on amplitude criteria")
+            print(f"Rejected {n_rejected} epochs based on {amplitude_threshold}µV amplitude threshold")
         self.preproc_stats['n_orig_events'] = len(self.events)
         self.preproc_stats['n_final_events'] = len(self.epochs)
 

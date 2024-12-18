@@ -70,6 +70,7 @@ class TMSEEG_GUI:
             'random_seed': {'min': 0, 'max': 1000000, 'type': int},
             'bad_channels_threshold': {'min': 0, 'max': 10, 'type': float},
             'bad_epochs_threshold': {'min': 0, 'max': 10, 'type': float},
+            'amplitude_threshold': {'min': 50, 'max': 1000, 'type': float},
             'tms_muscle_thresh': {'min': 0, 'max': 10, 'type': float},
             'n_components': {'min': 1, 'max': 100, 'type': int},
             'ssp_n_eeg': {'min': 1, 'max': 10, 'type': int},
@@ -115,6 +116,7 @@ class TMSEEG_GUI:
             'random_seed': 'Random seed for reproducibility',
             'bad_channels_threshold': 'Threshold for detecting bad channels',
             'bad_epochs_threshold': 'Threshold for detecting bad epochs',
+            'amplitude_threshold': 'Threshold for epoch rejection based on peak-to-peak amplitude in µV',
             'tms_muscle_thresh': 'Threshold for detecting muscle artifacts',
             'n_components': 'Number of components for PARAFAC',
             'ssp_n_eeg': 'Number of EEG components for SSP',
@@ -411,8 +413,8 @@ class TMSEEG_GUI:
         self.add_parameter_group(preproc_frame, {
             'Downsampling Frequency (Hz)': ('ds_sfreq', 725),
             'Random Seed': ('random_seed', 42),
-            'Bad Channels Threshold': ('bad_channels_threshold', 3),
-            'Bad Epochs Threshold': ('bad_epochs_threshold', 3),
+            'Bad Channels Threshold': ('bad_channels_threshold', 1),
+            'Bad Epochs Threshold': ('bad_epochs_threshold', 1),
             'SSP EEG Components': ('ssp_n_eeg', 2),
             'Substitute Zero Events With': ('substitute_zero_events_with', 10),
         })
@@ -494,6 +496,7 @@ class TMSEEG_GUI:
             'Epoch End Time (s)': ('epochs_tmax', 0.41),
             'Baseline Start (ms)': ('baseline_start', -400),
             'Baseline End (ms)': ('baseline_end', -50),
+            'Amplitude Threshold (µV)': ('amplitude_threshold', 300), 
         })
         tep_frame = ttk.Frame(notebook, padding="5")
         notebook.add(tep_frame, text="TEP Analysis")
@@ -634,19 +637,30 @@ class TMSEEG_GUI:
         thread.start()
         
     def run_analysis_thread(self, args):
-        """Modified thread function with enhanced error capture"""
+        """Modified thread function with enhanced error capture and stop handling"""
         try:
             self.redirect_output()
             import matplotlib
             matplotlib.use('Agg')
             
             from run import process_subjects
+            
+            # Reset stop flag before starting
+            import builtins
+            setattr(builtins, 'STOP_PROCESSING', False)
+            
             pcists = process_subjects(args)
-            self.root.after(0, self.analysis_complete, pcists)
+            
+            # Only show completion if we weren't stopped
+            if not getattr(builtins, 'STOP_PROCESSING', False):
+                self.root.after(0, self.analysis_complete, pcists)
         except Exception:
             import traceback
-            error_msg = traceback.format_exc()  # Get the full traceback as string
+            error_msg = traceback.format_exc()
             self.root.after(0, self.analysis_error, error_msg)
+        finally:
+            # Always cleanup
+            self.cleanup_after_stop()
             
     def analysis_complete(self, pcists):
         self.progress.stop()
@@ -708,11 +722,27 @@ class TMSEEG_GUI:
         print("\nFull Error Details:")
         print(error_detail)
         
+    def cleanup_after_stop(self):
+        """Clean up after stopping the analysis"""
+        import matplotlib.pyplot as plt
+        plt.close('all')  # Close all matplotlib figures
+        
+        # Reset the stop flag
+        import builtins
+        setattr(builtins, 'STOP_PROCESSING', False)
+        
+        # Clear any remaining progress indication
+        self.progress.stop()
+        self.running = False
+        print("\nAnalysis stopped and cleaned up")
+
     def stop_analysis(self):
         if self.running:
+            print("\nStopping analysis (this may take a moment)...")
             self.running = False
-            self.progress.stop()
-            messagebox.showinfo("Stopped", "Analysis stopped by user")
+            import builtins
+            setattr(builtins, 'STOP_PROCESSING', True)
+            self.root.after(1000, self.cleanup_after_stop)  # Cleanup after 1 second
 
 if __name__ == "__main__":
     root = tk.Tk()

@@ -5,7 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from preproc import TMSEEGPreprocessor
 from pcist import PCIst
-from validate_tep import validate_teps, plot_tms_components
+from preproc_vis import plot_with_type_check
+from validate_tep import plot_tep_analysis, generate_validation_summary
 import mne
 import time
 from neurone_loader import Recording
@@ -14,225 +15,95 @@ import argparse
 mne.viz.use_browser_backend("matplotlib")
 plt.rcParams['figure.figsize'] = [8, 6]
 
-def plot_eeg(output_dir, eeg, session_name):
-    """
-    Plot EEG data and save to file
-    
-    Args:
-        output_dir: Directory to save the plot
-        eeg: MNE Raw object to plot
-        duration: Duration to display in seconds
-        start: Start time in seconds
-        session_name: Name of the session for the filename
-    """
-    import numpy as np
-    from pathlib import Path
-    import datetime
-    
-    # Create a more specific filename
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_path = Path(output_dir) / f"raw_eeg_{session_name}_{timestamp}.png"
-
-    with mne.viz.use_browser_backend("matplotlib"):
-        fig = eeg.copy().set_eeg_reference('average').plot(scalings=None)
-        for ax in fig.get_axes():
-            if hasattr(ax, 'invert_yaxis'):
-                ax.invert_yaxis()
-        fig.savefig(save_path)
-        plt.close(fig)
-        
-def plot_epochs(output_dir, eeg, session_name):
-    """
-    Plot epoch data and save to file 
-    
-    Args:
-        output_dir: Directory to save the plot
-        eeg: MNE Epochs object to plot
-        session_name: Name of the session for the filename
-    """
-    import numpy as np
-    from pathlib import Path
-    import datetime
-    
-    # Create a more specific filename
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_path = Path(output_dir) / f"epochs_{session_name}_{timestamp}.png"
-
-    with mne.viz.use_browser_backend("matplotlib"):
-        fig = eeg.copy().set_eeg_reference('average').plot(scalings=None)
-        for ax in fig.get_axes():
-            if hasattr(ax, 'invert_yaxis'):
-                ax.invert_yaxis()
-        fig.savefig(save_path)
-        plt.close(fig)
-
-def plot_csd_epochs(output_dir, eeg, session_name):
-    """
-    Plot epoch data and save to file 
-    
-    Args:
-        output_dir: Directory to save the plot
-        eeg: MNE Epochs object to plot
-        session_name: Name of the session for the filename
-    """
-    import numpy as np
-    from pathlib import Path
-    import datetime
-    
-    # Create a more specific filename
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_path = Path(output_dir) / f"epochs_{session_name}_{timestamp}.png"
-
-    with mne.viz.use_browser_backend("matplotlib"):
-        fig = eeg.copy().plot(scalings=None)
-        for ax in fig.get_axes():
-            if hasattr(ax, 'invert_yaxis'):
-                ax.invert_yaxis()
-        fig.savefig(save_path)
-        plt.close(fig)
 
 def generate_preproc_stats(processor, session_name, output_dir):
     """
-    Generate detailed preprocessing quality control statistics.
+    Generate simplified preprocessing quality control report.
     
     Args:
-        processor: TMSEEGPreprocessor object containing preprocessing information
+        processor: TMSEEGPreprocessor object
         session_name: Name of the current session
         output_dir: Directory to save the output file
     """
-    import numpy as np
     from pathlib import Path
     import datetime
+    import numpy as np
     
-    output_file = Path(output_dir) / f"preproc_stats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    output_file = Path(output_dir) / f"preproc_stats_{session_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     
     with open(output_file, 'w') as f:
-        # Header
-        f.write("TMS-EEG Preprocessing Quality Control Report\n")
+        # Header with key session info
+        f.write(f"TMS-EEG Preprocessing Report: {session_name}\n")
         f.write("=" * 50 + "\n\n")
         
-        # 1. Recording Information
-        f.write("1. RECORDING INFORMATION\n")
-        f.write("-" * 40 + "\n")
-        f.write(f"Session: {session_name}\n")
-        f.write(f"Original sampling rate: {processor.raw.info['sfreq']} Hz\n")
-        f.write(f"Downsampled to: {processor.ds_sfreq} Hz\n")
+        # Recording parameters
+        f.write("Recording Parameters\n")
+        f.write("-" * 20 + "\n")
         f.write(f"Duration: {processor.raw.times[-1]:.1f} seconds\n")
-        f.write(f"Number of channels: {len(processor.raw.ch_names)}\n")
+        f.write(f"Sampling rate: {processor.raw.info['sfreq']} → {processor.ds_sfreq} Hz\n")
+        f.write(f"Channels: {len(processor.raw.ch_names)}\n\n")
         
-        # 2. TMS Events Analysis
-        f.write("\n2. TMS EVENTS ANALYSIS\n")
-        f.write("-" * 40 + "\n")
+        # TMS pulse information
         events = processor._get_events()
         n_events = len(events)
-        f.write(f"Total TMS pulses: {n_events}\n")
-        
+        f.write("TMS Pulses\n")
+        f.write("-" * 20 + "\n")
+        f.write(f"Total pulses: {n_events}\n")
         if n_events > 1:
             intervals = np.diff([event[0] for event in events]) / processor.raw.info['sfreq']
-            f.write(f"Inter-pulse intervals:\n")
-            f.write(f"  Mean: {np.mean(intervals):.3f} seconds\n")
-            f.write(f"  Std: {np.std(intervals):.3f} seconds\n")
-            f.write(f"  Range: {np.min(intervals):.3f} - {np.max(intervals):.3f} seconds\n")
-            f.write(f"  CV: {(np.std(intervals)/np.mean(intervals))*100:.1f}%\n")
+            f.write(f"Mean interval: {np.mean(intervals):.3f} s (±{np.std(intervals):.3f})\n\n")
         
-        # 3. Data Quality Metrics
-        f.write("\n3. DATA QUALITY METRICS\n")
-        f.write("-" * 40 + "\n")
+        # Data quality summary
+        f.write("Data Quality Metrics\n")
+        f.write("-" * 20 + "\n")
         
-        # Channel info
-        if hasattr(processor, 'bad_channels'):
-            f.write("\nChannel Quality:\n")
-            f.write(f"Original channels: {len(processor.raw.ch_names)}\n")
-            f.write(f"Bad channels detected: {len(processor.bad_channels)}\n")
-            if processor.bad_channels:
-                f.write(f"Bad channels: {', '.join(processor.bad_channels)}\n")
-            f.write(f"Channel retention rate: {(len(processor.raw.ch_names) - len(processor.bad_channels))/len(processor.raw.ch_names)*100:.1f}%\n")
+        # Channel quality
+        n_bad_channels = len(getattr(processor, 'bad_channels', []))
+        channel_retention = (len(processor.raw.ch_names) - n_bad_channels) / len(processor.raw.ch_names) * 100
+        f.write(f"Channel retention: {channel_retention:.1f}%")
+        if hasattr(processor, 'bad_channels') and processor.bad_channels:
+            f.write(f" (Removed: {', '.join(processor.bad_channels)})")
+        f.write("\n")
         
-        # Epoch info
+        # Epoch quality
         if hasattr(processor, 'epochs'):
-            f.write("\nEpoch Quality:\n")
-            f.write(f"Total epochs created: {len(processor.epochs)}\n")
-            if hasattr(processor, 'bad_epochs'):
-                f.write(f"Bad epochs detected: {len(processor.bad_epochs)}\n")
-                retention_rate = (len(processor.epochs) - len(processor.bad_epochs))/len(processor.epochs)*100
-                f.write(f"Epoch retention rate: {retention_rate:.1f}%\n")
+            n_bad_epochs = len(getattr(processor, 'bad_epochs', []))
+            epoch_retention = (len(processor.epochs) - n_bad_epochs) / len(processor.epochs) * 100
+            f.write(f"Epoch retention: {epoch_retention:.1f}%")
+            if n_bad_epochs > 0:
+                f.write(f" ({n_bad_epochs} epochs removed)")
+            f.write("\n")
         
-        # 4. Artifact Removal Performance
-        f.write("\n4. ARTIFACT REMOVAL PERFORMANCE\n")
-        f.write("-" * 40 + "\n")
+        # Artifact removal summary
+        f.write("\nArtifact Removal\n")
+        f.write("-" * 20 + "\n")
         
-        f.write("\nTMS Artifact Removal:\n")
-        if hasattr(processor, 'interpolation_method'):
-            f.write(f"Method: {processor.interpolation_method}\n")
-        else:
-            f.write("Method: Not available\n")
+        # ICA components
+        if hasattr(processor, 'muscle_components'):
+            f.write(f"Muscle components removed: {len(processor.muscle_components)}\n")
+        if hasattr(processor, 'excluded_components'):
+            f.write(f"Other artifacts removed: {len(processor.excluded_components)}\n")
         
-        if hasattr(processor, 'interp_window'):
-            f.write(f"Interpolation window: {processor.interp_window} ms\n")
-        else:
-            f.write("Interpolation window: Not available\n")
+        # Overall quality assessment
+        f.write("\nQuality Assessment\n")
+        f.write("-" * 20 + "\n")
         
-        # ICA info
-        if hasattr(processor, 'ica'):
-            f.write("\nFirst ICA:\n")
-            f.write(f"Method: {processor.ica.method}\n")
-            if hasattr(processor, 'muscle_components'):
-                f.write(f"Muscle components removed: {len(processor.muscle_components)}\n")
-                if processor.muscle_components:
-                    f.write(f"Component indices: {processor.muscle_components}\n")
+        # Calculate simplified quality score
+        quality_score = np.mean([
+            channel_retention / 100,
+            epoch_retention / 100 if hasattr(processor, 'epochs') else 1.0
+        ])
         
-        if hasattr(processor, 'ica2'):
-            f.write("\nSecond ICA:\n")
-            f.write(f"Method: {processor.ica2.method}\n")
-            if hasattr(processor, 'excluded_components'):
-                f.write(f"Components excluded: {len(processor.excluded_components)}\n")
-                if processor.excluded_components:
-                    f.write(f"Component indices: {processor.excluded_components}\n")
+        f.write(f"Overall quality score: {quality_score*100:.1f}%\n")
         
-        # 5. Quality Control Summary
-        f.write("\n5. QUALITY CONTROL SUMMARY\n")
-        f.write("-" * 40 + "\n")
-        
-        # Calculate quality metrics
-        quality_metrics = {}
-        
-        # Channel quality (weight: 0.3)
-        channel_quality = (len(processor.raw.ch_names) - len(getattr(processor, 'bad_channels', []))) / len(processor.raw.ch_names)
-        quality_metrics['Channel Quality'] = channel_quality
-        
-        # Epoch quality (weight: 0.3)
-        if hasattr(processor, 'epochs') and hasattr(processor, 'bad_epochs'):
-            epoch_quality = (len(processor.epochs) - len(processor.bad_epochs)) / len(processor.epochs)
-        else:
-            epoch_quality = 1.0
-        quality_metrics['Epoch Quality'] = epoch_quality
-        
-        # Artifact removal quality (weight: 0.4)
-        if hasattr(processor, 'muscle_components') and hasattr(processor, 'excluded_components'):
-            artifact_quality = 1 - (len(processor.muscle_components) + len(processor.excluded_components)) / (processor.ica.n_components_ * 2)
-        else:
-            artifact_quality = 1.0
-        quality_metrics['Artifact Removal Quality'] = artifact_quality
-        
-        # Calculate weighted overall quality
-        weights = {'Channel Quality': 0.3, 'Epoch Quality': 0.3, 'Artifact Removal Quality': 0.4}
-        overall_quality = sum(quality_metrics[k] * weights[k] for k in quality_metrics)
-        
-        # Write quality metrics
-        for metric, value in quality_metrics.items():
-            f.write(f"{metric}: {value*100:.1f}%\n")
-        f.write(f"\nOverall Quality Score: {overall_quality*100:.1f}%\n")
-        
-        # Add warnings if needed
-        if overall_quality < 0.7:
-            f.write("\nWARNINGS:\n")
-            if channel_quality < 0.8:
-                f.write("- High number of bad channels detected\n")
-            if epoch_quality < 0.8:
-                f.write("- High number of epochs rejected\n")
-            if artifact_quality < 0.7:
-                f.write("- Large number of artifact components removed\n")
-            
+        # Add focused warnings if needed
+        if quality_score < 0.7:
+            f.write("\nWarnings:\n")
+            if channel_retention < 80:
+                f.write("• High number of channels removed\n")
+            if hasattr(processor, 'epochs') and epoch_retention < 80:
+                f.write("• High number of epochs removed\n")
+    
     return output_file
 
 def generate_research_stats(pcist_values, pcist_objects, details_list, session_names, output_dir):
@@ -377,6 +248,13 @@ def generate_research_stats(pcist_values, pcist_objects, details_list, session_n
 
 
 def process_subjects(args):
+    import builtins
+    setattr(builtins, 'STOP_PROCESSING', False)
+    def check_stop():
+        if getattr(builtins, 'STOP_PROCESSING', False):
+            print("\nProcessing stopped by user")
+            return True
+        return False
     data_dir = Path(args.data_dir)
     # Specific paths for the subject
     TMS_DATA_PATH = data_dir / 'TMSEEG'
@@ -407,16 +285,23 @@ def process_subjects(args):
 
     # Loop through sessions 
     for n, r in enumerate(range(len(rec.sessions))):
+        if check_stop():
+            return []
         print(f"\nProcessing Session {n}: {rec.sessions[r].path}")
+
         # Load and prepare raw data
         session = rec.sessions[r]
+        if check_stop(): return []
         session_path = rec.sessions[r].path
         session_name = os.path.basename(session_path) 
         raw = rec.sessions[r].to_mne(substitute_zero_events_with=args.substitute_zero_events_with)
+        if check_stop(): return []
+
         # Process session...
         events = mne.find_events(raw, stim_channel='STI 014')
         annotations = mne.annotations_from_events(events=events, sfreq=raw.info['sfreq'],event_desc={args.substitute_zero_events_with: 'Stimulation'})
         raw.set_annotations(annotations)
+
         # Drop unnecessary channels
         channels_to_drop = []
         if 'EMG1' in raw.ch_names:
@@ -425,10 +310,12 @@ def process_subjects(args):
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
         if args.plot_preproc:
-            plot_eeg(eeg=raw, output_dir=args.output_dir, session_name=session_name)
+            plot_with_type_check(raw, args.output_dir, f"{session_name}_1_raw", plot_type='raw')
+
         # Preprocessing
         processor = TMSEEGPreprocessor(raw, ds_sfreq=args.ds_sfreq)
         print("\nRemoving TMS artifact and muscle peaks...")
+        if check_stop(): return []
         processor.remove_tms_artifact(cut_times_tms=(-2, 10))  # Step 8
 
         print("\nInterpolating TMS artifact...")
@@ -439,32 +326,49 @@ def process_subjects(args):
         events = processor._get_events()
         event_id = processor._get_event_ids()
         if args.plot_preproc:
-            plot_eeg(eeg=raw, output_dir=args.output_dir, session_name=session_name)
+            plot_with_type_check(raw, args.output_dir, f"{session_name}_2_post_interpol", plot_type='raw')
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
-        processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width, plot_psd=False) 
+        print("\nFiltering raw eeg data...")
+        if check_stop(): return []
+        processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width, plot_psd=False)
+
+        if args.plot_preproc:
+            plot_with_type_check(raw, args.output_dir, f"{session_name}_3_filtered", plot_type='raw') 
+
         print("\nCreating epochs...")
-        processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None)
+        processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None, amplitude_threshold=args.amplitude_threshold)
+
         print("\nRemoving bad channels...")
         processor.remove_bad_channels(threshold=args.bad_channels_threshold)
+
         print("\nRemoving bad epochs...")
         processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
+        if args.plot_preproc:
+            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_4_epochs", plot_type='epochs')
+
+        print("\nSetting average reference...")
         processor.set_average_reference()
+
         print("\nRunning first ICA...")
+        if check_stop(): return []
         if args.plot_preproc:
             plot_components=True
         else:
             plot_components=False
         processor.run_ica(method=args.ica_method, tms_muscle_thresh=args.tms_muscle_thresh, plot_components=plot_components)
         if args.plot_preproc:
-            plot_epochs(eeg=processor.epochs, output_dir=args.output_dir, session_name=session_name)
+            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_5_post_ICA1", plot_type='epochs')
         if args.clean_muscle_artifacts:
             print("\nCleaning muscle artifacts...")
+            if check_stop(): return []
             processor.clean_muscle_artifacts(
                 muscle_window=(args.muscle_window_start, args.muscle_window_end),
                 threshold_factor=args.threshold_factor,
                 n_components=args.n_components,
                 verbose=True
             )
+        if args.plot_preproc:
+            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_6_post_clean", plot_type='epochs')
         if not args.skip_second_artifact_removal:
             print("\nExtending TMS artifact removal window...")
             processor.remove_tms_artifact(cut_times_tms=(-2, 15))  
@@ -475,44 +379,47 @@ def process_subjects(args):
                                             cut_times_tms=(-2, 15))
         if not args.no_second_ICA:
             print("\nRunning second ICA...")
+            if check_stop(): return []
             processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact"])
 
         print("\nApplying SSP...")
         processor.apply_ssp(n_eeg=args.ssp_n_eeg)
+
         print("\nApplying baseline correction...")
         processor.apply_baseline_correction(baseline=(baseline_start_sec, baseline_end_sec))
         if args.plot_preproc:
-            plot_epochs(eeg=processor.epochs, output_dir=args.output_dir, session_name=session_name)
+            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_7_ICA2", plot_type='epochs')
         if args.apply_csd:
             print("\nApplying CSD transformation...")
             processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
+    
         print(f"\nDownsampling to {processor.ds_sfreq} Hz")
         processor.downsample()
         if args.plot_preproc:
-            plot_csd_epochs(eeg=processor.epochs, output_dir=args.output_dir, session_name=session_name)
+            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_8_final_epochs", plot_type='epochs')
 
         epochs = processor.epochs
 
         if args.validate_teps:
-            print("\nValidating TEPs...")
-            baseline_window = (args.baseline_start, args.baseline_end)
-            response_window = (args.response_start, args.response_end)
-
-            plot_tms_components(
-                evoked=epochs.average(),
-                output_dir=args.output_dir,
-                session_name=session_name,
-                prominence=args.prominence,
-                save=True  
-            )
-            quality_results, component_results = validate_teps(
-                evoked=epochs.average(),
-                output_dir=args.output_dir,
-                session_name=session_name,
-                baseline_window=baseline_window,
-                response_window=response_window,
-                save_outputs=getattr(args, 'save_validation', True)  
-            )
+            try:
+                print("\nAnalyzing TEPs...")
+                if check_stop(): return []
+                components = plot_tep_analysis(
+                    evoked=epochs.average(),
+                    output_dir=args.output_dir,
+                    session_name=session_name,
+                    prominence=args.prominence
+                )
+                
+                if args.save_validation:
+                    generate_validation_summary(
+                        components,
+                        args.output_dir,
+                        session_name
+                    )
+            except Exception as e:
+                print(f"Warning: TEP analysis failed: {str(e)}")
+                components = None
         
         # Final quality check
         fig = processor.plot_evoked_response(ylim={'eeg': [-5, 5]}, xlim=(-0.3, 0.3), title="Final Evoked Response", show=args.show_evoked)
@@ -642,6 +549,8 @@ if __name__ == "__main__":
                     help='Display the evoked plot with TEPs (default: False)')
     parser.add_argument('--validate_teps', action='store_true',
                 help='Perform TEP validation against established criteria')
+    parser.add_argument('--save_validation', action='store_true',
+                help='Save TEP validation summary (default: False)')
     parser.add_argument('--prominence', type=float, default=0.01,
                     help='Minimum prominence for peak detection (default: 0.01)')
     parser.add_argument('--baseline_start', type=int, default=-400,
@@ -652,6 +561,8 @@ if __name__ == "__main__":
                         help='Start of response window in ms (default: 0)')
     parser.add_argument('--response_end', type=int, default=299,
                         help='End of response window in ms (default: 299)')
+    parser.add_argument('--amplitude_threshold', type=float, default=300.0,
+                    help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
     parser.add_argument('--k', type=float, default=1.2,
                         help='PCIst parameter k (default: 1.2)')
     parser.add_argument('--min_snr', type=float, default=1.1,

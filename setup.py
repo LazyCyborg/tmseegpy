@@ -1,36 +1,31 @@
+# setup.py
 from setuptools import setup, find_packages
 
 setup(
-    name='tmseeg_preprocessing',
-    version='0.1.0',
-    description='A Python package for preprocessing TMS-EEG data using MNE',
-    author='Alexander Engelmark',
-    author_email='hjarneko@gmail.com',
-    url='https://github.com/LazyCyborgtmseeg_preprocessing',
+    name="tmseegpy",
+    version="0.1.0",
     packages=find_packages(),
     install_requires=[
-        'numpy',
-        'matplotlib',
-        'mne',
-        'mne_icalabel',
-        'mne_faster',
-        'scipy',
-        'seaborn',
-        'tqdm',
-        'pandas',
-        'scikit-learn',
-        'joblib',
-        'statsmodels',
-        'pyyaml',
-        'pytest',
-        'sklearn'
+        "numpy",
+        "matplotlib",
+        "mne",
+        "scipy",
     ],
+    entry_points={
+        'console_scripts': [
+            'tmseegpy=tmseegpy.main:main',
+        ],
+    },
+    author="LazyCyborg",
+    author_email="your.email@example.com",
+    description="A TMS-EEG analysis package with GUI interface",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/LazyCyborg/tmseegpy",
     classifiers=[
-        'Development Status :: 3 - Alpha',
-        'Intended Audience :: Science/Research',
-        'License :: OSI Approved :: MIT License',
-        'Programming Language :: Python :: 3',
-        'Topic :: Scientific/Engineering :: Medical Science Apps.',
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
     ],
-    python_requires='>=3.7',
+    python_requires=">=3.8",
 )
