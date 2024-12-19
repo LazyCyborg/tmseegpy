@@ -104,9 +104,7 @@ For an graphical user interface run:
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
 ### Command-Line Arguments
-Configuration Parameters
 The following parameters can be configured either through command-line arguments or the GUI interface:
-Preprocessing Parameters
 
 | Argument                    | Type  | Default  | Description                                                                                |
 |-----------------------------|-------|----------|--------------------------------------------------------------------------------------------|
