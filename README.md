@@ -4,30 +4,32 @@ This repository contains my attempt at building some sort of pipeline for prepro
 
 Currently the code is only tested on TMS-EEG data recorded in .ses format from the Bittium NeurOne 5kHz sampling rate amplifier. Feel free to modify the preproc module to fit other types of recorded TMS-EEG data. If you create a dataloader that is compatible with multiple systems feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. 
 
-## Table of Contents
+# Table of Contents
 
 - [Installation](#installation)
+  - [Use the scripts](#installation-use-the-scripts)
+  - [Install as a package](#install-as-a-package)
 - [Usage](#usage)
   - [GUI](#gui)
   - [Command-Line Arguments](#command-line-arguments)
   - [Example Usage](#example-usage)
 - [Data Preparation](#data-preparation)
 - [Processing Pipeline](#processing-pipeline)
-  1. [Data Loading](#1-data-loading)
-  2. [TMS Artifact Removal](#2-tms-artifact-removal)
-  3. [Filtering](#3-filtering)
-  4. [Epoching](#4-epoching)
-  5. [Bad Channel and Epoch Detection](#5-bad-channel-and-epoch-detection)
-  6. [ICA and Artifact Removal](#6-ica-and-artifact-removal)
-  7. [Baseline Correction and Referencing](#7-baseline-correction-and-referencing)
-  8. [Signal Space Projection (SSP) (optional)](#8-current-source-density-csd-transformation)
-  9. [Current Source Density (CSD) Transformation (optional)](#9-current-source-density-csd-transformation)
-  10. [Downsampling](#10-downsampling)
-  11. [Final Quality Check](#11-final-quality-check)
-  12. [PCIst Analysis](#12-pcist-analysis)
+- [Example pipeline](#example-pipeline-that-i-used)
+  - [Initial Data Loading and Setup](#initial-data-loading-and-setup)
+  - [Stage 1: Initial TMS Artifact Handling](#stage-1-initial-tms-artifact-handling)
+  - [Stage 2: Filtering and Epoching](#stage-2-filtering-and-epoching)
+  - [Stage 3: First Artifact Cleaning](#stage-3-first-artifact-cleaning)
+  - [Stage 4: Extended TMS Artifact Handling](#stage-4-extended-tms-artifact-handling)
+  - [Stage 5: Final Cleaning](#stage-5-final-cleaning)
+  - [Quality Control and Analysis](#quality-control-and-analysis)
+  - [PCIst Calculation](#pcist-calculation)
 - [Modules and Classes](#modules-and-classes)
-  - [TMSEEGPreprocessor](#tmseepreprocessor)
-  - [TMSArtifactCleaner](#tmsartifactcleaner)
+  - [TMSEEGPreprocessor](#tmseegpreprocessor-main-class-for-preprocessing)
+  - [TMSArtifactCleaner Class](#tmsartifactcleaner-class-which-might-work)
+    - [What it does](#what-it-does)
+    - [Parameters](#parameters)
+    - [Methods](#methods)
   - [PCIst](#pcist)
 - [Contributing](#contributing)
 - [License](#license)
@@ -200,11 +202,15 @@ data/
 - The `--data_dir` argument should point to the directory containing your TMS data (e.g., `data/`).
 - Each session should be in its own subdirectory under `TMS1/`.
 
-## Processing Pipeline
+# Processing Pipeline
 
 The pipeline processes TMS-EEG data through these stages which are roughly modelled from the reccomendations in:
 
-Brancaccio, A., Tabarelli, D., Zazio, A., Bertazzoli, G., Metsomaa, J., Ziemann, U., Bortoletto, M., & Belardinelli, P. (2024). Towards the definition of a standard in TMS-EEG data preprocessing. NeuroImage, 301. https://doi.org/10.1016/j.neuroimage.2024.120874
+Comolatti, R., Pigorini, A., Casarotto, S., Fecchio, M., Faria, G., Sarasso, S., Rosanova, M., Gosseries, O., Boly, M., Bodart, O., Ledoux, D., Brichant, J. F., Nobili, L., Laureys, S., Tononi, G., Massimini, M., & Casali, A. G. (2019). A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations. Brain Stimulation, 12(5), 1280–1289. https://doi.org/10.1016/j.brs.2019.05.013
+
+and from 
+
+https://nigelrogasch.gitbook.io/tesa-user-manual/example_pipelines
 
 And the custom functions (TMS-artifact removal and classification of ICA components) are modelled after the TESA toolbox:
 
@@ -213,26 +219,26 @@ Rogasch NC, Sullivan C, Thomson RH, Rose NS, Bailey NW, Fitzgerald PB, Farzan F,
 Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact-rejection techniques available in TESA, an open-source TMS-EEG toolbox. Brain Stimulation. 2020; In press.
 
 
-# TMS-EEG Data Preprocessing Pipeline
+## Example pipeline (that I used)
 
-This document outlines the standard preprocessing pipeline for TMS-EEG data analysis.
+This is the pipeline that I used after a lot of trial and error. The only way that I "validate" the pipeline is by checking if the final EEG-data looks reasonable, if the evoked plots contain some sort of TEPs and if the PCI-values are stabel across recordings. The pipeline is only tested on 10 recordings from the same healthy subject who either was awake or slightly somnolent.
 
 ## Initial Data Loading and Setup
 1. Load raw data from Neurone format
-2. Set random seed (default: 42)
+2. Set random seed (42)
 3. Create events from trigger channel ('STI 014')
 4. Remove non-EEG channels (e.g., EMG1)
 
 ## Stage 1: Initial TMS Artifact Handling
 5. First-pass TMS artifact removal
-   - Cut window: -2 to 10 ms around TMS pulse
+   - Cut window: -2 to 10 ms around TMS pulse and replace with zeros
 6. Initial interpolation of TMS artifact
    - Method: cubic
    - Interpolation window: 1.0 ms
    - Cut times: -2 to 10 ms
 
 ## Stage 2: Filtering and Epoching
-7. Apply frequency filters
+7. Apply frequency filters (I chose a 1 Hz lowpass since the final EEG data had some drift artifacts when using 0.1 Hz)
    - Low-pass: 1 Hz
    - High-pass: 45 Hz
    - Notch filter: 50 Hz (width: 2 Hz)
@@ -252,42 +258,43 @@ This document outlines the standard preprocessing pipeline for TMS-EEG data anal
 12. First ICA run
     - Method: FastICA
     - TMS muscle threshold: 2.0
-13. Optional muscle artifact cleaning (PARAFAC)
+
+- Optional muscle artifact cleaning (PARAFAC) (I did not use this)
     - Time window: 5-30 ms
     - Threshold factor: 1.0
     - Components: 5
 
 ## Stage 4: Extended TMS Artifact Handling
-14. Second-pass TMS artifact removal
+13. Second-pass TMS artifact removal
     - Extended cut window: -2 to 15 ms
-15. Extended interpolation
+14. Extended interpolation
     - Method: cubic
     - Interpolation window: 5.0 ms
     - Cut times: -2 to 15 ms
 
 ## Stage 5: Final Cleaning
-16. Second ICA run
+15. Second ICA run
     - Method: Infomax
     - Auto-reject components with mne_ica_label, labeled as: eye blink, heart beat, muscle artifact, channel noise, line noise
-17. Apply SSP (Optional and not used when I preprocess) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html)
+- Apply SSP (Optional and I did not use this) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html)
     - Number of EEG components: 2
-18. Apply baseline correction
+16. Apply baseline correction
     - Window: -400 to -50 ms
-19. Optional CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html)
+17. Optional CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html)
     - Lambda2: 1e-3
     - Stiffness: 3
-20. Final downsampling
+18. Final downsampling
     - Target frequency: 725 Hz
 
 ## Quality Control and Analysis
-21. TEP validation (optional)
+19. TEP validation (optional)
     - Peak prominence threshold: 0.01
-22. Generate evoked response plot
+20. Generate evoked response plot
     - Time window: -0.3 to 0.3 s
     - Y-limits: -2 to 2 µV
 
 ## PCIst Calculation
-23. Calculate PCIst
+21. Calculate PCIst
     - Response window: 0 to 299 ms
     - k parameter: 1.2
     - Minimum SNR: 1.1

@@ -294,7 +294,7 @@ class TMSEEGPreprocessor:
                         replace_times: Optional[Tuple[float, float]] = None,
                         verbose: bool = True) -> None:
         """
-        Remove TMS artifacts exactly following TESA implementation.
+        Remove TMS artifacts following TESA implementation.
         
         Parameters
         ----------
@@ -368,7 +368,7 @@ class TMSEEGPreprocessor:
                             cut_times_tms: Tuple[float, float] = (-2, 10),  # Add this back
                             verbose: bool = True) -> None:
         """
-        Interpolate TMS artifacts exactly following TESA implementation.
+        Interpolate TMS artifacts following TESA implementation.
         Uses polynomial interpolation rather than spline interpolation.
         
         Parameters
