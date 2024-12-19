@@ -2,7 +2,7 @@ numpy>=1.16.0
 scipy>=1.2.0
 mne>=1.1
 mne-bids
-picard
+picard @ https://files.pythonhosted.org/packages/f4/f2/4635cdda0cdc737d422ae5f97bbe68f6fa5878ed0bbcc7d6dce600e7fc61/picard-2.10.3-py3-none-any.whl
 pooch
 torch
 scikit-learn
