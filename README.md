@@ -257,7 +257,7 @@ Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact
 ### 9. Current Source Density (CSD) Transformation (optional)
 
 - Function: `apply_csd`
-- Description: Enhances spatial resolution by applying the CSD transformation.
+- Description: Enhances spatial resolution by applying the CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html).
 
 ### 10. Downsampling
 
