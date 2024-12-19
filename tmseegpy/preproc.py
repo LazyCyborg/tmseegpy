@@ -77,9 +77,9 @@ class TMSEEGPreprocessor:
     """
     
     def __init__(self, 
-                 raw: mne.io.Raw,
-                 montage: Union[str, mne.channels.montage.DigMontage] = 'standard_1020',
-                 ds_sfreq: float = 1000):
+                raw: mne.io.Raw,
+                montage: Union[str, mne.channels.montage.DigMontage] = 'standard_1020',
+                ds_sfreq: float = 1000):
         
         self.raw = raw.copy()
         self.epochs = None
@@ -87,26 +87,92 @@ class TMSEEGPreprocessor:
         self.ds_sfreq = ds_sfreq
 
         self.processing_stage = {
-        'initial_removal': False,
-        'first_interpolation': False,
-        'artifact_cleaning': False,
-        'extended_removal': False,
-        'final_interpolation': False
-    }
+            'initial_removal': False,
+            'first_interpolation': False,
+            'artifact_cleaning': False,
+            'extended_removal': False,
+            'final_interpolation': False
+        }
         
-        # Set montage
-        if isinstance(montage, str):
-            self.montage = mne.channels.make_standard_montage(montage)
-        else:
-            self.montage = montage 
-            
         # Remove unused EMG channels if present
         for ch in self.raw.info['ch_names']:
             if ch.startswith('EMG'):
                 self.raw.drop_channels(ch)
-                
-        # Set montage
-        self.raw.set_montage(self.montage)
+            elif ch.startswith('31'):
+                self.raw.drop_channels(ch)
+            elif ch.startswith('32'):
+                self.raw.drop_channels(ch)
+        
+        # Channel name standardization
+        ch_names = self.raw.ch_names
+        rename_dict = {}
+        for ch in ch_names:
+            # Common naming variations
+            if ch in ['31', '32']:
+                continue  # Skip non-EEG channels
+            if ch.upper() == 'FP1':
+                rename_dict[ch] = 'Fp1'
+            elif ch.upper() == 'FP2':
+                rename_dict[ch] = 'Fp2'
+            elif ch.upper() in ['FPZ', 'FPOZ']:
+                rename_dict[ch] = 'Fpz'
+            elif ch.upper() == 'POZ':
+                rename_dict[ch] = 'POz'
+            elif ch.upper() == 'PZ':
+                rename_dict[ch] = 'Pz'
+            elif ch.upper() == 'FCZ':
+                rename_dict[ch] = 'FCz'
+            elif ch.upper() == 'CPZ':
+                rename_dict[ch] = 'CPz'
+            elif ch.upper() == 'FZ':
+                rename_dict[ch] = 'Fz'
+            elif ch.upper() == 'CZ':
+                rename_dict[ch] = 'Cz'
+            elif ch.upper() == 'OZ':
+                rename_dict[ch] = 'Oz'
+        
+        if rename_dict:
+            print("Renaming channels to match standard nomenclature:")
+            for old, new in rename_dict.items():
+                print(f"  {old} -> {new}")
+            self.raw.rename_channels(rename_dict)
+        
+        # Set montage with error handling
+        if isinstance(montage, str):
+            try:
+                self.montage = mne.channels.make_standard_montage(montage)
+            except ValueError as e:
+                print(f"Warning: Could not create montage '{montage}': {str(e)}")
+                print("Falling back to standard_1020 montage")
+                self.montage = mne.channels.make_standard_montage('standard_1020')
+        else:
+            self.montage = montage
+        
+        try:
+            # First try to set montage normally
+            self.raw.set_montage(self.montage)
+        except ValueError as e:
+            print(f"\nWarning: Could not set montage directly: {str(e)}")
+            
+            # Get the channel types
+            ch_types = {ch: self.raw.get_channel_types(picks=ch)[0] for ch in self.raw.ch_names}
+            
+            # Identify non-EEG channels
+            non_eeg = [ch for ch, type_ in ch_types.items() if type_ not in ['eeg', 'unknown']]
+            if non_eeg:
+                print(f"\nFound non-EEG channels: {non_eeg}")
+                print("Setting their types explicitly...")
+                for ch in non_eeg:
+                    self.raw.set_channel_types({ch: 'misc'})
+            
+            # Try setting montage again with on_missing='warn'
+            try:
+                self.raw.set_montage(self.montage, on_missing='warn')
+                print("\nMontage set successfully with warnings for missing channels")
+            except Exception as e2:
+                print(f"\nWarning: Could not set montage even with warnings: {str(e2)}")
+                print("Continuing without montage. Some functionality may be limited.")
+        
         self.events = None
         self.event_id = None
 
@@ -119,14 +185,14 @@ class TMSEEGPreprocessor:
         self.noise_cov = None
 
         self.preproc_stats = {
-        'n_orig_events': 0,
-        'n_final_events': 0,
-        'bad_channels': [],
-        'n_bad_epochs': 0,
-        'muscle_components': [],
-        'excluded_ica_components': [],
-        'original_sfreq': 0,
-        'interpolated_times': [],
+            'n_orig_events': 0,
+            'n_final_events': 0,
+            'bad_channels': [],
+            'n_bad_epochs': 0,
+            'muscle_components': [],
+            'excluded_ica_components': [],
+            'original_sfreq': 0,
+            'interpolated_times': [],
         }
         
         
@@ -246,27 +312,50 @@ class TMSEEGPreprocessor:
             print("\nMuscle artifact cleaning complete")
 
     def remove_bad_channels(self, threshold: int = 2) -> None:
-            """
-            Remove and interpolate bad channels using FASTER algorithm.
+        """
+        Remove and interpolate bad channels using FASTER algorithm.
+        
+        Parameters
+        ----------
+        threshold : float
+            Threshold for bad channel detection (default = 2)
+        """
+        if self.epochs is None:
+            raise ValueError("Must create epochs before removing bad channels")
             
-            Parameters
-            ----------
-            threshold : float
-                Threshold for bad channel detection (default = 2)
-            """
-            if self.epochs is None:
-                raise ValueError("Must create epochs before removing bad channels")
-                
-            bad_channels = find_bad_channels(self.epochs, thres=threshold)
+        bad_channels = find_bad_channels(self.epochs, thres=threshold)
+        
+        if bad_channels:
+            print(f"Detected bad channels: {bad_channels}")
+            self.epochs.info['bads'] = list(set(self.epochs.info['bads']).union(set(bad_channels)))
             
-            if bad_channels:
-                print(f"Detected bad channels: {bad_channels}")
-                self.epochs.info['bads'] = list(set(self.epochs.info['bads']).union(set(bad_channels)))
+            try:
+                # First try normal interpolation
                 self.epochs.interpolate_bads(reset_bads=True)
                 print("Interpolated bad channels")
-                self.preproc_stats['bad_channels'] = bad_channels
-            else:
-                print("No bad channels detected")
+                
+            except ValueError as e:
+                print(f"Warning: Standard interpolation failed: {str(e)}")
+                print("Attempting alternative interpolation method...")
+                
+                try:
+                    # Try setting montage again with default positions
+                    temp_montage = mne.channels.make_standard_montage('standard_1020')
+                    self.epochs.set_montage(temp_montage, match_case=False, on_missing='warn')
+                    
+                    # Try interpolation again
+                    self.epochs.interpolate_bads(reset_bads=True)
+                    print("Successfully interpolated bad channels using default montage")
+                    
+                except Exception as e2:
+                    print(f"Warning: Alternative interpolation also failed: {str(e2)}")
+                    print("Dropping bad channels instead of interpolating")
+                    self.epochs.drop_channels(bad_channels)
+                    print(f"Dropped channels: {bad_channels}")
+            
+            self.preproc_stats['bad_channels'] = bad_channels
+        else:
+            print("No bad channels detected")
 
     def remove_bad_epochs(self, threshold: int = 3) -> None:
         """
@@ -525,7 +614,7 @@ class TMSEEGPreprocessor:
         if verbose:
             print("Staged artifact removal complete")
 
-    def run_ica(self, method: str = "fastica", tms_muscle_thresh: float = 1.0, plot_components: bool = True) -> None:
+    def run_ica(self, output_dir: str, session_name: str, method: str = "fastica", tms_muscle_thresh: float = 1.0, plot_components: bool = True,) -> None:
         """
         Run first ICA decomposition focusing on TMS-evoked muscle artifacts.
         
@@ -557,7 +646,7 @@ class TMSEEGPreprocessor:
         self.preproc_stats['muscle_components'] = muscle_comps
         if plot_components:
             # Plot results
-            self.plot_muscle_components(muscle_comps, scores)
+            self.plot_muscle_components(output_dir, session_name, muscle_comps, scores)
         # Apply ICA
         if len(muscle_comps) > 0:
             print(f"Excluding {len(muscle_comps)} muscle components: {muscle_comps}")
@@ -826,7 +915,7 @@ class TMSEEGPreprocessor:
         
         return muscle_components, component_scores
 
-    def plot_muscle_components(self, muscle_components: List[int], 
+    def plot_muscle_components(self, output_dir: str, session_name: str, muscle_components: List[int], 
                             component_scores: Dict,
                             plot_window: Tuple[float, float] = (-100, 250)) -> None:
         """
@@ -859,10 +948,12 @@ class TMSEEGPreprocessor:
             plt.show()
             return
         with mne.viz.use_browser_backend("matplotlib"):
-            self.ica.plot_sources(self.epochs)
+            fig = self.ica.plot_sources(self.epochs, show=False)
         # Plot detected muscle components
-        self.ica.plot_components(picks=muscle_components)
-        
+
+        fig.savefig(os.path.join(output_dir, session_name, f"Muscle components.png"), 
+            dpi=300, bbox_inches='tight')
+        plt.close(fig)
         
         '''
         # Plot component properties 

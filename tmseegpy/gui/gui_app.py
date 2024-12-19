@@ -293,7 +293,9 @@ class TMSEEG_GUI:
         args_dict = {
             'data_dir': self.data_dir.get(),
             'output_dir': self.output_dir.get(),
+            'stim_channel': 'STI 014', 
             'plot_preproc': self.plot_preproc.get(),
+            'stim_channel': self.stim_channel.get(), 
             'clean_muscle_artifacts': self.clean_muscle.get(),
             'show_evoked': self.show_evoked.get(),
             'research': self.research_stats.get(),
@@ -401,7 +403,6 @@ class TMSEEG_GUI:
         save_button.grid(row=2, column=1, sticky=tk.W)
         ToolTip(save_button, "Save validation reports and plots to output directory")
 
-        # Add this after your existing basic options
         format_frame = ttk.LabelFrame(options_frame, text="Data Format", padding="5")
         format_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
@@ -420,6 +421,12 @@ class TMSEEG_GUI:
         units_combo.grid(row=1, column=1, padx=5, pady=2)
         units_combo.state(['readonly'])
         ToolTip(units_combo, "Units for EEGLAB channel positions")
+
+        ttk.Label(options_frame, text="Stim Channel:").grid(row=5, column=0, sticky=tk.W, padx=5)
+        self.stim_channel = tk.StringVar(value='STI 014')
+        stim_entry = ttk.Entry(options_frame, textvariable=self.stim_channel, width=15)
+        stim_entry.grid(row=5, column=1, padx=5, pady=2)
+        ToolTip(stim_entry, "Name of the stimulus channel in your data")
             
         
     def create_advanced_options(self, parent):
@@ -613,6 +620,7 @@ class TMSEEG_GUI:
             'apply_ssp': self.apply_ssp.get(), 
             'apply_csd': self.apply_csd.get(),
             'skip_second_artifact_removal': self.skip_second_artifact_removal.get(),
+            'stim_channel': 'STI 014',
             
             # Additional arguments with default values
             'substitute_zero_events_with': 10,

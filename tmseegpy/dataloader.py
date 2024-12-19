@@ -104,7 +104,7 @@ class TMSEEGLoader:
     def _load_neurone(self) -> List[mne.io.Raw]:
         """
         Load NeurOne .ses files.
-        
+
         Returns
         -------
         List[mne.io.Raw]
@@ -117,11 +117,18 @@ class TMSEEGLoader:
             for session in rec.sessions
         ]
         
-        # Store session info
-        self.session_info = [
-            {'name': str(session.path.name), 'format': 'neurone', 'path': str(session.path)}
-            for session in rec.sessions
-        ]
+        # Modified session info creation
+        self.session_info = []
+        for session in rec.sessions:
+            # Get session path as Path object and extract name
+            session_path = Path(session.path)
+            session_name = session_path.name if isinstance(session_path, Path) else Path(session.path).name
+            
+            self.session_info.append({
+                'name': session_name,
+                'format': 'neurone',
+                'path': str(session.path)
+            })
         
         return self.raw_list
 

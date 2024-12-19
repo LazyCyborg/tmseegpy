@@ -43,7 +43,7 @@ def generate_preproc_stats(processor, session_name, output_dir):
         f.write(f"Sampling rate: {processor.raw.info['sfreq']} → {processor.ds_sfreq} Hz\n")
         f.write(f"Channels: {len(processor.raw.ch_names)}\n\n")
         
-        # TMS pulse information
+        '''# TMS pulse information
         events = processor._get_events()
         n_events = len(events)
         f.write("TMS Pulses\n")
@@ -51,7 +51,7 @@ def generate_preproc_stats(processor, session_name, output_dir):
         f.write(f"Total pulses: {n_events}\n")
         if n_events > 1:
             intervals = np.diff([event[0] for event in events]) / processor.raw.info['sfreq']
-            f.write(f"Mean interval: {np.mean(intervals):.3f} s (±{np.std(intervals):.3f})\n\n")
+            f.write(f"Mean interval: {np.mean(intervals):.3f} s (±{np.std(intervals):.3f})\n\n")'''
         
         # Data quality summary
         f.write("Data Quality Metrics\n")
@@ -307,25 +307,63 @@ def process_subjects(args):
             # First try user-specified channel
             events = mne.find_events(raw, stim_channel=args.stim_channel)
         except ValueError:
-            # If not found, try to detect stimulus channel automatically
-            stim_channels = mne.pick_types(raw.info, stim=True, exclude=[])
-            if len(stim_channels) > 0:
-                # Use the first detected stim channel
-                stim_ch_name = raw.ch_names[stim_channels[0]]
-                print(f"Using detected stim channel: {stim_ch_name}")
-                events = mne.find_events(raw, stim_channel=stim_ch_name)
-            else:
-                # If no stim channels found, try common names
-                common_stim_names = ['STI 014', 'STIM', 'STI101', 'trigger', 'STI 001']
-                found = False
-                for ch_name in common_stim_names:
-                    if ch_name in raw.ch_names:
-                        print(f"Using stim channel: {ch_name}")
-                        events = mne.find_events(raw, stim_channel=ch_name)
-                        found = True
-                        break
-                if not found:
-                    raise ValueError(f"Could not find stimulus channel. Available channels: {raw.ch_names}")
+            try:
+                # If no stim channel found, try to get events from annotations
+                print("No stim channel found, looking for events in annotations...")
+                
+                # Get unique annotation descriptions
+                unique_descriptions = set(raw.annotations.description)
+                print(f"Found annotation types: {unique_descriptions}")
+                
+                # For TMS-EEG we typically want 'Stimulation' or similar annotations
+                tms_annotations = ['Stimulation', 'TMS', 'R128', 'Response']
+                
+                # Create mapping for event IDs
+                event_id = {}
+                for desc in unique_descriptions:
+                    # Look for TMS-related annotations
+                    if any(tms_str.lower() in desc.lower() for tms_str in tms_annotations):
+                        event_id[desc] = args.substitute_zero_events_with
+                
+                if not event_id:
+                    print("No TMS-related annotations found. Using all annotations...")
+                    # If no TMS annotations found, use all annotations
+                    for i, desc in enumerate(unique_descriptions, 1):
+                        event_id[desc] = i
+                
+                print(f"Using event mapping: {event_id}")
+                
+                # Get events from annotations
+                events, _ = mne.events_from_annotations(raw, event_id=event_id)
+                
+                if len(events) == 0:
+                    raise ValueError("No events found in annotations")
+                    
+                print(f"Found {len(events)} events from annotations")
+                
+            except Exception as e:
+                # If both methods fail, try common stim channels
+                print(f"Could not get events from annotations: {str(e)}")
+                print("Trying common stim channel names...")
+                
+                stim_channels = mne.pick_types(raw.info, stim=True, exclude=[])
+                if len(stim_channels) > 0:
+                    stim_ch_name = raw.ch_names[stim_channels[0]]
+                    print(f"Using detected stim channel: {stim_ch_name}")
+                    events = mne.find_events(raw, stim_channel=stim_ch_name)
+                else:
+                    common_stim_names = ['STI 014', 'STIM', 'STI101', 'trigger', 'STI 001']
+                    found = False
+                    for ch_name in common_stim_names:
+                        if ch_name in raw.ch_names:
+                            print(f"Using stim channel: {ch_name}")
+                            events = mne.find_events(raw, stim_channel=ch_name)
+                            found = True
+                            break
+                    if not found:
+                        raise ValueError(f"Could not find events in data. Available channels: {raw.ch_names}")
+
+        print(f"Found {len(events)} events")
 
         print(f"Found {len(events)} events")
         annotations = mne.annotations_from_events(
@@ -356,8 +394,6 @@ def process_subjects(args):
                                         interp_window=1.0,  # 1ms window for initial interpolation
                                         cut_times_tms=(-2, 10))  # Step 9
 
-        events = processor._get_events()
-        event_id = processor._get_event_ids()
         #if args.plot_preproc:
            # plot_raw_segments(raw, args.output_dir, step_name='raw_i',)
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
@@ -389,7 +425,7 @@ def process_subjects(args):
             plot_components=True
         else:
             plot_components=False
-        processor.run_ica(method=args.ica_method, tms_muscle_thresh=args.tms_muscle_thresh, plot_components=plot_components)
+        processor.run_ica(output_dir=args.output_dir, session_name=session_name, method=args.ica_method, tms_muscle_thresh=args.tms_muscle_thresh, plot_components=plot_components)
         if args.plot_preproc:
             plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='ica1')
         if args.clean_muscle_artifacts:
@@ -419,7 +455,7 @@ def process_subjects(args):
             if check_stop(): return []
             processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact", "channel noise", "line noise"])
 
-        if not args.apply_ssp:    
+        if args.apply_ssp:    
             print("\nApplying SSP...")
             processor.apply_ssp(n_eeg=args.ssp_n_eeg)
 
@@ -545,7 +581,7 @@ if __name__ == "__main__":
     parser.add_argument('--eeglab_montage_units', type=str, default='auto',
                    help='Units for EEGLAB channel positions (default: auto)')
     parser.add_argument('--stim_channel', type=str, default='STI 014',
-                   help='Name of the stimulus channel (default: STI 014)')
+                    help='Name of the stimulus channel (default: STI 014)')
     parser.add_argument('--plot_preproc', action='store_true',
                     help='Enable muscle artifact cleaning (default: False)')
     parser.add_argument('--random_seed', type=int, default=42,
