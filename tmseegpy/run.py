@@ -385,9 +385,10 @@ def process_subjects(args):
             print("\nRunning second ICA...")
             if check_stop(): return []
             processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact", "channel noise", "line noise"])
-            
-        print("\nApplying SSP...")
-        processor.apply_ssp(n_eeg=args.ssp_n_eeg)
+
+        if not args.apply_ssp:    
+            print("\nApplying SSP...")
+            processor.apply_ssp(n_eeg=args.ssp_n_eeg)
 
         print("\nApplying baseline correction...")
         processor.apply_baseline_correction(baseline=(baseline_start_sec, baseline_end_sec))
@@ -565,6 +566,8 @@ if __name__ == "__main__":
                     help='Disable seconds ICA using ICA_label (default: False)')
     parser.add_argument('--second_ica_method', type=str, default='infomax',
                         help='Second ICA method (default: infomax)')
+    parser.add_argument('--apply_ssp', action='store_true',
+                    help='Apply SSP (default: False)')
     parser.add_argument('--ssp_n_eeg', type=int, default=2,
                         help='Number of EEG components for SSP (default: 2)')
     parser.add_argument('--apply_csd', action='store_true',

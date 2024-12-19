@@ -115,6 +115,7 @@ The following parameters can be configured either through command-line arguments
 | --random_seed               | int   | 42       | Seed for random number generators for reproducibility                                      |
 | --bad_channels_threshold    | float | 1        | Threshold for detecting bad channels using the FASTER algorithm                           |
 | --bad_epochs_threshold      | float | 1        | Threshold for detecting bad epochs using the FASTER algorithm                             |
+| --apply_ssp                | flag  | False    | Apply Signal Space Projection                                                               |
 | --ssp_n_eeg                | int   | 2        | Number of SSP components to apply                                                         |
 | --substitute_zero_events_with | int   | 10       | Value to substitute zero events in the data                                             |
 | Filtering Parameters |
@@ -141,7 +142,7 @@ The following parameters can be configured either through command-line arguments
 | --tms_muscle_thresh        | float | 2.0      | Threshold for detecting TMS-evoked muscle artifacts during ICA                           |
 | --second_ica_method        | str   | 'infomax'| ICA method for the second ICA pass ('infomax' or 'fastica')                             |
 | CSD Parameters |
-| --apply_csd                | flag  | False    | Apply Current Source Density (CSD) transformation                                        |
+| --apply_csd                | flag  | True    | Apply Current Source Density (CSD) transformation                                        |
 | --lambda2                  | float | 1e-3     | Lambda2 parameter for CSD transformation                                                 |
 | --stiffness               | int   | 3        | Stiffness parameter for CSD transformation                                               |
 | Epoching Parameters |
