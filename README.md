@@ -200,7 +200,7 @@ data/
 ```
 
 - The `--data_dir` argument should point to the directory containing your TMS data (e.g., `data/`).
-- Each session should be in its own subdirectory under `TMS1/`.
+- Each session should be in its own subdirectory under `TMSEEG/`.
 
 # Processing Pipeline
 
