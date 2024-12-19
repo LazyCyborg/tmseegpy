@@ -1,6 +1,10 @@
-from __future__ import annotations  # c.f. PEP 563, PEP 649
+from __future__ import annotations
 
-from importlib.resources import files
+try:
+    from importlib.resources import files
+except ImportError:
+    from importlib_resources import files
+
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -196,7 +200,7 @@ def _format_input_for_torch(topo: ArrayLike, psd: ArrayLike, autocorr: ArrayLike
 def _run_iclabel(images: ArrayLike, psds: ArrayLike, autocorr: ArrayLike) -> NDArray:
     """Run ICLabel using onnx."""
     # load weights
-    network_file = files("mne_icalabel.iclabel.network") / "assets" / "ICLabelNet.pt"
+    network_file = files("tmseegpy.mne_icalabel.iclabel.network") / "assets" / "ICLabelNet.pt"
     iclabel_net = ICLabelNet()
     iclabel_net.load_state_dict(torch.load(network_file, weights_only=True))
     # format inputs and run forward pass

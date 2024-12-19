@@ -33,7 +33,10 @@ setup(
         "tqdm",
         "mne-faster",
         'psutil',
-        'construct'
+        'construct',
+        'importlib-metadata; python_version<"3.8"',
+        'importlib-resources; python_version<"3.9"',
+
     ],
     entry_points={
         "console_scripts": [

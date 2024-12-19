@@ -66,7 +66,7 @@ def iclabel_label_components(
     labels_pred_proba = run_iclabel(*features, backend=backend)  # type: ignore
 
     if inplace:
-        from mne_icalabel.config import ICA_LABELS_TO_MNE
+        from tmseegpy.mne_icalabel.config import ICA_LABELS_TO_MNE
 
         ica.labels_scores_ = labels_pred_proba
         argmax_labels = np.argmax(labels_pred_proba, axis=1)

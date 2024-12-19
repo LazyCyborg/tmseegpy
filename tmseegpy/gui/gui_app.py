@@ -646,7 +646,7 @@ class TMSEEG_GUI:
             import matplotlib
             matplotlib.use('Agg')
             
-            from run import process_subjects
+            from ..run import process_subjects
             
             # Reset stop flag before starting
             import builtins
