@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from preproc import TMSEEGPreprocessor
 from pcist import PCIst
-from preproc_vis import plot_with_type_check
+from preproc_vis import plot_raw_segments, plot_epochs_grid
 from validate_tep import plot_tep_analysis, generate_validation_summary
 import mne
 import time
@@ -309,8 +309,8 @@ def process_subjects(args):
         if channels_to_drop:
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
-        if args.plot_preproc:
-            plot_with_type_check(raw, args.output_dir, f"{session_name}_1_raw", plot_type='raw')
+        #if args.plot_preproc:
+           # plot_raw_segments(raw, args.output_dir, step_name='raw',)
 
         # Preprocessing
         processor = TMSEEGPreprocessor(raw, ds_sfreq=args.ds_sfreq)
@@ -325,18 +325,19 @@ def process_subjects(args):
 
         events = processor._get_events()
         event_id = processor._get_event_ids()
-        if args.plot_preproc:
-            plot_with_type_check(raw, args.output_dir, f"{session_name}_2_post_interpol", plot_type='raw')
+        #if args.plot_preproc:
+           # plot_raw_segments(raw, args.output_dir, step_name='raw_i',)
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
         print("\nFiltering raw eeg data...")
         if check_stop(): return []
         processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width, plot_psd=False)
 
-        if args.plot_preproc:
-            plot_with_type_check(raw, args.output_dir, f"{session_name}_3_filtered", plot_type='raw') 
+        #if args.plot_preproc:
+          #  plot_raw_segments(raw, args.output_dir, step_name='raw_f',)
 
         print("\nCreating epochs...")
         processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None, amplitude_threshold=args.amplitude_threshold)
+        epochs = processor.epochs
 
         print("\nRemoving bad channels...")
         processor.remove_bad_channels(threshold=args.bad_channels_threshold)
@@ -344,7 +345,7 @@ def process_subjects(args):
         print("\nRemoving bad epochs...")
         processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
         if args.plot_preproc:
-            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_4_epochs", plot_type='epochs')
+            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='epochs')
 
         print("\nSetting average reference...")
         processor.set_average_reference()
@@ -357,7 +358,7 @@ def process_subjects(args):
             plot_components=False
         processor.run_ica(method=args.ica_method, tms_muscle_thresh=args.tms_muscle_thresh, plot_components=plot_components)
         if args.plot_preproc:
-            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_5_post_ICA1", plot_type='epochs')
+            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='ica1')
         if args.clean_muscle_artifacts:
             print("\nCleaning muscle artifacts...")
             if check_stop(): return []
@@ -368,7 +369,7 @@ def process_subjects(args):
                 verbose=True
             )
         if args.plot_preproc:
-            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_6_post_clean", plot_type='epochs')
+            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='clean')
         if not args.skip_second_artifact_removal:
             print("\nExtending TMS artifact removal window...")
             processor.remove_tms_artifact(cut_times_tms=(-2, 15))  
@@ -377,18 +378,21 @@ def process_subjects(args):
             processor.interpolate_tms_artifact(method='cubic',
                                             interp_window=5.0,  
                                             cut_times_tms=(-2, 15))
+            
+        # https://mne.tools/mne-icalabel/stable/generated/examples/00_iclabel.html#sphx-glr-generated-examples-00-iclabel-py
+
         if not args.no_second_ICA:
             print("\nRunning second ICA...")
             if check_stop(): return []
-            processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact"])
-
+            processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact", "channel noise", "line noise"])
+            
         print("\nApplying SSP...")
         processor.apply_ssp(n_eeg=args.ssp_n_eeg)
 
         print("\nApplying baseline correction...")
         processor.apply_baseline_correction(baseline=(baseline_start_sec, baseline_end_sec))
         if args.plot_preproc:
-            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_7_ICA2", plot_type='epochs')
+            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='ica2')
         if args.apply_csd:
             print("\nApplying CSD transformation...")
             processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
@@ -396,7 +400,7 @@ def process_subjects(args):
         print(f"\nDownsampling to {processor.ds_sfreq} Hz")
         processor.downsample()
         if args.plot_preproc:
-            plot_with_type_check(processor.epochs, args.output_dir, f"{session_name}_8_final_epochs", plot_type='epochs')
+            plot_epochs_grid(epochs, args.output_dir, session_name, step_name='final')
 
         epochs = processor.epochs
 
@@ -404,25 +408,49 @@ def process_subjects(args):
             try:
                 print("\nAnalyzing TEPs...")
                 if check_stop(): return []
+                
+                # Calculate evoked response
+                evoked = epochs.average()
+                
+                # Basic validation checks
+                if not evoked.times.size:
+                    raise ValueError("No time points in evoked data")
+                if not evoked.data.any():
+                    raise ValueError("No data in evoked response")
+                    
+                print(f"Processing TEPs from {evoked.times[0]:.3f}s to {evoked.times[-1]:.3f}s")
+                
+                # Run TEP analysis
                 components = plot_tep_analysis(
-                    evoked=epochs.average(),
+                    evoked=evoked,
                     output_dir=args.output_dir,
                     session_name=session_name,
                     prominence=args.prominence
                 )
                 
-                if args.save_validation:
-                    generate_validation_summary(
-                        components,
-                        args.output_dir,
-                        session_name
-                    )
+                # Check if any components were found
+                if not components:
+                    print("Warning: No TEP components were detected")
+                else:
+                    print(f"Found {len(components)} TEP components")
+                    
+                    if args.save_validation:
+                        generate_validation_summary(
+                            components,
+                            args.output_dir,
+                            session_name
+                        )
+                        print("TEP validation summary saved")
+                        
             except Exception as e:
                 print(f"Warning: TEP analysis failed: {str(e)}")
+                import traceback
+                print("Detailed error:")
+                print(traceback.format_exc())
                 components = None
         
         # Final quality check
-        fig = processor.plot_evoked_response(ylim={'eeg': [-5, 5]}, xlim=(-0.3, 0.3), title="Final Evoked Response", show=args.show_evoked)
+        fig = processor.plot_evoked_response(ylim={'eeg': [-2, 2]}, xlim=(-0.3, 0.3), title="Final Evoked Response", show=args.show_evoked)
         fig.savefig(f"{args.output_dir}/evoked_{session_name}.png")  
         plt.close(fig)
         
@@ -451,13 +479,13 @@ def process_subjects(args):
         session_names.append(session_name)
 
     
-    if args.preproc_qc:
-        preproc_stats_file = generate_preproc_stats(
-            processor,
-            session_name,
-            args.output_dir
-        )
-        print(f"Preprocessing statistics saved to: {preproc_stats_file}")
+    #if args.preproc_qc:
+       # preproc_stats_file = generate_preproc_stats(
+           # processor,
+           # session_name,
+           # args.output_dir
+       #)
+       # print(f"Preprocessing statistics saved to: {preproc_stats_file}")
 
     if args.research:
         output_file = generate_research_stats(
@@ -581,8 +609,6 @@ if __name__ == "__main__":
                         help='Start of the post-TMS window in ms (default: 0)')
     parser.add_argument('--post_window_end', type=int, default=300,
                         help='End of the post-TMS window in ms (default: 300)')
-    parser.add_argument('--preproc_qc', action='store_true',
-                help='Generate preprocessing quality control statistics (default: False)')
     parser.add_argument('--research', action='store_true',
                     help='Output summary statistics of measurements (default: False)')
     args = parser.parse_args()

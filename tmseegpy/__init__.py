@@ -7,6 +7,7 @@ from .pcist import PCIst
 from .microstates import Microstate
 from .gui import ToolTip, TMSEEG_GUI
 from .run import process_subjects
+from .preproc_vis import plot_with_type_check
 
 __all__ = [
     'TMSEEGPreprocessor',
@@ -16,6 +17,7 @@ __all__ = [
     'Microstate',
     'ToolTip', 
     'TMSEEG_GUI',
-    'process_subjects' 
+    'process_subjects',
+    'plot_with_type_check' 
 
 ]

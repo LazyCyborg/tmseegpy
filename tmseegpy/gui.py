@@ -294,7 +294,7 @@ class TMSEEG_GUI:
             'clean_muscle_artifacts': self.clean_muscle.get(),
             'show_evoked': self.show_evoked.get(),
             'research': self.research_stats.get(),
-            'preproc_qc': self.preproc_qc.get(),
+            #'preproc_qc': self.preproc_qc.get(),
             'apply_ssp': self.apply_ssp.get(),
             'apply_csd': self.apply_csd.get(),
         }
@@ -351,7 +351,7 @@ class TMSEEG_GUI:
         self.plot_preproc = tk.BooleanVar()
         plot_button = ttk.Checkbutton(options_frame, text="Plot Preprocessing Steps", 
                     variable=self.plot_preproc)
-        plot_button.grid(row=4, column=1, sticky=tk.W)
+        plot_button.grid(row=3, column=1, sticky=tk.W)
         ToolTip(plot_button, "Show preprocessing visualization steps")
         
         self.clean_muscle = tk.BooleanVar()
@@ -365,21 +365,21 @@ class TMSEEG_GUI:
         
         self.research_stats = tk.BooleanVar()
         ttk.Checkbutton(options_frame, text="Generate Research Statistics", 
-                    variable=self.research_stats).grid(row=1, column=1, sticky=tk.W)
+                    variable=self.research_stats).grid(row=0, column=1, sticky=tk.W)
         
         # Third row
-        self.apply_ssp = tk.BooleanVar(value=True)  
+        self.apply_ssp = tk.BooleanVar(value=False)  
         ssp_button = ttk.Checkbutton(options_frame, text="Apply SSP", 
                     variable=self.apply_ssp)
         ssp_button.grid(row=1, column=0, sticky=tk.W)
         ToolTip(ssp_button, "Apply Signal Space Projection for artifact removal")
         
-        self.preproc_qc = tk.BooleanVar()
-        ttk.Checkbutton(options_frame, text="Generate Preprocessing QC", 
-                    variable=self.preproc_qc).grid(row=0, column=1, sticky=tk.W)
+        #self.preproc_qc = tk.BooleanVar()
+       # ttk.Checkbutton(options_frame, text="Generate Preprocessing QC", 
+                   # variable=self.preproc_qc).grid(row=0, column=1, sticky=tk.W)
         
         # Fourth row
-        self.apply_csd = tk.BooleanVar(value=False)  
+        self.apply_csd = tk.BooleanVar(value=True)  
         csd_button = ttk.Checkbutton(options_frame, text="Apply CSD", 
                     variable=self.apply_csd)
         csd_button.grid(row=2, column=0, sticky=tk.W)
@@ -389,13 +389,13 @@ class TMSEEG_GUI:
         self.validate_teps = tk.BooleanVar()  
         validate_button = ttk.Checkbutton(options_frame, text="Validate TEPs", 
                     variable=self.validate_teps)
-        validate_button.grid(row=2, column=1, sticky=tk.W)
+        validate_button.grid(row=1, column=1, sticky=tk.W)
         ToolTip(validate_button, "Perform TEP validation and generate reports")
         
         self.save_validation = tk.BooleanVar() 
         save_button = ttk.Checkbutton(options_frame, text="Save Validation Reports & Plots", 
                     variable=self.save_validation)
-        save_button.grid(row=3, column=1, sticky=tk.W)
+        save_button.grid(row=2, column=1, sticky=tk.W)
         ToolTip(save_button, "Save validation reports and plots to output directory")
             
         
@@ -423,7 +423,7 @@ class TMSEEG_GUI:
         filter_frame = ttk.Frame(notebook, padding="5")
         notebook.add(filter_frame, text="Filtering")
         self.add_parameter_group(filter_frame, {
-            'Low Frequency (Hz)': ('l_freq', 0.1),
+            'Low Frequency (Hz)': ('l_freq', 1), # 0.1 is the standard in the PCIst article by Comolatti et al., 2019
             'High Frequency (Hz)': ('h_freq', 45),
             'Notch Frequency (Hz)': ('notch_freq', 50),
             'Notch Width': ('notch_width', 2),
@@ -476,7 +476,7 @@ class TMSEEG_GUI:
         notebook.add(ica_frame, text="ICA Settings")
         self.add_parameter_group(ica_frame, {
             'ICA Method': ('ica_method', 'fastica'),
-            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 3.0),
+            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 2.0),
             'Second ICA Method': ('second_ica_method', 'infomax'),
         })
         
@@ -496,7 +496,7 @@ class TMSEEG_GUI:
             'Epoch End Time (s)': ('epochs_tmax', 0.41),
             'Baseline Start (ms)': ('baseline_start', -400),
             'Baseline End (ms)': ('baseline_end', -50),
-            'Amplitude Threshold (µV)': ('amplitude_threshold', 300), 
+            'Amplitude Threshold (µV)': ('amplitude_threshold', 4500), 
         })
         tep_frame = ttk.Frame(notebook, padding="5")
         notebook.add(tep_frame, text="TEP Analysis")
@@ -524,7 +524,7 @@ class TMSEEG_GUI:
     def create_console(self, parent):
         # Console frame
         console_frame = ttk.LabelFrame(parent, text="Console Output", padding="5")
-        console_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        console_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
         
         self.console = tk.Text(console_frame, height=15, width=120)
         self.console.grid(row=0, column=0, sticky=(tk.W, tk.E))
@@ -536,13 +536,13 @@ class TMSEEG_GUI:
         
     def create_control_buttons(self, parent):
         button_frame = ttk.Frame(parent)
-        button_frame.grid(row=4, column=0, columnspan=3, pady=10)
+        button_frame.grid(row=2, column=0, columnspan=3, pady=10)
         
         ttk.Button(button_frame, text="Get PCIst", command=self.run_analysis).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Stop", command=self.stop_analysis).pack(side=tk.LEFT, padx=5)
         
         self.progress = ttk.Progressbar(parent, length=300, mode='indeterminate')
-        self.progress.grid(row=5, column=0, columnspan=3, pady=5)
+        self.progress.grid(row=3, column=0, columnspan=3, pady=5)
         
     def browse_data_dir(self):
         directory = filedialog.askdirectory(initialdir=self.data_dir.get())
@@ -584,7 +584,7 @@ class TMSEEG_GUI:
             'research': self.research_stats.get(),
             'validate_teps': self.validate_teps.get(),  # Add validation option
             'save_validation': self.save_validation.get(),
-            'preproc_qc': self.preproc_qc.get(),
+            #'preproc_qc': self.preproc_qc.get(),
             'apply_ssp': self.apply_ssp.get(), 
             'apply_csd': self.apply_csd.get(),
             'skip_second_artifact_removal': self.skip_second_artifact_removal.get(),
