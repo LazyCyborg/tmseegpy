@@ -280,7 +280,7 @@ This is the pipeline that I used after a lot of trial and error. The only way th
     - Number of EEG components: 2
 16. Apply baseline correction
     - Window: -400 to -50 ms
-17. Optional CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html)
+17. CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html)
     - Lambda2: 1e-3
     - Stiffness: 3
 18. Final downsampling
