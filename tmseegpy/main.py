@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 import argparse
 import tkinter as tk
-from .gui import TMSEEG_GUI
+from .gui.gui_app import TMSEEG_GUI
 
 def main():
     parser = argparse.ArgumentParser(description='Launch TMS-EEG Analysis GUI')

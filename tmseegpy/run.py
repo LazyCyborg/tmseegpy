@@ -3,13 +3,13 @@ import os
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from preproc import TMSEEGPreprocessor
-from pcist import PCIst
-from preproc_vis import plot_raw_segments, plot_epochs_grid
-from validate_tep import plot_tep_analysis, generate_validation_summary
+from .preproc import TMSEEGPreprocessor
+from .pcist import PCIst
+from .preproc_vis import plot_raw_segments, plot_epochs_grid
+from .validate_tep import plot_tep_analysis, generate_validation_summary
 import mne
 import time
-from neurone_loader import Recording
+from .neurone_loader import Recording
 import argparse
 
 mne.viz.use_browser_backend("matplotlib")

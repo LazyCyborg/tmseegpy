@@ -2,7 +2,7 @@
 
 This repository contains my attempt at building some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data. The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019). The analysis of PCIst is jsut a copy paste from https://github.com/renzocom/PCIst/blob/master/PCIst/pci_st.py which is written by Renzo Comolatti. The code is mostly adapted from a very long jupyter notebook which used mostly native MNE-Python methods which I expanded to a toolbox that I have been using in my analyses. So the code base might not be very efficient. 
 
-Currently the code is only tested on TMS-EEG data recorded in .ses format from the Bittium NeurOne 5kHz sampling rate amplifier. Feel free to modify the preproc module to fit other types of recorded TMS-EEG data. If you create a dataloader that is compatible with multiple systems feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. 
+Currently the code is only tested on TMS-EEG data recorded in .ses format from the Bittium NeurOne 5kHz sampling rate amplifier. Feel free to modify the preproc module to fit other types of recorded TMS-EEG data. If you create a dataloader that is compatible with multiple systems feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. I am also using the 0.7.0 version (cloned) of mne_ica_label since there was some issues with the current version of mne.
 
 # Table of Contents
 
@@ -36,7 +36,7 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
 - [Acknowledgements](#acknowledgements)
 
 
-## Installation (use the scripts)
+## Installation 
 
 1. Clone the repository:
 
@@ -44,46 +44,12 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
    git clone https://github.com/LazyCyborg/tmseegpy.git
    cd tmseegpy
 
-2. Create a virtual environment (optional but recommended):
+2. Create a virtual environment (optional but very recommended):
 
    ```bash
-    conda env create -f eeg_env.yml
-    conda activate eeg
-   ```
-
-3. Install the required packages:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-   Required libraries:
-
-   - NumPy
-   - SciPy
-   - MNE
-   - scikit-learn
-   - tensorly
-   - matplotlib
-   - seaborn
-   - tqdm
-   - mne-icalabel
-   - mne-faster
-
-## Install as a package 
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/LazyCyborg/tmseegpy.git
-   cd tmseegpy
-
-2. Create a virtual environment (optional but recommended):
-
-   ```bash
-    conda env create -f eeg_env.yml
-    conda activate eeg
-   ```
+    conda create -n tmseegpy- python=3.8
+    conda activate tmseegpy
+   ``` 
 
 3. Install the package:
 
@@ -100,8 +66,7 @@ The pipeline is designed to be run from the command line or through the simple G
 For an graphical user interface run:
 
    ```bash
-   cd tms_eeg_analysis
-   python gui.py 
+   tmseegpy
    ```
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
@@ -170,19 +135,23 @@ The following parameters can be configured either through command-line arguments
 To run the pipeline with default settings:
 
 ```bash
-python main.py --data_dir ./TMSEEG
+cd tmseegpy
+```
+
+```bash
+python run.py --data_dir ./TMSEEG
 ```
 
 To enable muscle artifact cleaning and apply CSD transformation:
 
 ```bash
-python main.py --data_dir ./TMSEEG --clean_muscle_artifacts --apply_csd
+python run.py --data_dir ./TMSEEG --clean_muscle_artifacts --apply_csd
 ```
 
 To enable plotting during preprocessing for quality checks:
 
 ```bash
-python main.py --data_dir ./TMSEEG --plot_preproc
+python run.py --data_dir ./TMSEEG --plot_preproc
 ```
 
 ## Data Preparation
@@ -244,7 +213,7 @@ This is the pipeline that I used after a lot of trial and error. The only way th
    - Notch filter: 50 Hz (width: 2 Hz)
 8. Create epochs
    - Time window: -0.41 to 0.41 s
-   - Amplitude threshold: 4500 µV
+   - Amplitude threshold for epoch rejection: 4500 µV 
    - Demeaning 
 9. Remove bad channels
    - Using FASTER algorithm

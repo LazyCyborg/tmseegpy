@@ -33,7 +33,7 @@ from mne import (compute_raw_covariance,
 from mne.viz import plot_alignment, plot_bem
 
 # Required for ICA and component labeling
-from mne_icalabel import label_components
+from .mne_icalabel import label_components
 from mne.preprocessing import ICA
 
 # Required for FASTER bad channel/epoch detection 
@@ -47,7 +47,7 @@ from tqdm import tqdm
 
 
 ## Custom TMS-artefact cleaner
-from clean import TMSArtifactCleaner
+from .clean import TMSArtifactCleaner
 
 
 class TMSEEGPreprocessor:

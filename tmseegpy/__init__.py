@@ -1,23 +1,11 @@
-# tms_eeg_analysis/__init__.py
+# tmseegpy/__init__.py
+from .gui.gui_app import TMSEEG_GUI
+from .analyze import *
+from .clean import *
+from .pcist import *
+from .preproc import *
+from .preproc_vis import *
+from .run import *
+from .validate_tep import *
 
-from .preproc import TMSEEGPreprocessor
-from .analyze import PCIlz
-from .clean import TMSArtifactCleaner
-from .pcist import PCIst
-from .microstates import Microstate
-from .gui import ToolTip, TMSEEG_GUI
-from .run import process_subjects
-from .preproc_vis import plot_with_type_check
-
-__all__ = [
-    'TMSEEGPreprocessor',
-    'PCIlz',
-    'TMSArtifactCleaner',
-    'PCIst',
-    'Microstate',
-    'ToolTip', 
-    'TMSEEG_GUI',
-    'process_subjects',
-    'plot_with_type_check' 
-
-]
+__version__ = "0.1.0"
