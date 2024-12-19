@@ -212,106 +212,126 @@ Rogasch NC, Sullivan C, Thomson RH, Rose NS, Bailey NW, Fitzgerald PB, Farzan F,
 
 Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact-rejection techniques available in TESA, an open-source TMS-EEG toolbox. Brain Stimulation. 2020; In press.
 
-### 1. Data Loading
 
-- Function: Loads raw EEG data and converts it to a mne.raw object.
-- Description: Utlises the modifed version of the neurone_loader and is currently only tested on .ses files.
+# TMS-EEG Data Preprocessing Pipeline
 
-### 2. TMS Artifact Removal
+This document outlines the standard preprocessing pipeline for TMS-EEG data analysis.
 
-- Function: `remove_tms_artifact`
-- Description: Removes TMS artifacts by cutting out the artifact period and optionally replacing it with zeros or baseline data.
+## Initial Data Loading and Setup
+1. Load raw data from Neurone format
+2. Set random seed (default: 42)
+3. Create events from trigger channel ('STI 014')
+4. Remove non-EEG channels (e.g., EMG1)
 
-### 3. Filtering
+## Stage 1: Initial TMS Artifact Handling
+5. First-pass TMS artifact removal
+   - Cut window: -2 to 10 ms around TMS pulse
+6. Initial interpolation of TMS artifact
+   - Method: cubic
+   - Interpolation window: 1.0 ms
+   - Cut times: -2 to 10 ms
 
-- Function: `filter_raw`
-- Description: Applies bandpass and notch filters to remove unwanted frequencies, such as DC offset and powerline noise.
+## Stage 2: Filtering and Epoching
+7. Apply frequency filters
+   - Low-pass: 1 Hz
+   - High-pass: 45 Hz
+   - Notch filter: 50 Hz (width: 2 Hz)
+8. Create epochs
+   - Time window: -0.41 to 0.41 s
+   - Amplitude threshold: 4500 µV
+   - Demeaning 
+9. Remove bad channels
+   - Using FASTER algorithm
+   - Threshold: 1
+10. Remove bad epochs
+    - Using FASTER algorithm
+    - Threshold: 1
+11. Set average reference
 
-### 4. Epoching
+## Stage 3: First Artifact Cleaning
+12. First ICA run
+    - Method: FastICA
+    - TMS muscle threshold: 2.0
+13. Optional muscle artifact cleaning (PARAFAC)
+    - Time window: 5-30 ms
+    - Threshold factor: 1.0
+    - Components: 5
 
-- Function: `create_epochs`
-- Description: Segments the continuous data into epochs around the TMS events.
+## Stage 4: Extended TMS Artifact Handling
+14. Second-pass TMS artifact removal
+    - Extended cut window: -2 to 15 ms
+15. Extended interpolation
+    - Method: cubic
+    - Interpolation window: 5.0 ms
+    - Cut times: -2 to 15 ms
 
-### 5. Bad Channel and Epoch Detection
+## Stage 5: Final Cleaning
+16. Second ICA run
+    - Method: Infomax
+    - Auto-reject components with mne_ica_label, labeled as: eye blink, heart beat, muscle artifact, channel noise, line noise
+17. Apply SSP (Optional and not used when I preprocess) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html)
+    - Number of EEG components: 2
+18. Apply baseline correction
+    - Window: -400 to -50 ms
+19. Optional CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html)
+    - Lambda2: 1e-3
+    - Stiffness: 3
+20. Final downsampling
+    - Target frequency: 725 Hz
 
-- Functions: `remove_bad_channels`, `remove_bad_epochs`
-- Description: Detects and removes bad channels and epochs using the FASTER algorithm.
+## Quality Control and Analysis
+21. TEP validation (optional)
+    - Peak prominence threshold: 0.01
+22. Generate evoked response plot
+    - Time window: -0.3 to 0.3 s
+    - Y-limits: -2 to 2 µV
 
-### 6. ICA and Artifact Removal
+## PCIst Calculation
+23. Calculate PCIst
+    - Response window: 0 to 299 ms
+    - k parameter: 1.2
+    - Minimum SNR: 1.1
+    - Maximum variance: 99.0%
+    - Steps for threshold optimization: 100
 
-- Functions: `run_ica`, `run_second_ica`, `clean_muscle_artifacts`
-- Description:
-  - First ICA: Aims to classify TMS-evoked muscle artifacts using Z-score threshold of independent components.
-  - Second ICA: Removes remaining artifacts such as eye blinks and heartbeats using ICLabel.
-  - Muscle Artifact Cleaning: Optionally cleans muscle artifacts using tensor decomposition (se bellow).
-
-### 7. Baseline Correction and Referencing
-
-- Functions: `set_average_reference`, `apply_baseline_correction`
-- Description: Applies average referencing, baseline correction, and Signal Space Projection (SSP).
-
-### 8. Signal Space Projection (SSP) (optional)
-
-- Functions: `apply_ssp`
-- Description: Computes and applies Signal Space Projection (SSP) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html).
-
-### 9. Current Source Density (CSD) Transformation (optional)
-
-- Function: `apply_csd`
-- Description: Enhances spatial resolution by applying the CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html).
-
-### 10. Downsampling
-
-- Function: `downsample`
-- Description: Reduces the sampling frequency.
-
-### 11. Final Quality Check
-
-- Function: `plot_evoked_response`
-- Description: Plots the averaged evoked response for visual inspection.
-
-### 12. PCIst Analysis
-
-- Class: `PCIst`
-- Description: Calculates the Perturbational Complexity Index based on State transitions, providing a measure of brain response complexity.
 
 ## Modules and Classes
 
-### TMSEEGPreprocessor
+### TMSEEGPreprocessor (main class for preprocessing)
 
-Class for preprocessing TMS-EEG data.
+I used this in a jupyter notebook to simply chain steps from mne with FASTER and mne_ica_label as well as the the custom functions for artifact removal, interpolation and ICA component selection based on Z-score threshold based on TESA. 
 
- Methods:
+ Methods included (They are pretty well documented so look in the preproc.py file for more info):
 
 - `remove_tms_artifact`: Removes TMS artifacts from raw data.
-- `interpolate_tms_artifact`: Interpolates removed TMS artifacts using MNE-FASTER.
+- `interpolate_tms_artifact`: Interpolates removed TMS artifacts using scipy cubic interpolation.
 - `filter_raw`: Applies bandpass and notch filters to raw data.
-- `create_epochs`: Creates epochs from continuous data.
+- `create_epochst`: Creates epochs from the mne.raw object and rejects epochs with amplitudes over >4500 (can be changed), and demeans the data. 
 - `remove_bad_channels`: Identifies and interpolates bad channels using MNE-FASTER.
-- `remove_bad_epochs`: Removes bad epochs based on amplitude criteria.
+- `remove_bad_epochs`: Removes bad epochs based on amplitude using MNE-FASTER.
 - `run_ica`: Runs ICA and attempts to classify components as TMS-evoked muscle activity using Z-core threshold.
+- `clean_muscle_artifacts`: Cleans TMS-evoked muscle artifacts using non-negative tensor decomposition (se bellow).
 - `run_second_ica`: Runs ICA to identify and remove residual physiological artifacts using MNE-ICALabel.
-- `clean_muscle_artifacts`: Cleans TMS-evoked muscle artifacts using non-negative tensor decomposition.
-- `apply_ssp`: Aplies signal-space projection (SSP) to epochs .
+- `apply_ssp`: Aplies signal-space projection (SSP) to epochs.
 - `apply_csd`: Applies current Source Density transformation.
 - `set_average_reference`: Sets the EEG reference to average.
 - `apply_baseline_correction`: Applies baseline correction to epochs.
 - `apply_csd`: Applies Current Source Density transformation.
 
 
-### TMSArtifactCleaner Class
+### TMSArtifactCleaner Class (which might work)
 
 The TMSArtifactCleaner class is designed to detect and clean transcranial magnetic stimulation (TMS)-evoked muscle artifacts in EEG/MEG data using tensor decomposition techniques. It uses the tensorly library for tensor operations and mne for handling eeg data.
 
-#### Features
+#### What it does 
 
-- Artifact Detection: Utilizes Non-negative PARAFAC tensor decomposition to detect muscle artifacts in EEG/MEG epochs.
-- Artifact Cleaning: Employs Tucker decomposition to clean the detected artifacts.
+- Artifact Detection: Uses Non-negative PARAFAC tensor decomposition to detect muscle artifacts in EEG epochs.
+- Artifact Cleaning: Uses Tucker decomposition to clean the detected artifacts.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
 
 
 #### Parameters:
-- epochs (mne.Epochs): The EEG/MEG epochs to process.
+- epochs (mne.Epochs): The EEG epochs to process.
 - verbose (bool, optional): Whether to print progress messages.
 
 #### Methods
