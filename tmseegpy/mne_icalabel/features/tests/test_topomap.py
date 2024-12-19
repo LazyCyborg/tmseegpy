@@ -13,7 +13,7 @@ if check_version("mne", "1.6"):
 else:
     from mne.io.pick import _pick_data_channels, _picks_to_idx
 
-from mne_icalabel.features import get_topomaps
+from tmseegpy.mne_icalabel.features import get_topomaps
 
 directory = testing.data_path() / "MEG" / "sample"
 raw = read_raw(directory / "sample_audvis_trunc_raw.fif", preload=False)

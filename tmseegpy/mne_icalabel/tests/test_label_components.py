@@ -3,7 +3,7 @@ from mne.datasets import testing
 from mne.io import read_raw
 from mne.preprocessing import ICA
 
-from mne_icalabel import label_components
+from tmseegpy.mne_icalabel import label_components
 
 directory = testing.data_path() / "MEG" / "sample"
 raw = read_raw(directory / "sample_audvis_trunc_raw.fif", preload=False)

@@ -7,7 +7,7 @@ from mne.io import read_raw_edf
 from mne.preprocessing import ICA
 from mne_bids import BIDSPath, write_raw_bids
 
-from mne_icalabel.annotation import mark_component, write_components_tsv
+from tmseegpy.mne_icalabel.annotation import mark_component, write_components_tsv
 
 subject_id = "01"
 session_id = "01"

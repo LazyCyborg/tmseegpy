@@ -1,6 +1,6 @@
 import pytest
 
-from mne_icalabel.utils._imports import import_optional_dependency
+from tmseegpy.mne_icalabel.utils._imports import import_optional_dependency
 
 
 def test_import_optional_dependency():

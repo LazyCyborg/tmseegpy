@@ -2,7 +2,7 @@ from io import StringIO
 
 import pytest
 
-from mne_icalabel.utils.config import _get_gpu_info, sys_info
+from tmseegpy.mne_icalabel.utils.config import _get_gpu_info, sys_info
 
 
 def test_sys_info():

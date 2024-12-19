@@ -3,7 +3,7 @@ from mne import create_info
 from mne.io import RawArray
 from mne.preprocessing import ICA
 
-from mne_icalabel.utils._checks import _validate_ica, _validate_inst_and_ica
+from tmseegpy.mne_icalabel.utils._checks import _validate_ica, _validate_inst_and_ica
 
 
 def test_validate_inst_and_ica(rng):

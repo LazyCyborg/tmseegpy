@@ -1,4 +1,4 @@
-from mne_icalabel.datasets.icalabel import data_path
+from tmseegpy.mne_icalabel.datasets.icalabel import data_path
 
 
 def test_dataset(tmp_path):

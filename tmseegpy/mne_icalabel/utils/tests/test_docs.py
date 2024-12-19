@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from mne.utils import verbose
 
-from mne_icalabel.utils._docs import _KEYS_MNE, copy_doc, docdict, fill_doc
+from tmseegpy.mne_icalabel.utils._docs import _KEYS_MNE, copy_doc, docdict, fill_doc
 
 
 def test_fill_doc_function():

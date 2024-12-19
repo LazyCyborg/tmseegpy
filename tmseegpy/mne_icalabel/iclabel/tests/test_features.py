@@ -9,9 +9,9 @@ from mne.io.eeglab.eeglab import _check_load_mat
 from mne.preprocessing import read_ica_eeglab
 from scipy.io import loadmat
 
-from mne_icalabel.datasets import icalabel
-from mne_icalabel.iclabel._utils import _mne_to_eeglab_locs
-from mne_icalabel.iclabel.features import (
+from tmseegpy.mne_icalabel.datasets import icalabel
+from tmseegpy.mne_icalabel.iclabel._utils import _mne_to_eeglab_locs
+from tmseegpy.mne_icalabel.iclabel.features import (
     _compute_ica_activations,
     _eeg_autocorr,
     _eeg_autocorr_fftw,

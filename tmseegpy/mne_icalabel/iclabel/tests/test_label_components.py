@@ -5,9 +5,9 @@ from mne.datasets import testing
 from mne.io import RawArray, read_raw
 from mne.preprocessing import ICA
 
-from mne_icalabel.config import ICA_LABELS_TO_MNE
-from mne_icalabel.iclabel import iclabel_label_components
-from mne_icalabel.utils._tests import requires_module
+from tmseegpy.mne_icalabel.config import ICA_LABELS_TO_MNE
+from tmseegpy.mne_icalabel.iclabel import iclabel_label_components
+from tmseegpy.mne_icalabel.utils._tests import requires_module
 
 directory = testing.data_path() / "MEG" / "sample"
 raw = read_raw(directory / "sample_audvis_trunc_raw.fif", preload=False)
