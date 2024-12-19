@@ -1,4 +1,8 @@
-from importlib.resources import files
+import sys
+if sys.version_info >= (3, 9):
+    from importlib.resources import files
+else:
+    from importlib_resources import files
 
 import numpy as np
 import pytest
