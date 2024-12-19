@@ -1,4 +1,4 @@
-# gui.py
+# gui_app.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
@@ -400,6 +400,26 @@ class TMSEEG_GUI:
                     variable=self.save_validation)
         save_button.grid(row=2, column=1, sticky=tk.W)
         ToolTip(save_button, "Save validation reports and plots to output directory")
+
+        # Add this after your existing basic options
+        format_frame = ttk.LabelFrame(options_frame, text="Data Format", padding="5")
+        format_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(format_frame, text="Data Format:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.data_format = tk.StringVar(value='neurone')
+        format_combo = ttk.Combobox(format_frame, textvariable=self.data_format, width=15)
+        format_combo['values'] = ('neurone', 'brainvision', 'edf', 'cnt', 'eeglab', 'auto')
+        format_combo.grid(row=0, column=1, padx=5, pady=2)
+        format_combo.state(['readonly'])
+        ToolTip(format_combo, "Format of input data files")
+
+        ttk.Label(format_frame, text="EEGLAB Units:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        self.eeglab_units = tk.StringVar(value='auto')
+        units_combo = ttk.Combobox(format_frame, textvariable=self.eeglab_units, width=15)
+        units_combo['values'] = ('auto', 'mm', 'm', 'cm')
+        units_combo.grid(row=1, column=1, padx=5, pady=2)
+        units_combo.state(['readonly'])
+        ToolTip(units_combo, "Units for EEGLAB channel positions")
             
         
     def create_advanced_options(self, parent):
@@ -581,6 +601,8 @@ class TMSEEG_GUI:
             # Directory and basic options
             'data_dir': self.data_dir.get(),
             'output_dir': self.output_dir.get(),
+            'data_format': self.data_format.get(),
+            'eeglab_montage_units': self.eeglab_units.get(),
             'plot_preproc': self.plot_preproc.get(),
             'clean_muscle_artifacts': self.clean_muscle.get(),
             'show_evoked': self.show_evoked.get(),

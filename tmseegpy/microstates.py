@@ -1,3 +1,5 @@
+# microstates.py
+# Might be fun to check microstate transitions before and after TMS? Will probably need many measurements to get to some stable microstates? 
 import numpy as np
 from typing import Optional, Union, Dict, List, Tuple
 import matplotlib.pyplot as plt

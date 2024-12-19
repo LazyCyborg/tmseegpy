@@ -274,32 +274,65 @@ def process_subjects(args):
     pcist_objects = []
     pcist_details = []
     session_names = []
-    # Load the raw data for the session
-    neurone_path = str(TMS_DATA_PATH)
-    rec = Recording(neurone_path)
+
+    # Load the raw data using the new loader
+    from .dataloader import TMSEEGLoader
+    loader = TMSEEGLoader(
+        data_path=TMS_DATA_PATH,
+        format=args.data_format,
+        substitute_zero_events_with=args.substitute_zero_events_with,
+        eeglab_montage_units=args.eeglab_montage_units,
+        verbose=True
+    )
+
+    raw_list = loader.load_data()
+    session_info = loader.get_session_info()
+
     np.random.seed(args.random_seed)
-
-
     baseline_start_sec = args.baseline_start / 1000.0
     baseline_end_sec = args.baseline_end / 1000.0
 
-    # Loop through sessions 
-    for n, r in enumerate(range(len(rec.sessions))):
+    # Loop through the loaded raw data
+    for n, raw in enumerate(raw_list):
         if check_stop():
             return []
-        print(f"\nProcessing Session {n}: {rec.sessions[r].path}")
+        
+        session_name = session_info[n]['name']
+        print(f"\nProcessing Session {n}: {session_name}")
 
-        # Load and prepare raw data
-        session = rec.sessions[r]
-        if check_stop(): return []
-        session_path = rec.sessions[r].path
-        session_name = os.path.basename(session_path) 
-        raw = rec.sessions[r].to_mne(substitute_zero_events_with=args.substitute_zero_events_with)
         if check_stop(): return []
 
         # Process session...
-        events = mne.find_events(raw, stim_channel='STI 014')
-        annotations = mne.annotations_from_events(events=events, sfreq=raw.info['sfreq'],event_desc={args.substitute_zero_events_with: 'Stimulation'})
+        try:
+            # First try user-specified channel
+            events = mne.find_events(raw, stim_channel=args.stim_channel)
+        except ValueError:
+            # If not found, try to detect stimulus channel automatically
+            stim_channels = mne.pick_types(raw.info, stim=True, exclude=[])
+            if len(stim_channels) > 0:
+                # Use the first detected stim channel
+                stim_ch_name = raw.ch_names[stim_channels[0]]
+                print(f"Using detected stim channel: {stim_ch_name}")
+                events = mne.find_events(raw, stim_channel=stim_ch_name)
+            else:
+                # If no stim channels found, try common names
+                common_stim_names = ['STI 014', 'STIM', 'STI101', 'trigger', 'STI 001']
+                found = False
+                for ch_name in common_stim_names:
+                    if ch_name in raw.ch_names:
+                        print(f"Using stim channel: {ch_name}")
+                        events = mne.find_events(raw, stim_channel=ch_name)
+                        found = True
+                        break
+                if not found:
+                    raise ValueError(f"Could not find stimulus channel. Available channels: {raw.ch_names}")
+
+        print(f"Found {len(events)} events")
+        annotations = mne.annotations_from_events(
+            events=events, 
+            sfreq=raw.info['sfreq'],
+            event_desc={args.substitute_zero_events_with: 'Stimulation'}
+        )
         raw.set_annotations(annotations)
 
         # Drop unnecessary channels
@@ -506,6 +539,13 @@ if __name__ == "__main__":
                         help='Path to the data directory (default: ./data)')
     parser.add_argument('--output_dir', type=str, default=str(Path.cwd() / 'output'), 
                         help='Path to the output directory (default: ./output)')
+    parser.add_argument('--data_format', type=str, default='neurone',
+                   choices=['neurone', 'brainvision', 'edf', 'cnt', 'eeglab', 'auto'],
+                   help='Format of input data (default: neurone)')
+    parser.add_argument('--eeglab_montage_units', type=str, default='auto',
+                   help='Units for EEGLAB channel positions (default: auto)')
+    parser.add_argument('--stim_channel', type=str, default='STI 014',
+                   help='Name of the stimulus channel (default: STI 014)')
     parser.add_argument('--plot_preproc', action='store_true',
                     help='Enable muscle artifact cleaning (default: False)')
     parser.add_argument('--random_seed', type=int, default=42,

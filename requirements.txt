@@ -1,5 +1,16 @@
-mne_icalabel
-mne_faster
+numpy>=1.16.0
+scipy>=1.2.0
+mne>=1.1
+pooch
+torch
+scikit-learn
+tensorly
+matplotlib
+seaborn
+tqdm
+mne-faster
+psutil
+construct
 pyyaml
 pytest
 pytesseract>=0.3
@@ -8,3 +19,5 @@ antspy>=0.2
 xlrd>=2.0
 openpyxl>=3.0
 pymatreader>=0.0.30
+importlib-metadata; python_version<"3.8"
+importlib-resources; python_version<"3.9"

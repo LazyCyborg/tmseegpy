@@ -1,22 +1,31 @@
-name: eeg
+name: tmseegpy-env
 channels:
   - conda-forge
+  - pytorch
   - defaults
 dependencies:
-  - python=3.9
-  - numpy
-  - scipy
+  - python>=3.8
+  # Core scientific packages
+  - numpy>=1.16.0
+  - scipy>=1.2.0
+  - scikit-learn
+  # MNE and related
+  - mne>=1.1
+  - mne-base
+  # Deep learning
+  - pytorch
+  - tensorly
+  # Visualization
   - matplotlib
   - seaborn
-  - scikit-learn
-  - mne
-  - tensorly
+  # Utilities
   - tqdm
-  - ipython
-  - jupyter
-  - pandas
-  - joblib
-  - statsmodels
-  - scikit-image
-  - h5py
+  - psutil
+  - pooch
+  - construct
   - pip
+  - pip:
+    - mne-faster
+    # Handle Python version specific dependencies
+    - "importlib-metadata; python_version<'3.8'"
+    - "importlib-resources; python_version<'3.9'"

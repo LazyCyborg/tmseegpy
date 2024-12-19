@@ -47,8 +47,8 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
 2. Create a virtual environment (optional but very recommended):
 
    ```bash
-    conda create -n tmseegpy- python=3.8
-    conda activate tmseegpy
+   conda env create -f environment.yml
+   conda activate tmseegpy-env
    ``` 
 
 3. Install the package:

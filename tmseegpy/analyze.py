@@ -1,4 +1,5 @@
-# Standard scientific libraries
+# analyze.py
+# Old class that I was using when I used freesurfer and MNE-Python to try and compute the PCIlz from the original Casali paper from 2013
 import numpy as np
 from scipy import stats, signal
 from scipy.stats import zscore

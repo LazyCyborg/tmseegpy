@@ -7,5 +7,6 @@ from .preproc import *
 from .preproc_vis import *
 from .run import *
 from .validate_tep import *
+from .dataloader import *
 
 __version__ = "0.1.0"
