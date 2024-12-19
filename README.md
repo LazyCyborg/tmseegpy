@@ -104,53 +104,64 @@ For an graphical user interface run:
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
 ### Command-Line Arguments
+Configuration Parameters
+The following parameters can be configured either through command-line arguments or the GUI interface:
+Preprocessing Parameters
 
 | Argument                    | Type  | Default  | Description                                                                                |
 |-----------------------------|-------|----------|--------------------------------------------------------------------------------------------|
-| --data_dir                  | str   | ./data   | Path to the data directory containing EEG recordings.                                     |
-| --plot_preproc              | flag  | False    | Enable plotting during preprocessing for quality checks.                                   |
-| --random_seed               | int   | 42       | Seed for random number generators for reproducibility.                                    |
-| --substitute_zero_events_with | int   | 10       | Value to substitute zero events in the data.                                              |
-| --ds_sfreq                  | float | 725      | Desired sampling frequency after downsampling.                                            |
-| --cut_times_tms_start       | float | -2       | Start time (ms) for cutting around TMS pulse for artifact removal.                        |
-| --cut_times_tms_end         | float | 10       | End time (ms) for cutting around TMS pulse for artifact removal.                          |
-| --interpolation_method      | str   | 'cubic'  | Interpolation method ('linear' or 'cubic').                                               |
-| --interp_window_start       | float | 20       | Start time (ms) for interpolation window before artifact.                                 |
-| --interp_window_end         | float | 20       | End time (ms) for interpolation window after artifact.                                    |
-| --fix_artifact_window_start | float | -0.005   | Start time (s) for fixing stimulus artifact using MNE's function.                         |
-| --fix_artifact_window_end   | float | 0.015    | End time (s) for fixing stimulus artifact using MNE's function.                           |
-| --l_freq                    | float | 0.1      | Lower cutoff frequency for bandpass filter.                                               |
-| --h_freq                    | float | 45       | Upper cutoff frequency for bandpass filter.                                               |
-| --notch_freq                | float | 50       | Frequency for notch filter (e.g., to remove powerline noise).                             |
-| --notch_width               | float | 2        | Width of the notch filter.                                                                |
-| --epochs_tmin               | float | -0.41    | Start time (s) for epochs relative to the event.                                          |
-| --epochs_tmax               | float | 0.41     | End time (s) for epochs relative to the event.                                            |
-| --bad_channels_threshold    | float | 3        | Threshold for detecting bad channels using the FASTER algorithm.                          |
-| --bad_epochs_threshold      | float | 3        | Threshold for detecting bad epochs using the FASTER algorithm.                            |
-| --ica_method                | str   | 'fastica'| ICA method for the first ICA pass ('fastica' or 'infomax').                               |
-| --tms_muscle_thresh         | float | 3.0      | Threshold for detecting TMS-evoked muscle artifacts during ICA.                           |
-| --clean_muscle_artifacts    | flag  | False    | Enable muscle artifact cleaning using tensor decomposition.                               |
-| --muscle_window_start       | float | 0.005    | Start time (s) for muscle artifact detection window.                                      |
-| --muscle_window_end         | float | 0.030    | End time (s) for muscle artifact detection window.                                        |
-| --threshold_factor          | float | 1.0      | Threshold factor for muscle artifact detection.                                           |
-| --n_components              | int   | 5        | Number of components for tensor decomposition during muscle artifact cleaning.            |
-| --second_ica_method         | str   | 'infomax'| ICA method for the second ICA pass ('infomax' or 'fastica' ).                             |
-| --ssp_n_eeg                 | int   | 2        | Number of SSP components to apply.                                                        |
-| --apply_csd                 | flag  | False    | Apply Current Source Density (CSD) transformation.                                        |
-| --lambda2                   | float | 1e-5     | Lambda2 parameter for CSD transformation.                                                 |
-| --stiffness                 | int   | 4        | Stiffness parameter for CSD transformation.                                               |
-| --baseline_start            | float | -0.4     | Start time (s) for baseline correction window.                                            |
-| --baseline_end              | float | -0.005   | End time (s) for baseline correction window.                                              |
-| --response_start            | int   | 0        | Start time (ms) for the response window in PCIst analysis.                                |
-| --response_end              | int   | 299      | End time (ms) for the response window in PCIst analysis.                                  |
-| --k                         | float | 1.2      | PCIst parameter k.                                                                        |
-| --min_snr                   | float | 1.1      | Minimum SNR threshold for PCIst analysis.                                                 |
-| --max_var                   | float | 99.0     | Maximum variance percentage to retain in PCA during PCIst.                                |
-| --embed                     | flag  | False    | Enable time-delay embedding in PCIst analysis.                                            |
-| --n_steps                   | int   | 100      | Number of steps for threshold optimization in PCIst analysis.                             |
-| --preproc_qc                | bool  | False    | Generate preprocessing quality control statistics.                                        |
-| --research                  | bool  | False    | Output summary statistics of measurements.                                                |
-
+| Preprocessing Parameters |
+| --data_dir                  | str   | ./data   | Path to the data directory containing EEG recordings                                       |
+| --plot_preproc              | flag  | False    | Enable plotting during preprocessing for quality checks                                    |
+| --ds_sfreq                  | float | 725      | Desired sampling frequency after downsampling                                             |
+| --random_seed               | int   | 42       | Seed for random number generators for reproducibility                                      |
+| --bad_channels_threshold    | float | 1        | Threshold for detecting bad channels using the FASTER algorithm                           |
+| --bad_epochs_threshold      | float | 1        | Threshold for detecting bad epochs using the FASTER algorithm                             |
+| --ssp_n_eeg                | int   | 2        | Number of SSP components to apply                                                         |
+| --substitute_zero_events_with | int   | 10       | Value to substitute zero events in the data                                             |
+| Filtering Parameters |
+| --l_freq                    | float | 1        | Lower cutoff frequency for bandpass filter                                               |
+| --h_freq                    | float | 45       | Upper cutoff frequency for bandpass filter                                               |
+| --notch_freq               | float | 50       | Frequency for notch filter (e.g., to remove powerline noise)                             |
+| --notch_width              | float | 2        | Width of the notch filter                                                                |
+| TMS Artifact Removal Parameters |
+| --initial_cut_start        | float | -2       | Start time (ms) for initial cutting around TMS pulse                                     |
+| --initial_cut_end          | float | 10       | End time (ms) for initial cutting around TMS pulse                                       |
+| --initial_interp_window    | float | 1.0      | Initial interpolation window size (ms)                                                   |
+| --extended_cut_start       | float | -2       | Start time (ms) for extended artifact removal                                            |
+| --extended_cut_end         | float | 15       | End time (ms) for extended artifact removal                                              |
+| --extended_interp_window   | float | 5.0      | Extended interpolation window size (ms)                                                  |
+| --interpolation_method     | str   | 'cubic'  | Interpolation method ('linear' or 'cubic')                                               |
+| Muscle Artifact Parameters |
+| --clean_muscle_artifacts   | flag  | False    | Enable muscle artifact cleaning using tensor decomposition                               |
+| --muscle_window_start      | float | 0.005    | Start time (s) for muscle artifact detection window                                      |
+| --muscle_window_end        | float | 0.030    | End time (s) for muscle artifact detection window                                        |
+| --threshold_factor         | float | 1.0      | Threshold factor for muscle artifact detection                                           |
+| --n_components             | int   | 5        | Number of components for tensor decomposition during muscle artifact cleaning             |
+| ICA Parameters |
+| --ica_method               | str   | 'fastica'| ICA method for the first ICA pass ('fastica' or 'infomax')                              |
+| --tms_muscle_thresh        | float | 2.0      | Threshold for detecting TMS-evoked muscle artifacts during ICA                           |
+| --second_ica_method        | str   | 'infomax'| ICA method for the second ICA pass ('infomax' or 'fastica')                             |
+| CSD Parameters |
+| --apply_csd                | flag  | False    | Apply Current Source Density (CSD) transformation                                        |
+| --lambda2                  | float | 1e-3     | Lambda2 parameter for CSD transformation                                                 |
+| --stiffness               | int   | 3        | Stiffness parameter for CSD transformation                                               |
+| Epoching Parameters |
+| --epochs_tmin              | float | -0.41    | Start time (s) for epochs relative to the event                                         |
+| --epochs_tmax              | float | 0.41     | End time (s) for epochs relative to the event                                           |
+| --baseline_start          | float | -400     | Start time (ms) for baseline correction window                                           |
+| --baseline_end            | float | -50      | End time (ms) for baseline correction window                                             |
+| --amplitude_threshold     | float | 4500     | Amplitude threshold (µV) for epoch rejection                                             |
+| PCIst Parameters |
+| --response_start          | int   | 0        | Start time (ms) for the response window in PCIst analysis                                |
+| --response_end            | int   | 299      | End time (ms) for the response window in PCIst analysis                                  |
+| --k                       | float | 1.2      | PCIst parameter k                                                                        |
+| --min_snr                 | float | 1.1      | Minimum SNR threshold for PCIst analysis                                                 |
+| --max_var                 | float | 99.0     | Maximum variance percentage to retain in PCA during PCIst                                |
+| --embed                   | flag  | False    | Enable time-delay embedding in PCIst analysis                                            |
+| --n_steps                 | int   | 100      | Number of steps for threshold optimization in PCIst analysis                             |
+| Statistics                |
+| --research                | bool  | False    | Output summary statistics of measurements                                                |
 
 
 ### Example Usage
