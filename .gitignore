@@ -35,6 +35,7 @@ data/
 *.h5
 *.npy
 *.npz
+*.png
 
 
 # Jupyter Notebooks

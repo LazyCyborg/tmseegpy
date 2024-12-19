@@ -2,7 +2,7 @@ numpy>=1.16.0
 scipy>=1.2.0
 mne>=1.1
 mne-bids
-picard==2.10.3
+picard==2.12.3
 pooch
 torch
 scikit-learn
