@@ -195,8 +195,8 @@ This is the pipeline that I used after a lot of trial and error. The only way th
 ## Initial Data Loading and Setup
 1. Load raw data from Neurone format
 2. Set random seed (42)
-3. Create events from trigger channel ('STI 014')
-4. Remove non-EEG channels (e.g., EMG1)
+3. Create events from trigger channel ('STI 014' for the Bittium system we usedf)
+4. Remove non-EEG channels (e.g., EMG1 or similar)
 
 ## Stage 1: Initial TMS Artifact Handling
 5. First-pass TMS artifact removal
