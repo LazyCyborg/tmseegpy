@@ -9,12 +9,11 @@ import pytest
 import torch
 from scipy.io import loadmat
 
-from mne_icalabel.datasets import icalabel
-from mne_icalabel.iclabel.network.utils import _format_input
-from mne_icalabel.utils._tests import requires_module
+from tmseegpy.mne_icalabel.datasets import icalabel
+from tmseegpy.mne_icalabel.iclabel.network.utils import _format_input
+from tmseegpy.mne_icalabel.utils._tests import requires_module
 
 dataset_path = icalabel.data_path() / "iclabel"
-
 
 # Network weights
 torch_iclabel_path = files("mne_icalabel.iclabel.network") / "assets" / "ICLabelNet.pt"

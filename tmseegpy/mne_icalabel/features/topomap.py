@@ -3,14 +3,16 @@ from __future__ import annotations  # c.f. PEP 563, PEP 649
 from typing import TYPE_CHECKING
 
 import numpy as np
-from mne import pick_info
+from mne import pick_info, pick_types  # Changed this line - pick_types is now in mne directly
 from mne.channels.layout import _find_topomap_coords
 from mne.defaults import _BORDER_DEFAULT, _EXTRAPOLATE_DEFAULT, _INTERPOLATION_DEFAULT
 from mne.utils import _validate_type, check_version
 from mne.viz.topomap import _check_extrapolate, _make_head_outlines, _setup_interp
 
 if check_version("mne", "1.6"):
-    from mne._fiff.pick import _pick_data_channels, _picks_to_idx
+    def _pick_data_channels(info, exclude=()):
+        return pick_types(info, meg=False, eeg=True, exclude=exclude)
+    from mne._fiff.pick import _picks_to_idx
 else:
     from mne.io.pick import _pick_data_channels, _picks_to_idx
 

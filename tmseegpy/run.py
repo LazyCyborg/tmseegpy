@@ -1,6 +1,8 @@
 # run.py
 import os
 from pathlib import Path
+from tabnanny import verbose
+
 import numpy as np
 import matplotlib.pyplot as plt
 from .preproc import TMSEEGPreprocessor
@@ -11,6 +13,7 @@ import mne
 import time
 from .neurone_loader import Recording
 import argparse
+import queue
 
 mne.viz.use_browser_backend("matplotlib")
 plt.rcParams['figure.figsize'] = [8, 6]
@@ -247,6 +250,46 @@ def generate_research_stats(pcist_values, pcist_objects, details_list, session_n
     return output_file
 
 
+'''def schedule_on_main_thread(ica_instance, epochs, title="Manual ICA"):
+    """Schedule ICA component selection on the main thread."""
+    import builtins
+    from .gui.ica_handler import select_ica_components
+    import queue
+    import threading
+
+    # Get the main Tk root from builtins
+    root = getattr(builtins, "GUI_MAIN_ROOT", None)
+    if root is None:
+        raise RuntimeError("No main Tk root found in builtins.GUI_MAIN_ROOT")
+
+    result_queue = queue.Queue()
+    selection_complete = threading.Event()
+
+    def run_selection():
+        try:
+            # Create the dialog in the main thread
+            result = select_ica_components(ica_instance, epochs, title, root=root)
+            result_queue.put(result)
+        except Exception as e:
+            print(f"Error in ICA selection: {str(e)}")
+            result_queue.put([])
+        finally:
+            selection_complete.set()
+
+    # If we're already in main thread, run directly
+    if threading.current_thread() is threading.main_thread():
+        run_selection()
+    else:
+        # Schedule on main thread and wait for completion
+        root.after(0, run_selection)
+        selection_complete.wait(timeout=300)  # 5-minute timeout
+
+    try:
+        return result_queue.get_nowait()
+    except queue.Empty:
+        print("No components selected within timeout period")
+        return []'''
+
 def process_subjects(args):
     import builtins
     setattr(builtins, 'STOP_PROCESSING', False)
@@ -381,7 +424,7 @@ def process_subjects(args):
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
         #if args.plot_preproc:
-           # plot_raw_segments(raw, args.output_dir, step_name='raw',)
+           # plot_raw_segments(raw, args.output_dir, step_name='raw')
 
         # Preprocessing
         processor = TMSEEGPreprocessor(raw, ds_sfreq=args.ds_sfreq)
@@ -395,11 +438,12 @@ def process_subjects(args):
                                         cut_times_tms=(-2, 10))  # Step 9
 
         #if args.plot_preproc:
-           # plot_raw_segments(raw, args.output_dir, step_name='raw_i',)
+           # plot_raw_segments(raw, args.output_dir, step_name='raw_i')
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
-        print("\nFiltering raw eeg data...")
-        if check_stop(): return []
-        processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width, plot_psd=False)
+        if args.filter_raw:
+            print("\nFiltering raw eeg data...")
+            if check_stop(): return []
+            processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width)
 
         #if args.plot_preproc:
           #  plot_raw_segments(raw, args.output_dir, step_name='raw_f',)
@@ -422,10 +466,19 @@ def process_subjects(args):
         print("\nRunning first ICA...")
         if check_stop(): return []
         if args.plot_preproc:
-            plot_components=True
+            plot_components = True
         else:
-            plot_components=False
-        processor.run_ica(output_dir=args.output_dir, session_name=session_name, method=args.ica_method, tms_muscle_thresh=args.tms_muscle_thresh, plot_components=plot_components)
+            plot_components = False
+
+        # Modified first ICA call
+        processor.run_ica(
+            output_dir=args.output_dir,
+            session_name=session_name,
+            method=args.ica_method,
+            tms_muscle_thresh=args.tms_muscle_thresh,
+            plot_components=plot_components,
+            manual_mode=args.first_ica_manual
+        )
         if args.plot_preproc:
             plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='ica1')
         if args.clean_muscle_artifacts:
@@ -437,8 +490,6 @@ def process_subjects(args):
                 n_components=args.n_components,
                 verbose=True
             )
-        if args.plot_preproc:
-            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='clean')
         if not args.skip_second_artifact_removal:
             print("\nExtending TMS artifact removal window...")
             processor.remove_tms_artifact(cut_times_tms=(-2, 15))  
@@ -450,10 +501,26 @@ def process_subjects(args):
             
         # https://mne.tools/mne-icalabel/stable/generated/examples/00_iclabel.html#sphx-glr-generated-examples-00-iclabel-py
 
+        if not args.filter_raw:
+            print("\nFiltering epoched data...")
+            processor.filter_epochs(
+                l_freq=args.l_freq,
+                h_freq=args.h_freq,
+                notch_freq=args.notch_freq,
+                notch_width=args.notch_width,
+            )
+
+        if args.plot_preproc:
+            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='filtered')
+
         if not args.no_second_ICA:
             print("\nRunning second ICA...")
             if check_stop(): return []
-            processor.run_second_ica(method=args.second_ica_method, exclude_labels=["eye blink", "heart beat", "muscle artifact", "channel noise", "line noise"])
+            processor.run_second_ica(
+                method=args.second_ica_method,
+                exclude_labels=["eye blink", "heart beat", "muscle artifact", "channel noise", "line noise"],
+                manual_mode=args.second_ica_manual
+            )
 
         if args.apply_ssp:    
             print("\nApplying SSP...")
@@ -473,6 +540,7 @@ def process_subjects(args):
             plot_epochs_grid(epochs, args.output_dir, session_name, step_name='final')
 
         epochs = processor.epochs
+        epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
 
         if args.validate_teps:
             try:
@@ -520,7 +588,8 @@ def process_subjects(args):
                 components = None
         
         # Final quality check
-        fig = processor.plot_evoked_response(ylim={'eeg': [-2, 2]}, xlim=(-0.3, 0.3), title="Final Evoked Response", show=args.show_evoked)
+        # Maybe use ylim={'eeg': [-2, 2]},
+        fig = processor.plot_evoked_response(xlim=(-0.1, 0.4), title="Final Evoked Response", show=args.show_evoked)
         fig.savefig(f"{args.output_dir}/evoked_{session_name}.png")  
         plt.close(fig)
         
@@ -608,8 +677,10 @@ if __name__ == "__main__":
                         help='Interpolation method (TESA requires cubic)')
     parser.add_argument('--skip_second_artifact_removal', action='store_true',
                     help='Skip the second stage of TMS artifact removal')
+    parser.add_argument('--filter_raw', type=bool, default=False,
+                        help='Whether to filter raw data instead of epoched (default: False)')
     parser.add_argument('--l_freq', type=float, default=0.1,
-                        help='Lower frequency for filtering (default: 0.1)')
+                        help='Lower frequency for filtering (default: 1)')
     parser.add_argument('--h_freq', type=float, default=45,
                         help='Upper frequency for filtering (default: 45)')
     parser.add_argument('--notch_freq', type=float, default=50,
@@ -636,6 +707,10 @@ if __name__ == "__main__":
                     help='End time for muscle artifact window (default: 0.030)')
     parser.add_argument('--threshold_factor', type=float, default=1.0,
                     help='Threshold factor for muscle artifact cleaning (default: 1.0)')
+    parser.add_argument('--first_ica_manual', action='store_true',
+                        help='Enable manual component selection for first ICA')
+    parser.add_argument('--second_ica_manual', action='store_true',
+                        help='Enable manual component selection for second ICA')
     parser.add_argument('--n_components', type=int, default=5,
                     help='Number of components for muscle artifact cleaning (default: 5)')
     parser.add_argument('--no_second_ICA', action='store_true',

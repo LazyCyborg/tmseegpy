@@ -1,0 +1,3 @@
+include tmseegpy/mne_icalabel/iclabel/network/assets/ICLabelNet.pt
+include tmseegpy/mne_icalabel/iclabel/network/assets/*
+recursive-include tmseegpy/mne_icalabel/iclabel/network/assets *

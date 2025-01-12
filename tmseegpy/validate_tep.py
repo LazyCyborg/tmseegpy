@@ -104,7 +104,7 @@ def plot_tep_analysis(evoked: mne.Evoked,
     ax_gfp.set_title('Global Field Power with TEP Components')
     ax_gfp.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax_gfp.grid(True, alpha=0.3)
-    ax_gfp.set_xlim(-100, 300)
+    ax_gfp.set_xlim(-100, 400)
     
     # Create subplot for topomaps
     gs_topos = gs[1].subgridspec(1, len(components), wspace=0.3)

@@ -1,3 +1,44 @@
 [build-system]
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "tmseegpy"
+version = "0.1.7"
+description = "A pipeline for preprocessing and analyzing TMS-EEG data"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "LazyCyborg"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "numpy>=1.16.0",
+    "scipy>=1.2.0",
+    "mne>=1.1",
+    "pooch",
+    "torch",
+    "scikit-learn",
+    "tensorly",
+    "matplotlib",
+    "seaborn",
+    "tqdm",
+    "mne-faster",
+    "psutil",
+    "construct",
+    "importlib-metadata; python_version < '3.8'",
+    "importlib-resources; python_version < '3.9'"
+]
+
+[project.scripts]
+tmseegpy = "tmseegpy.gui:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"tmseegpy.mne_icalabel.iclabel.network" = ["assets/*"]

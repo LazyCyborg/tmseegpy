@@ -51,6 +51,7 @@ class MneExportable(abc.ABC):
                          "and all its dependencies.")
             return False
 
+
     def to_mne(self, substitute_zero_events_with=None, copy=False, channel_type_mappings=None):
         """
         Convert loaded data to a mne.io.RawArray
@@ -73,10 +74,13 @@ class MneExportable(abc.ABC):
         :raises ImportError: if the mne package is not installed
         :raises UnknownChannelException: if a unknown channel name is encountered (see channel_type_mappings parameter)
         """
+        from datetime import datetime, timezone, timedelta, date
+        from copy import deepcopy
+        import numpy as np
 
         if not hasattr(self, '_mne'):
-            if not self._import_mne():
-                raise ImportError
+                if not self._import_mne():
+                    raise ImportError
         mne = self._mne
 
         allowed_channel_types = ['meg', 'eeg', 'stim', 'eog', 'ecg', 'emg', 'misc', 'resp', 'chpi', 'exci', 'ias',
@@ -200,9 +204,29 @@ class MneExportable(abc.ABC):
             mne_sub_info['his_id'] = self.subject_info['id']
             mne_sub_info['last_name'] = self.subject_info['last_name']
             mne_sub_info['first_name'] = self.subject_info['first_name']
+            
+            # Modified birthday handling
             dob = self.subject_info['date_of_birth']
             if dob is not None:
-                mne_sub_info['birthday'] = (dob.year, dob.month, dob.day)
+                if isinstance(dob, (tuple, list)):
+                    # Convert tuple/list to date object
+                    try:
+                        dob = date(year=dob[0], month=dob[1], day=dob[2])
+                    except (IndexError, TypeError):
+                        dob = None
+                elif isinstance(dob, str):
+                    # Try to parse string date
+                    try:
+                        dob = datetime.strptime(dob, '%Y-%m-%d').date()
+                    except ValueError:
+                        dob = None
+                elif isinstance(dob, datetime):
+                    dob = dob.date()
+                elif not isinstance(dob, date):
+                    dob = None
+                    
+                mne_sub_info['birthday'] = dob
+
             cnt.info['subject_info'] = mne_sub_info
 
         if self.time_start is not None:

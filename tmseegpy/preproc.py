@@ -1,4 +1,4 @@
-# Standard scientific libraries
+# preproc.py
 import numpy as np
 from scipy import stats, signal
 from scipy.interpolate import interp1d
@@ -11,6 +11,16 @@ from scipy import optimize
 import mne
 from mne.preprocessing import compute_current_source_density
 from mne.io.constants import FIFF
+from matplotlib.widgets import CheckButtons, Button
+from matplotlib.gridspec import GridSpec
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import tkinter as tk
+from tkinter import ttk
+import threading
+import queue
+import mne
+from mne.preprocessing import ICA
+from typing import List
 
 from typing import Optional, Union, Dict, List, Tuple, Any
 import warnings
@@ -85,6 +95,13 @@ class TMSEEGPreprocessor:
         self.epochs = None
         self.evoked = None
         self.ds_sfreq = ds_sfreq
+
+        self.first_ica_manual = False
+        self.second_ica_manual = False
+        self.selected_first_ica_components = []
+        self.selected_second_ica_components = []
+        self.ica = None
+        self.ica2 = None
 
         self.processing_stage = {
             'initial_removal': False,
@@ -555,109 +572,350 @@ class TMSEEGPreprocessor:
         raw_out.set_annotations(raw_out.annotations)
         self.raw = raw_out
 
-    '''def _apply_interpolation(self, data, epoch_idx, start_idx, end_idx, method, sfreq, window_samples):
-        if method == 'linear':
-            x_fit = np.array([max(0, start_idx-1), min(data.shape[2 if epoch_idx is not None else 1]-1, end_idx+1)])
-            x_interp = np.arange(start_idx, end_idx+1)
-            
-            for ch in range(data.shape[1]):
-                y_fit = data[epoch_idx, ch, x_fit.astype(int)] if epoch_idx is not None else data[ch, x_fit.astype(int)]
-                f = interp1d(x_fit, y_fit, kind='linear')
-                if epoch_idx is not None:
-                    data[epoch_idx, ch, start_idx:end_idx+1] = f(x_interp)
-                else:
-                    data[ch, start_idx:end_idx+1] = f(x_interp)
-        else:  # cubic
-            window_start = max(0, start_idx - window_samples[0])
-            window_end = min(data.shape[2 if epoch_idx is not None else 1]-1, end_idx + window_samples[1])
-            
-            x_fit = np.concatenate([
-                np.arange(window_start, start_idx),
-                np.arange(end_idx+1, window_end+1)
-            ])
-            x_interp = np.arange(start_idx, end_idx+1)
-            
-            for ch in range(data.shape[1]):
-                y_fit = data[epoch_idx, ch, x_fit.astype(int)] if epoch_idx is not None else data[ch, x_fit.astype(int)]
-                x_norm = x_fit - x_fit[0]
-                x_interp_norm = x_interp - x_fit[0]
-                f = interp1d(x_norm, y_fit, kind='cubic')
-                if epoch_idx is not None:
-                    data[epoch_idx, ch, start_idx:end_idx+1] = f(x_interp_norm)
-                else:
-                    data[ch, start_idx:end_idx+1] = f(x_interp_norm)'''
-    
-    def staged_artifact_removal(self, verbose: bool = True) -> None:
-        """
-        Perform staged TMS artifact removal following TESA pipeline.
-        """
-        # Stage 1: Initial removal (-2 to 10 ms)
-        if verbose:
-            print("Stage 1: Initial TMS artifact removal (-2 to 10 ms)")
-        self.remove_tms_artifact(cut_times_tms=(-2, 10), verbose=verbose)
-        self.interpolate_tms_artifact(method='cubic', 
-                                    interp_window=1.0,
-                                    cut_times_tms=(-2, 10),
-                                    verbose=verbose)
-        
-        self.run_ica()
-        
-        # Stage 2: Extended removal (-2 to 15 ms)
-        if verbose:
-            print("Stage 2: Extended TMS artifact removal (-2 to 15 ms)")
-        self.remove_tms_artifact(cut_times_tms=(-2, 15), verbose=verbose)
-        self.interpolate_tms_artifact(method='cubic',
-                                    interp_window=5.0,
-                                    cut_times_tms=(-2, 15),
-                                    verbose=verbose)
 
-        if verbose:
-            print("Staged artifact removal complete")
+    from typing import Optional, List
+    import threading
+    import tkinter as tk
 
-    def run_ica(self, output_dir: str, session_name: str, method: str = "fastica", tms_muscle_thresh: float = 1.0, plot_components: bool = True,) -> None:
-        """
-        Run first ICA decomposition focusing on TMS-evoked muscle artifacts.
-        
-        Parameters
-        ----------
-        method : str
-            ICA method to use ('infomax' or 'fastica')
-        tms_muscle_thresh : float
-            Threshold for muscle component detection
-            Default is 1.0 based on empirical testing
-        """
+    def run_ica(self,
+                output_dir: str,
+                session_name: str,
+                method: str = "fastica",
+                tms_muscle_thresh: float = 1.0,
+                plot_components: bool = False,
+                manual_mode: bool = False) -> None:
+        """Run ICA decomposition with thread-safe manual component selection."""
         if self.epochs is None:
             raise ValueError("Must create epochs before running ICA")
-        # Store pre-ICA epochs
+
         self.epochs_pre_ica = self.epochs.copy()
-        # Set up ICA
+
+        # Fit ICA
+        print("\nFitting ICA...")
         self.ica = ICA(
             max_iter="auto",
             method=method,
             random_state=42
         )
-        # Fit ICA
         self.ica.fit(self.epochs)
-        # Detect muscle components
-        muscle_comps, scores = self.detect_tms_muscle_components(
-            tms_muscle_thresh=tms_muscle_thresh,
-            verbose=True
-        )
-        self.preproc_stats['muscle_components'] = muscle_comps
-        if plot_components:
-            # Plot results
-            self.plot_muscle_components(output_dir, session_name, muscle_comps, scores)
-        # Apply ICA
-        if len(muscle_comps) > 0:
-            print(f"Excluding {len(muscle_comps)} muscle components: {muscle_comps}")
-            self.ica.apply(self.epochs, exclude=muscle_comps)
-        else:
-            print("No muscle components detected to exclude")
-        # Apply baseline correction maybe not required if we run second ICA
-        #self.epochs.apply_baseline(baseline=(-0.1, -0.002))
-        #print('Applied baseline corrections post first ICA')
+        print("ICA fit complete")
 
-    def filter_raw(self, l_freq=1, h_freq=90, notch_freq=50, notch_width=2, plot_psd=True, fmax=200):
+        if manual_mode:
+            # Get the main Tk root window early to ensure GUI availability
+            import builtins
+            root = getattr(builtins, 'GUI_MAIN_ROOT', None)
+            if root is None:
+                raise RuntimeError("No main Tk root found")
+
+            self.first_ica_manual = True
+            print("\nStarting manual component selection...")
+            print("A new window will open for component selection.")
+
+            # Import the GUI handler here to ensure it's available
+            from .gui.ica_handler import ICAComponentSelector
+
+            # Calculate all component information before creating GUI
+            try:
+                # Calculate TMS muscle scores first
+                print("\nCalculating TMS muscle component scores...")
+                muscle_comps, component_scores = self.detect_tms_muscle_components(
+                    tms_muscle_thresh=tms_muscle_thresh,
+                    verbose=True
+                )
+                print(f"Found {len(muscle_comps)} potential muscle components")
+
+                # Then calculate ICLabel classifications
+                print("\nRunning ICLabel classification...")
+                from mne_icalabel import label_components
+                ic_labels = label_components(self.epochs, self.ica, method="iclabel")
+
+                # Print component information
+                print("\nComponent classifications:")
+                for idx, label in enumerate(ic_labels['labels']):
+                    muscle_score = component_scores['muscle_ratios'][idx]
+                    print(f"IC{idx}: {label} (TMS-muscle score: {muscle_score:.2f})")
+
+            except Exception as e:
+                print(f"\nWarning: Error in component analysis: {str(e)}")
+                print("Continuing with manual selection without automatic scores")
+                component_scores = None
+                ic_labels = None
+
+            # Create synchronization primitives
+            selection_complete = threading.Event()
+            result_queue = queue.Queue()
+
+            def handle_selection(components):
+                """Callback to handle selected components"""
+                try:
+                    result_queue.put(components)
+                finally:
+                    selection_complete.set()
+
+            # Function to create and show selector
+            def create_selector():
+                try:
+                    selector = ICAComponentSelector(root)
+                    selector.select_components(
+                        ica_instance=self.ica,
+                        epochs=self.epochs,
+                        title="First ICA - Select Components to Remove",
+                        callback=handle_selection,
+                        component_scores=component_scores,
+                        component_labels=ic_labels
+                    )
+                except Exception as e:
+                    print(f"Error creating selector: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    selection_complete.set()
+                    result_queue.put([])
+
+            # Schedule selector creation based on thread
+            if threading.current_thread() is threading.main_thread():
+                create_selector()
+            else:
+                root.after(0, create_selector)
+
+            # Wait for selection to complete with timeout
+            if not selection_complete.wait(timeout=300):  # 5-minute timeout
+                print("\nComponent selection timed out")
+                return
+
+            try:
+                # Get selected components from queue
+                selected_components = result_queue.get_nowait()
+            except queue.Empty:
+                print("\nNo components selected")
+                return
+
+            # Apply selected components
+            if selected_components:
+                print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
+                self.ica.apply(self.epochs, exclude=selected_components)
+                self.selected_first_ica_components = selected_components
+                self.preproc_stats['muscle_components'] = selected_components
+            else:
+                print("\nNo components selected for exclusion")
+                self.preproc_stats['muscle_components'] = []
+
+        else:
+            # Automatic detection
+            muscle_comps, _ = self.detect_tms_muscle_components(
+                tms_muscle_thresh=tms_muscle_thresh,
+                verbose=True
+            )
+
+            self.preproc_stats['muscle_components'] = muscle_comps
+
+            if muscle_comps:
+                print(f"Excluding {len(muscle_comps)} muscle components: {muscle_comps}")
+                self.ica.apply(self.epochs, exclude=muscle_comps)
+            else:
+                print("No muscle components detected to exclude")
+
+    def run_second_ica(self,
+                       method: str = "infomax",
+                       exclude_labels: List[str] = ["eye blink", "heart beat", "muscle artifact",
+                                                    "channel noise", "line noise"],
+                       manual_mode: bool = False) -> None:
+        """Run second ICA with thread-safe manual component selection."""
+        if not hasattr(self, 'epochs'):
+            raise ValueError("Must have epochs data to run ICA")
+
+        print("\nPreparing for second ICA...")
+        self.set_average_reference()
+
+        # Initialize and fit ICA
+        fit_params = dict(extended=True) if method == "infomax" else None
+        self.ica2 = ICA(max_iter="auto", method=method, random_state=42, fit_params=fit_params)
+        self.ica2.fit(self.epochs)
+        print("Second ICA fit complete")
+
+        if manual_mode:
+            # Get the main Tk root window
+            import builtins
+            root = getattr(builtins, 'GUI_MAIN_ROOT', None)
+            if root is None:
+                raise RuntimeError("No main Tk root found")
+
+            # Import the GUI handler here to ensure it's available
+            from .gui.ica_handler import ICAComponentSelector
+
+            self.second_ica_manual = True
+            print("\nStarting manual component selection for second ICA...")
+            print("A new window will open for component selection.")
+
+            try:
+                # Run ICLabel classification
+                print("\nRunning ICLabel classification...")
+                from mne_icalabel import label_components
+                ic_labels = label_components(self.epochs, self.ica2, method="iclabel")
+
+                # Print component classifications
+                print("\nComponent classifications:")
+                for idx, label in enumerate(ic_labels['labels']):
+                    print(f"IC{idx}: {label}")
+
+                # Show suggested components
+                suggested_exclude = [idx for idx, label in enumerate(ic_labels['labels'])
+                                     if label in exclude_labels]
+                if suggested_exclude:
+                    print(f"\nSuggested components for removal: {suggested_exclude}")
+                    print("(Based on ICLabel classification)")
+
+            except Exception as e:
+                print(f"\nWarning: Error in ICLabel classification: {str(e)}")
+                print("Continuing with manual selection without automatic classification")
+                ic_labels = None
+
+            # Create synchronization primitives
+            selection_complete = threading.Event()
+            result_queue = queue.Queue()
+
+            def handle_selection(components):
+                """Callback to handle selected components"""
+                try:
+                    result_queue.put(components)
+                finally:
+                    selection_complete.set()
+
+            # Function to create and show selector
+            def create_selector():
+                try:
+                    selector = ICAComponentSelector(root)
+                    selector.select_components(
+                        ica_instance=self.ica2,
+                        epochs=self.epochs,
+                        title="Second ICA - Select Components to Remove",
+                        callback=handle_selection,
+                        component_scores=None,  # No TMS-muscle scores for second ICA
+                        component_labels=ic_labels
+                    )
+                except Exception as e:
+                    print(f"Error creating selector: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    selection_complete.set()
+                    result_queue.put([])
+
+            # Schedule selector creation based on thread
+            if threading.current_thread() is threading.main_thread():
+                create_selector()
+            else:
+                root.after(0, create_selector)
+
+            # Wait for selection to complete with timeout
+            if not selection_complete.wait(timeout=300):  # 5-minute timeout
+                print("\nComponent selection timed out")
+                return
+
+            try:
+                # Get selected components from queue
+                selected_components = result_queue.get_nowait()
+            except queue.Empty:
+                print("\nNo components selected")
+                return
+
+            # Apply selected components
+            if selected_components:
+                print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
+                self.ica2.apply(self.epochs, exclude=selected_components)
+                self.selected_second_ica_components = selected_components
+                self.preproc_stats['excluded_ica_components'] = selected_components
+            else:
+                print("\nNo components selected for exclusion")
+                self.preproc_stats['excluded_ica_components'] = []
+
+        else:
+            # Automatic labeling
+            print("\nRunning automatic component labeling...")
+            try:
+                from mne_icalabel import label_components
+                ic_labels = label_components(self.epochs, self.ica2, method="iclabel")
+                labels = ic_labels["labels"]
+
+                print("\nComponent classifications:")
+                for n, lab in enumerate(labels):
+                    print(f"Component {n}: {lab}")
+
+                exclude_idx = [idx for idx, lab in enumerate(labels) if lab in exclude_labels]
+
+                if exclude_idx:
+                    print(f"\nExcluding {len(exclude_idx)} components in second ICA")
+                    print(f"Excluded components: {exclude_idx}")
+                    self.ica2.apply(self.epochs, exclude=exclude_idx)
+                    self.preproc_stats['excluded_ica_components'] = exclude_idx
+                else:
+                    print("\nNo components excluded in second ICA")
+                    self.preproc_stats['excluded_ica_components'] = []
+
+            except Exception as e:
+                print(f"Warning: Could not run automatic component labeling: {str(e)}")
+                print("No components will be automatically excluded")
+                self.preproc_stats['excluded_ica_components'] = []
+
+        print('Second ICA complete')
+
+    def detect_tms_muscle_components(self,
+                                     tms_muscle_window: Tuple[float, float] = (11, 30),
+                                     tms_muscle_thresh: float = 2,
+                                     verbose: bool = True) -> Tuple[List[int], Dict]:
+        """Detect muscle components"""
+        if not hasattr(self, 'ica'):
+            raise ValueError("Must run ICA before detecting muscle components")
+
+        if verbose:
+            print(f"Analyzing {self.ica.n_components_} components")
+            print(f"Using muscle window: {tms_muscle_window}ms")
+            print(f"Using threshold: {tms_muscle_thresh}")
+
+        # Get ICA components
+        components = self.ica.get_sources(self.epochs)
+        n_components = components.get_data().shape[1]
+
+        # Get sampling rate and convert windows to samples
+        sfreq = self.epochs.info['sfreq']
+        tms_muscle_window_samples = np.array([np.abs(self.epochs.times - w / 1000).argmin()
+                                              for w in tms_muscle_window])
+
+        # Initialize outputs
+        muscle_components = []
+        component_scores = {
+            'muscle_ratios': np.zeros(n_components),
+            'window_scores': np.zeros(n_components),
+            'total_scores': np.zeros(n_components),
+        }
+
+        # Process each component
+        for comp_idx in range(n_components):
+            if verbose and comp_idx % 5 == 0:
+                print(f"\nAnalyzing component {comp_idx}")
+
+            comp_data = components.get_data()[:, comp_idx, :].reshape(-1)
+            comp_z = zscore(comp_data)
+
+            # Calculate scores
+            muscle_score = np.abs(comp_z)
+            window_score = np.mean(muscle_score[tms_muscle_window_samples[0]:tms_muscle_window_samples[1]])
+            total_score = np.mean(muscle_score)
+            muscle_ratio = window_score / total_score
+
+            if verbose:
+                print(f"Comp. {comp_idx} TMS-evoked muscle ratio is {muscle_ratio:.2f}.")
+
+            # Store metrics
+            component_scores['muscle_ratios'][comp_idx] = muscle_ratio
+            component_scores['window_scores'][comp_idx] = window_score
+            component_scores['total_scores'][comp_idx] = total_score
+
+            # Classify component
+            if muscle_ratio >= tms_muscle_thresh:
+                muscle_components.append(comp_idx)
+
+        return muscle_components, component_scores
+
+    def filter_raw(self, l_freq=1, h_freq=90, notch_freq=50, notch_width=2):
         """
         Apply bandpass and notch filters to raw data.
         
@@ -671,18 +929,10 @@ class TMSEEGPreprocessor:
             Frequency for the notch filter
         notch_width : float
             Width of the notch filter
-        plot_psd : bool
-            Whether to plot power spectral density before and after filtering
         fmax: int
             Maximum frequency to display
         """
-        if plot_psd:
-            # Store copy for before/after comparison
-            raw_orig = self.raw.copy()
-            
-            # Plot PSD before filtering
-            fig = raw_orig.compute_psd(fmax=fmax).plot(show=False)
-            fig.suptitle('PSD Before Filtering')
+        print(f"Applying bandpass and notch filters to raw data with frequency {l_freq}Hz and frequency {h_freq}Hz")
         
         # Apply bandpass filter
         self.raw.filter(
@@ -708,127 +958,69 @@ class TMSEEGPreprocessor:
             phase='zero',
             verbose=True
         )
-        
-        if plot_psd:
-            # Plot PSD after filtering
-            fig = self.raw.compute_psd(fmax=fmax).plot(show=False)
-            fig.suptitle('PSD After Filtering')
-            plt.show()
             
         print("Raw data filtering complete")
 
-    def filter_epochs(self, l_freq=1, h_freq=90, notch_freq=50, notch_width=2, notch=True):
+    def filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
         """
-        Filter epochs and plot PSD before and after filtering.
+        Filter epoched data using a zero-phase Butterworth filter.
 
         Parameters
         ----------
         l_freq : float
-            Lower cutoff frequency for the bandpass filter
+            Lower frequency cutoff for bandpass filter (default: 1 Hz)
         h_freq : float
-            Upper cutoff frequency for the bandpass filter 
+            Upper frequency cutoff for bandpass filter (default: 100 Hz)
         notch_freq : float
-            Frequency for the notch filter
+            Frequency for notch filter (default: 50 Hz)
         notch_width : float
-            Width of the notch filter
-        notch: bool
-            Set to true if you want to apply a notch filter
+            Width of notch filter (default: 10 Hz)
         """
+        from scipy.signal import butter, filtfilt
+
         if self.epochs is None:
-            raise ValueError("Must create epochs before plotting PSD")
+            raise ValueError("Must create epochs before filtering")
 
-        # Before filtering (store copy)
-        epochs_orig = self.epochs.copy()
+        print(f"Filtering with l_freq :{l_freq} Hz, h_freq: {h_freq} Hz notch_freq: {notch_freq} Hz and notch_width: {notch_width} Hz")
 
-        # Plot PSD before filtering
-        fig = epochs_orig.compute_psd(method="multitaper", fmin=0, fmax=100).plot(average=True, show=False)
-        fig.suptitle('PSD Before Filtering')
+        # Create a copy of the epochs object
+        filtered_epochs = self.epochs.copy()
 
-        # Apply bandpass filter
-        self.epochs.filter(l_freq=l_freq, 
-                        h_freq=h_freq,
-                        picks='eeg',
-                        filter_length='auto',  
-                        l_trans_bandwidth=0.5,  # Specify transition bandwidth for low cutoff
-                        h_trans_bandwidth=0.5,  # Specify transition bandwidth for high cutoff
-                        method='fir',
-                        fir_design='firwin',
-                        phase='zero',
-                        verbose=True)
-        if notch:
+        # Calculate filter parameters
+        sfreq = filtered_epochs.info['sfreq']
+        nyquist = sfreq / 2
+        order = 2  # Filter order (4th order Butterworth)
+
+        # Bandpass filter
+        low = l_freq / nyquist
+        high = h_freq / nyquist
+        b_bandpass, a_bandpass = butter(order, [low, high], btype='band')
+
+        # Notch filter
+        notch_low = (notch_freq - notch_width / 2) / nyquist
+        notch_high = (notch_freq + notch_width / 2) / nyquist
+        b_notch, a_notch = butter(order, [notch_low, notch_high], btype='bandstop')
+
+        try:
+            data = filtered_epochs.get_data()
+
+            # Apply bandpass filter
+            data_bandpass = filtfilt(b_bandpass, a_bandpass, data, axis=-1)
+
             # Apply notch filter
-            self.epochs._data = mne.filter.notch_filter(
-                self.epochs._data, 
-                Fs=self.epochs.info['sfreq'], 
-                freqs=notch_freq,
-                notch_widths=notch_width, 
-                method='fir',
-                filter_length='auto',
-                phase='zero',
-                verbose=True
-            )
+            data_notch = filtfilt(b_notch, a_notch, data_bandpass, axis=-1)
 
-        # Plot PSD after filtering
-        fig = self.epochs.compute_psd(method="multitaper", fmin=0, fmax=100).plot(average=True, show=False)
-        fig.suptitle('PSD After Filtering')
+            # Update the epoched data in the copied epochs object
+            filtered_epochs._data = data_notch
 
-        plt.show()
+        except Exception as e:
+            print(f"Error during filtering: {str(e)}")
+            raise
 
-    def run_second_ica(self, method: str = "infomax", 
-                    exclude_labels: List[str] = ["eye blink", "muscle artifact", "heart beat", "channel noise"]) -> None:
-        """
-        Run a second ICA specifically for remaining physiological artifacts using ICLabel.
-        
-        Parameters
-        ----------
-        method : str
-            ICA method to use ('infomax' or 'fastica')
-        exclude_labels : list
-            List of ICLabel categories to exclude
-        """
-        if not hasattr(self, 'epochs'):
-            raise ValueError("Must have epochs data to run ICA")
-        
-        self.set_average_reference()
-        if method == "infomax":
-            fit_params=dict(extended=True)
-        else:
-            fit_params=None
-        # Set up ICA
-        self.ica2 = ICA(
-            max_iter="auto",
-            method=method,
-            random_state=42,
-            fit_params=fit_params,
-        )
-        
-        # Fit ICA
-        self.ica2.fit(self.epochs)
-        
-        # Label components with ICLabel
-        ic_labels = label_components(self.epochs, self.ica2, method="iclabel")
-        labels = ic_labels["labels"]
-        
-        # Print all component labels
-        for n, label in enumerate(labels):
-            print(f"Component {n}: {label}")
-        
-        # Find components to exclude based on ICLabel
-        exclude_idx = [
-            idx for idx, label in enumerate(labels) if label in exclude_labels
-        ]
-        
-        if len(exclude_idx) > 0:
-            print(f"Excluding {len(exclude_idx)} components in second ICA")
-            print(f"Excluded components: {exclude_idx}")
-            self.ica2.apply(self.epochs, exclude=exclude_idx)
-            self.preproc_stats['excluded_ica_components'] = exclude_idx
+        print("\nFiltering complete")
 
-        else:
-            print("No components excluded in second ICA")
-
-        self.epochs.apply_baseline(baseline=(-0.1, -0.002))
-        print('Applied baseline corrections post second ICA')
+        # Replace the original epochs with the filtered epochs
+        self.epochs = filtered_epochs
 
     def detect_tms_muscle_components(self, 
                                 tms_muscle_window: Tuple[float, float] = (11, 30), 
@@ -954,33 +1146,7 @@ class TMSEEGPreprocessor:
         fig.savefig(os.path.join(output_dir, session_name, f"Muscle components.png"), 
             dpi=300, bbox_inches='tight')
         plt.close(fig)
-        
-        '''
-        # Plot component properties 
-        for comp in muscle_components:
-            self.ica.plot_properties(self.epochs, picks=comp, 
-                                psd_args=dict(fmax=70))
-        
-        # Create summary plot
-        fig, ax = plt.subplots(figsize=(12, 4))
-        
-        # Plot muscle ratios
-        bars = ax.bar(range(len(component_scores['muscle_ratios'])), 
-                    component_scores['muscle_ratios'])
-        ax.axhline(y=2, color='r', linestyle='--', label='Threshold')
-        
-        # Color the muscle components
-        for comp in muscle_components:
-            bars[comp].set_color('red')
-        
-        ax.set_xlabel('Component')
-        ax.set_ylabel('Muscle Ratio')
-        ax.set_title('TMS-Evoked Muscle Activity')
-        ax.legend()
-        
-        plt.tight_layout()
-        plt.show()
-        '''
+
     def set_average_reference(self):
         '''
         - Rereference EEG and apply projections
@@ -1031,7 +1197,7 @@ class TMSEEGPreprocessor:
 
 
     def plot_evoked_response(self, picks: Optional[str] = None,
-                            ylim: Dict = {'eeg': [-7, 7]},
+                            ylim: Optional[Dict] = None,
                             xlim: Optional[Tuple[float, float]] = (-0.1, 0.3),
                             title: str = 'Evoked Response',
                             show: bool = True) -> None:
@@ -1116,18 +1282,6 @@ class TMSEEGPreprocessor:
                 if hasattr(ax, 'invert_yaxis'):
                     ax.invert_yaxis()
             fig.canvas.draw()
-            
-    def plot_ica_components(self) -> None:
-        """
-        Plot ICA components if ICA has been run.
-        """
-        if not hasattr(self, 'ica'):
-            raise ValueError("Must run ICA before plotting components")
-            
-        with mne.viz.use_browser_backend("matplotlib"):    
-            self.ica.plot_sources(self.epochs, show_scrollbars=True)
-
-
 
     def apply_csd(self, lambda2=1e-5, stiffness=4, n_legendre_terms=50, verbose=True):
         """

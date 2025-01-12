@@ -7,8 +7,8 @@ import sys
 import io
 import os
 
-# When importing from run.py, update to:
 from ..run import process_subjects
+
 
 class ToolTip(object):
     def __init__(self, widget, text='widget info'):
@@ -49,6 +49,8 @@ class TMSEEG_GUI:
     def __init__(self, root):
         self.root = root
         self.root.title("TMS-EEG Preprocessing and PCIst")
+
+        import queue
         
         # Set initial window size (width x height)
         self.root.geometry("1000x1000")
@@ -73,7 +75,7 @@ class TMSEEG_GUI:
             'random_seed': {'min': 0, 'max': 1000000, 'type': int},
             'bad_channels_threshold': {'min': 0, 'max': 10, 'type': float},
             'bad_epochs_threshold': {'min': 0, 'max': 10, 'type': float},
-            'amplitude_threshold': {'min': 50, 'max': 1000, 'type': float},
+            'amplitude_threshold': {'min': 50, 'max': 5000, 'type': float},
             'tms_muscle_thresh': {'min': 0, 'max': 10, 'type': float},
             'n_components': {'min': 1, 'max': 100, 'type': int},
             'ssp_n_eeg': {'min': 1, 'max': 10, 'type': int},
@@ -102,11 +104,12 @@ class TMSEEG_GUI:
             'min_peak_distance': {'min': 1, 'max': 100, 'type': int},
             'substitute_zero_events_with': {'min': 1, 'max': 100, 'type': int},
             'threshold_factor': {'min': 0.1, 'max': 10.0, 'type': float},
-            'lambda2': {'min': 1e-6, 'max': 1e-4, 'type': float},
+            'lambda2': {'min': 1e-6, 'max': 1e-2, 'type': float},
             'stiffness': {'min': 1, 'max': 10, 'type': int},
             'ica_method': {'type': 'str', 'choices': ['fastica', 'infomax']},
             'second_ica_method': {'type': 'str', 'choices': ['fastica', 'infomax']},
-            'interpolation_method': {'type': 'str', 'choices': ['cubic', 'linear']},
+            'first_ica_manual': {'type': 'bool'},
+            'second_ica_manual': {'type': 'bool'},
             'response_start': {'min': -1000, 'max': 1000, 'type': int},
             'response_end': {'min': -1000, 'max': 1000, 'type': int},
             'prominence': {'min': 0.01, 'max': 1.0, 'type': float}
@@ -148,6 +151,8 @@ class TMSEEG_GUI:
             'muscle_window_start': 'Start time for muscle artifact window (s)',
             'muscle_window_end': 'End time for muscle artifact window (s)',
             'ica_method': 'Method for first ICA (fastica or infomax)',
+            'first_ica_manual': 'Enable manual selection of components for first ICA pass',
+            'second_ica_manual': 'Enable manual selection of components for second ICA pass',
             'second_ica_method': 'Method for second ICA (fastica or infomax)',
             'lambda2': 'Regularization parameter for CSD transformation',
             'stiffness': 'Stiffness parameter for CSD transformation',
@@ -291,43 +296,76 @@ class TMSEEG_GUI:
                 
         # Convert parameters to correct types for args
         args_dict = {
+            # Directory and basic options
             'data_dir': self.data_dir.get(),
             'output_dir': self.output_dir.get(),
-            'stim_channel': 'STI 014', 
+            'data_format': self.data_format.get(),
+            'eeglab_montage_units': self.eeglab_units.get(),
             'plot_preproc': self.plot_preproc.get(),
-            'stim_channel': self.stim_channel.get(), 
             'clean_muscle_artifacts': self.clean_muscle.get(),
             'show_evoked': self.show_evoked.get(),
             'research': self.research_stats.get(),
-            #'preproc_qc': self.preproc_qc.get(),
+            'validate_teps': self.validate_teps.get(),
+            'save_validation': self.save_validation.get(),
             'apply_ssp': self.apply_ssp.get(),
             'apply_csd': self.apply_csd.get(),
+            'skip_second_artifact_removal': self.skip_second_artifact_removal.get(),
+            'stim_channel': self.stim_channel.get(),
+            'filter_raw': self.filter_raw.get(),
+            'first_ica_manual': self.first_ica_manual.get(),
+            'second_ica_manual': self.second_ica_manual.get(),
+            'exclude_labels': [label.replace('_', ' ')
+                               for label, var in self.exclude_labels.items()
+                               if var.get()],
+
+            'muscle_window_start': float(self.params['muscle_window_start'].get()),
+            'muscle_window_end': float(self.params['muscle_window_end'].get()),
+            'threshold_factor': float(self.params['threshold_factor'].get()),
+            'n_components': int(self.params['n_components'].get()),
+
+            # Set default values
+            'substitute_zero_events_with': int(self.params['substitute_zero_events_with'].get()),
+            'interpolation_method': 'cubic',
+            'interp_window': 1.0,
+            'no_second_ICA': False,
+            'embed': False,
+            'fix_artifact_window_start': -0.005,
+            'fix_artifact_window_end': 0.015,
+            'response_start': int(self.params['response_start'].get()),
+            'response_end': int(self.params['response_end'].get())
         }
-        
-        # Add numerical parameters with proper type conversion
+
+        # Add ALL parameters from self.params
         for param, var in self.params.items():
             try:
-                value = float(var.get())
-                if self.validation_rules[param]['type'] == int:
-                    value = round(value)
-                args_dict[param] = value
-            except (ValueError, KeyError):
+                if param in self.validation_rules:
+                    if self.validation_rules[param]['type'] == 'str':
+                        args_dict[param] = var.get()
+                    else:
+                        value = float(var.get())
+                        if self.validation_rules[param]['type'] == int:
+                            value = round(value)
+                        args_dict[param] = value
+            except ValueError:
                 messagebox.showerror("Error", f"Invalid value for {param}")
                 self.progress.stop()
                 self.running = False
                 return
-        
-        # Create Args object
+
+        # Create Args object and set all attributes
         class Args:
-            pass
-        args = Args()
+            def __init__(self, **kwargs):
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        args = Args(**args_dict)
         for key, value in args_dict.items():
             setattr(args, key, value)
-            
+
         self.console.delete(1.0, tk.END)
         self.progress.start()
         self.running = True
-        
+
         # Run analysis in separate thread
         thread = threading.Thread(target=self.run_analysis_thread, args=(args,))
         thread.daemon = True
@@ -384,7 +422,7 @@ class TMSEEG_GUI:
                    # variable=self.preproc_qc).grid(row=0, column=1, sticky=tk.W)
         
         # Fourth row
-        self.apply_csd = tk.BooleanVar(value=True)  
+        self.apply_csd = tk.BooleanVar(value=False)
         csd_button = ttk.Checkbutton(options_frame, text="Apply CSD", 
                     variable=self.apply_csd)
         csd_button.grid(row=2, column=0, sticky=tk.W)
@@ -444,7 +482,7 @@ class TMSEEG_GUI:
             'Downsampling Frequency (Hz)': ('ds_sfreq', 725),
             'Random Seed': ('random_seed', 42),
             'Bad Channels Threshold': ('bad_channels_threshold', 1),
-            'Bad Epochs Threshold': ('bad_epochs_threshold', 1),
+            'Bad Epochs Threshold': ('bad_epochs_threshold', 2),
             'SSP EEG Components': ('ssp_n_eeg', 2),
             'Substitute Zero Events With': ('substitute_zero_events_with', 10),
         })
@@ -453,11 +491,14 @@ class TMSEEG_GUI:
         filter_frame = ttk.Frame(notebook, padding="5")
         notebook.add(filter_frame, text="Filtering")
         self.add_parameter_group(filter_frame, {
-            'Low Frequency (Hz)': ('l_freq', 1), # 0.1 is the standard in the PCIst article by Comolatti et al., 2019
-            'High Frequency (Hz)': ('h_freq', 45),
+            'Low Frequency (Hz)': ('l_freq', 0.1), # 0.1 is the standard in the PCIst article by Comolatti et al., 2019
+            'High Frequency (Hz)': ('h_freq', 45), # 45 is the standard in the PCIst article by Comolatti et al., 2019
             'Notch Frequency (Hz)': ('notch_freq', 50),
             'Notch Width': ('notch_width', 2),
         })
+        self.filter_raw = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filter_frame, text="Filter raw data",
+                        variable=self.filter_raw).grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
         
         # TMS Parameters
         tms_frame = ttk.Frame(notebook, padding="5")
@@ -500,15 +541,81 @@ class TMSEEG_GUI:
             'Threshold Factor': ('threshold_factor', 1.0),
             'Number of PARAFAC Components': ('n_components', 5),
         })
-        
-        # ICA Parameters
+
         ica_frame = ttk.Frame(notebook, padding="5")
         notebook.add(ica_frame, text="ICA Settings")
-        self.add_parameter_group(ica_frame, {
-            'ICA Method': ('ica_method', 'fastica'),
-            'TMS Muscle Threshold (for first ICA)': ('tms_muscle_thresh', 2.0),
-            'Second ICA Method': ('second_ica_method', 'infomax'),
-        })
+
+        # First ICA Frame
+        first_ica_frame = ttk.LabelFrame(ica_frame, text="First ICA (TMS-Muscle)", padding="5")
+        first_ica_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        # Add manual selection checkbox
+        self.first_ica_manual = tk.BooleanVar(value=True)
+        first_manual_check = ttk.Checkbutton(first_ica_frame,
+                                             text="Enable Manual Component Selection",
+                                             variable=self.first_ica_manual)
+        first_manual_check.grid(row=0, column=0, columnspan=2, sticky=tk.W)
+        ToolTip(first_manual_check, "Enable interactive selection of ICA components to remove")
+
+        # Method selection for first ICA
+        ttk.Label(first_ica_frame, text="ICA Method:").grid(row=1, column=0, sticky=tk.W)
+        self.params['ica_method'] = tk.StringVar(value='fastica')
+        method_combo = ttk.Combobox(first_ica_frame,
+                                    textvariable=self.params['ica_method'],
+                                    values=['fastica', 'infomax'],
+                                    state='readonly',
+                                    width=10)
+        method_combo.grid(row=1, column=1, padx=5, pady=2)
+
+        # Auto threshold for first ICA
+        ttk.Label(first_ica_frame, text="TMS Muscle Threshold:").grid(row=2, column=0, sticky=tk.W)
+        self.params['tms_muscle_thresh'] = tk.StringVar(value='2.0')
+        thresh_entry = ttk.Entry(first_ica_frame,
+                                 textvariable=self.params['tms_muscle_thresh'],
+                                 width=10)
+        thresh_entry.grid(row=2, column=1, padx=5, pady=2)
+        ToolTip(thresh_entry,
+                "Threshold for automatic muscle component detection (used if manual selection is disabled)")
+
+        # Second ICA Frame
+        second_ica_frame = ttk.LabelFrame(ica_frame, text="Second ICA (Other Artifacts)", padding="5")
+        second_ica_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        # Add manual selection checkbox
+        self.second_ica_manual = tk.BooleanVar(value=True)
+        second_manual_check = ttk.Checkbutton(second_ica_frame,
+                                              text="Enable Manual Component Selection",
+                                              variable=self.second_ica_manual)
+        second_manual_check.grid(row=0, column=0, columnspan=2, sticky=tk.W)
+        ToolTip(second_manual_check, "Enable interactive selection of ICA components to remove")
+
+        # Method selection for second ICA
+        ttk.Label(second_ica_frame, text="ICA Method:").grid(row=1, column=0, sticky=tk.W)
+        self.params['second_ica_method'] = tk.StringVar(value='fastica')
+        second_method_combo = ttk.Combobox(second_ica_frame,
+                                           textvariable=self.params['second_ica_method'],
+                                           values=['fastica', 'infomax'],
+                                           state='readonly',
+                                           width=10)
+        second_method_combo.grid(row=1, column=1, padx=5, pady=2)
+
+        # Auto-exclude labels frame
+        exclude_frame = ttk.LabelFrame(second_ica_frame, text="Auto-Exclude Labels", padding="5")
+        exclude_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        # Checkbox grid for exclude labels
+        self.exclude_labels = {
+            'eye_blink': tk.BooleanVar(value=True),
+            'muscle': tk.BooleanVar(value=True),
+            'heart_beat': tk.BooleanVar(value=True),
+            'channel_noise': tk.BooleanVar(value=True),
+            'line_noise': tk.BooleanVar(value=True)
+        }
+
+        for i, (label, var) in enumerate(self.exclude_labels.items()):
+            ttk.Checkbutton(exclude_frame,
+                            text=label.replace('_', ' ').title(),
+                            variable=var).grid(row=i // 2, column=i % 2, sticky=tk.W, padx=5, pady=2)
         
         # CSD Parameters
         csd_frame = ttk.Frame(notebook, padding="5")
@@ -542,9 +649,10 @@ class TMSEEG_GUI:
             'Min SNR': ('min_snr', 1.1),
             'Max Variance (%)': ('max_var', 99.0),
             'Number of Steps': ('n_steps', 100),
+            'Response Start (ms)': ('response_start', 0),
+            'Response End (ms)': ('response_end', 299)
         })
-        
-        
+
     def add_parameter_group(self, parent, params):
         for i, (label, (param, default)) in enumerate(params.items()):
             ttk.Label(parent, text=label + ":").grid(row=i, column=0, sticky=tk.W, padx=5, pady=2)
@@ -594,106 +702,76 @@ class TMSEEG_GUI:
             def flush(self):
                 pass
         sys.stdout = StdoutRedirector(self.console)
-        
-    def run_analysis(self):
+
+    def update_gui(self):
+        """Ensure GUI remains responsive during long operations."""
         if self.running:
-            return
-                
-        self.console.delete(1.0, tk.END)
-        self.progress.start()
-        self.running = True
-        
-        # Prepare arguments
-        args_dict = {
-            # Directory and basic options
-            'data_dir': self.data_dir.get(),
-            'output_dir': self.output_dir.get(),
-            'data_format': self.data_format.get(),
-            'eeglab_montage_units': self.eeglab_units.get(),
-            'plot_preproc': self.plot_preproc.get(),
-            'clean_muscle_artifacts': self.clean_muscle.get(),
-            'show_evoked': self.show_evoked.get(),
-            'research': self.research_stats.get(),
-            'validate_teps': self.validate_teps.get(),  # Add validation option
-            'save_validation': self.save_validation.get(),
-            #'preproc_qc': self.preproc_qc.get(),
-            'apply_ssp': self.apply_ssp.get(), 
-            'apply_csd': self.apply_csd.get(),
-            'skip_second_artifact_removal': self.skip_second_artifact_removal.get(),
-            'stim_channel': 'STI 014',
-            
-            # Additional arguments with default values
-            'substitute_zero_events_with': 10,
-            'ica_method': 'fastica',
-            'second_ica_method': 'infomax',
-            'interpolation_method': 'cubic',  # Force cubic interpolation
-            'interp_window': 1.0, 
-            'no_second_ICA': False,
-            'embed': False,
-            'fix_artifact_window_start': -0.005,
-            'fix_artifact_window_end': 0.015,
-            'threshold_factor': 1.0,
-            'muscle_window_start': 0.005,
-            'muscle_window_end': 0.030,
-            'lambda2': 1e-3,
-            'stiffness': 4,
-            'response_start': 0,        
-            'response_end': 299,   
-        }
-        
-        for param, var in self.params.items():
-            try:
-                if param in self.validation_rules:
-                    if self.validation_rules[param]['type'] == 'str':
-                        args_dict[param] = var.get()
-                    else:
-                        value = float(var.get())
-                        if self.validation_rules[param]['type'] == int:
-                            value = round(value)
-                        args_dict[param] = value
-            except ValueError:
-                messagebox.showerror("Error", f"Invalid value for {param}")
-                self.progress.stop()
-                self.running = False
-                return
-        
-        # Create Args object
-        class Args:
-            pass
-        args = Args()
-        for key, value in args_dict.items():
-            setattr(args, key, value)
-        
-        # Run analysis in separate thread
-        thread = threading.Thread(target=self.run_analysis_thread, args=(args,))
-        thread.daemon = True
-        thread.start()
-        
+            # Process pending events
+            self.root.update_idletasks()
+            # Schedule next update
+            self.root.after(100, self.update_gui)
+
     def run_analysis_thread(self, args):
-        """Modified thread function with enhanced error capture and stop handling"""
+        """Modified thread function to handle ICA selection and GUI updates"""
         try:
+            # Redirect output to console
             self.redirect_output()
+
+            # Configure matplotlib for thread-safe operation
             import matplotlib
-            matplotlib.use('Agg')
-            
+            matplotlib.use('Agg')  # Use non-interactive backend for the processing thread
+
+            # Import needed modules
             from ..run import process_subjects
-            
-            # Reset stop flag before starting
             import builtins
+            import queue
+
+            # Make sure GUI root is available
+            if not hasattr(builtins, 'GUI_MAIN_ROOT'):
+                builtins.GUI_MAIN_ROOT = self.root
+
+            # Create an event queue for GUI updates
+            gui_queue = queue.Queue()
+
+            def check_gui_queue():
+                try:
+                    while True:  # Process all pending GUI updates
+                        callback, args = gui_queue.get_nowait()
+                        callback(*args)
+                except queue.Empty:
+                    pass
+                if self.running:
+                    self.root.after(100, check_gui_queue)
+
+            def schedule_on_gui(callback, *args):
+                gui_queue.put((callback, args))
+
+            # Add GUI scheduling function to builtins
+            builtins.schedule_on_gui = schedule_on_gui
+
+            # Start checking GUI queue
+            self.root.after(0, check_gui_queue)
+
+            # Reset stop flag before starting
             setattr(builtins, 'STOP_PROCESSING', False)
-            
+
+            # Run the processing
             pcists = process_subjects(args)
-            
+
             # Only show completion if we weren't stopped
             if not getattr(builtins, 'STOP_PROCESSING', False):
-                self.root.after(0, self.analysis_complete, pcists)
-        except Exception:
+                schedule_on_gui(self.analysis_complete, pcists)
+
+        except Exception as e:
             import traceback
             error_msg = traceback.format_exc()
-            self.root.after(0, self.analysis_error, error_msg)
+            gui_queue.put((self.analysis_error, (error_msg,)))
+
         finally:
-            # Always cleanup
-            self.cleanup_after_stop()
+            # Cleanup
+            schedule_on_gui(self.cleanup_after_stop)
+            # Restore original backend
+            matplotlib.use('Agg')
             
     def analysis_complete(self, pcists):
         self.progress.stop()
@@ -777,7 +855,10 @@ class TMSEEG_GUI:
             setattr(builtins, 'STOP_PROCESSING', True)
             self.root.after(1000, self.cleanup_after_stop)  # Cleanup after 1 second
 
+import builtins
+
 if __name__ == "__main__":
     root = tk.Tk()
+    builtins.GUI_MAIN_ROOT = root  # <-- new line
     app = TMSEEG_GUI(root)
     root.mainloop()

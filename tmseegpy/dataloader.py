@@ -1,4 +1,4 @@
-# data_loader.py
+# dataloader.py
 from pathlib import Path
 import mne
 from typing import Optional, Union, Dict, List, Tuple

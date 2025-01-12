@@ -5,6 +5,11 @@ import mne
 from pathlib import Path
 import numpy as np
 import datetime
+from typing import Union
+
+from typing import Optional, Union, Dict, List, Tuple, Any
+import warnings
+import os
 
 def create_step_directory(output_dir: str, session_name: str, step_name: str) -> str:
     """Create a directory for a specific preprocessing step's plots."""
@@ -49,4 +54,40 @@ def plot_epochs_grid(epochs, output_dir: str, session_name: str, step_name: str,
             fig.savefig(os.path.join(step_dir, f'{data_type}_epochs_{plot_idx+1:03d}.png'), 
                        dpi=300, bbox_inches='tight')
             plt.close(fig)
+
+def plot_evoked_response(epochs: mne.epochs, 
+                        session_name: str, picks: Optional[str] = None,
+                        xlim: Optional[Tuple[float, float]] = (-0.1, 0.3),
+                        show: bool = False,
+                        plot_gfp: Union[str, bool] = None
+) -> None:
+    """
+    Plot averaged evoked response with butterfly plot and global field power.
+    
+    Parameters
+    ----------
+    epochs : mne.epochs
+        The epochs object
+    session_name: string
+        The name of the session
+    show : bool
+        Whether to show the plot
+    xlim : tuple
+        X-axis limits in seconds (start_time, end_time)
+
+    plot_gfp : bool | 'only 
+   
+    """
+    if epochs is None:
+        raise ValueError("Must create epochs before plotting evoked response")
+ 
+    # Create evoked from epochs
+    evoked = epochs.average()
+    
+    # Create figure with two subplots
+    fig = plt.figure(figsize=(12, 8))
+
+    evoked.plot(picks=picks, xlim=xlim, show=show, gfp=plot_gfp, title=f"Evoked response for {session_name}")
+    
+    return fig
 
