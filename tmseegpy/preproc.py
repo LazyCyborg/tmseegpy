@@ -43,7 +43,9 @@ from mne import (compute_raw_covariance,
 from mne.viz import plot_alignment, plot_bem
 
 # Required for ICA and component labeling
-from .mne_icalabel import label_components
+#from .mne_icalabel import label_components
+# A working version of mne_icalabel is found on the backup branch of tmseegpy.
+# I currently disabled ica_label functionality since it is not used but the references to it are only commented out
 from mne.preprocessing import ICA
 
 # Required for FASTER bad channel/epoch detection 
@@ -85,16 +87,18 @@ class TMSEEGPreprocessor:
     montage : mne.channels.montage.DigMontage
         The EEG montage
     """
-    
-    def __init__(self, 
-                raw: mne.io.Raw,
-                montage: Union[str, mne.channels.montage.DigMontage] = 'standard_1020',
-                ds_sfreq: float = 1000):
-        
+
+    def __init__(self,
+                 raw: mne.io.Raw,
+                 montage: Union[str, mne.channels.montage.DigMontage] = 'standard_1020',
+                 initial_sfreq: float = 1000,
+                 final_sfreq: float = 725):
+
         self.raw = raw.copy()
         self.epochs = None
         self.evoked = None
-        self.ds_sfreq = ds_sfreq
+        self.initial_sfreq = initial_sfreq
+        self.final_sfreq = final_sfreq
 
         self.first_ica_manual = False
         self.second_ica_manual = False
@@ -230,12 +234,12 @@ class TMSEEGPreprocessor:
             End time of epoch in seconds
         baseline : tuple or None
             Baseline period (start, end) in seconds. None for no baseline correction
-        amplitude_threshold : float
-            Threshold for rejecting epochs based on peak-to-peak amplitude in µV.
-            Default is 300 µV.
+       # amplitude_threshold : float
+       #     Threshold for rejecting epochs based on peak-to-peak amplitude in µV.
+        #    Default is 300 µV.
         """
         # Convert µV to V for MNE
-        reject = dict(eeg=amplitude_threshold * 1e-6)
+        #reject = dict(eeg=amplitude_threshold * 1e-6)
                 
         self.events, self.event_id = mne.events_from_annotations(self.raw)
         
@@ -245,18 +249,18 @@ class TMSEEGPreprocessor:
                             tmin=tmin, 
                             tmax=tmax, 
                             baseline=baseline,
-                            reject=reject,
+                            #reject=reject,
                             reject_by_annotation=True,
                             detrend=0,
                             preload=True,
                             verbose=True)
         
         print(f"Created {len(self.epochs)} epochs")
-        if len(self.events) > len(self.epochs):
-            n_rejected = len(self.events) - len(self.epochs)
-            print(f"Rejected {n_rejected} epochs based on {amplitude_threshold}µV amplitude threshold")
-        self.preproc_stats['n_orig_events'] = len(self.events)
-        self.preproc_stats['n_final_events'] = len(self.epochs)
+       # if len(self.events) > len(self.epochs):
+        #    n_rejected = len(self.events) - len(self.epochs)
+         #   print(f"Rejected {n_rejected} epochs based on {amplitude_threshold}µV amplitude threshold")
+       # self.preproc_stats['n_orig_events'] = len(self.events)
+       # self.preproc_stats['n_final_events'] = len(self.epochs)
 
 
     def _get_events(self):
@@ -581,14 +585,49 @@ class TMSEEGPreprocessor:
                 output_dir: str,
                 session_name: str,
                 method: str = "fastica",
-                tms_muscle_thresh: float = 1.0,
+                tms_muscle_thresh: float = 2.0,
+                blink_thresh: float = 2.5,
+                lat_eye_thresh: float = 2.0,
+                muscle_thresh: float = 0.6,
+                noise_thresh: float = 4.0,
                 plot_components: bool = False,
                 manual_mode: bool = False) -> None:
-        """Run ICA decomposition with thread-safe manual component selection."""
-        if self.epochs is None:
-            raise ValueError("Must create epochs before running ICA")
+        """
+        Run first ICA decomposition with TESA artifact detection.
+        Works with both Raw and Epochs data.
 
-        self.epochs_pre_ica = self.epochs.copy()
+        Parameters
+        ----------
+        output_dir : str
+            Directory to save outputs
+        session_name : str
+            Name of the current session
+        method : str
+            ICA method ('fastica' or 'infomax')
+        tms_muscle_thresh : float
+            Threshold for TMS-muscle artifact detection
+        blink_thresh : float
+            Threshold for blink detection
+        lat_eye_thresh : float
+            Threshold for lateral eye movement detection
+        muscle_thresh : float
+            Threshold for muscle artifact detection
+        noise_thresh : float
+            Threshold for noise detection
+        plot_components : bool
+            Whether to plot ICA components
+        manual_mode : bool
+            Whether to use manual component selection
+        """
+        # Store copy of data before ICA
+        if hasattr(self, 'epochs') and self.epochs is not None:
+            inst = self.epochs
+            self.epochs_pre_ica = self.epochs.copy()
+            is_epochs = True
+        else:
+            inst = self.raw
+            self.raw_pre_ica = self.raw.copy()
+            is_epochs = False
 
         # Fit ICA
         print("\nFitting ICA...")
@@ -597,11 +636,11 @@ class TMSEEGPreprocessor:
             method=method,
             random_state=42
         )
-        self.ica.fit(self.epochs)
+        self.ica.fit(inst)
         print("ICA fit complete")
 
         if manual_mode:
-            # Get the main Tk root window early to ensure GUI availability
+            # Get the main Tk root window
             import builtins
             root = getattr(builtins, 'GUI_MAIN_ROOT', None)
             if root is None:
@@ -611,59 +650,73 @@ class TMSEEGPreprocessor:
             print("\nStarting manual component selection...")
             print("A new window will open for component selection.")
 
-            # Import the GUI handler here to ensure it's available
-            from .gui.ica_handler import ICAComponentSelector
+            from .gui.ica_handler import ICAComponentSelector, ICAComponentSelectorContinuous
 
-            # Calculate all component information before creating GUI
+            if is_epochs:
+                selector_class = ICAComponentSelector
+            else:
+                selector_class = ICAComponentSelectorContinuous
+
             try:
-                # Calculate TMS muscle scores first
-                print("\nCalculating TMS muscle component scores...")
-                muscle_comps, component_scores = self.detect_tms_muscle_components(
+                # Run all TESA artifact detection methods
+                print("\nRunning TESA artifact detection...")
+                artifact_results = self.detect_all_artifacts(
                     tms_muscle_thresh=tms_muscle_thresh,
+                    blink_thresh=blink_thresh,
+                    lat_eye_thresh=lat_eye_thresh,
+                    muscle_freq_thresh=muscle_thresh,
+                    noise_thresh=noise_thresh,
                     verbose=True
                 )
-                print(f"Found {len(muscle_comps)} potential muscle components")
 
-                # Then calculate ICLabel classifications
-                print("\nRunning ICLabel classification...")
-                from mne_icalabel import label_components
-                ic_labels = label_components(self.epochs, self.ica, method="iclabel")
+                # Calculate component scores for GUI
+                component_scores = {
+                    'blink': artifact_results['blink']['scores']['z_scores'],
+                    'lat_eye': artifact_results['lateral_eye']['scores']['z_scores'],
+                    'muscle': artifact_results['muscle']['scores']['power_ratios'],
+                    'noise': artifact_results['noise']['scores']['max_z_scores']
+                }
 
-                # Print component information
-                print("\nComponent classifications:")
-                for idx, label in enumerate(ic_labels['labels']):
-                    muscle_score = component_scores['muscle_ratios'][idx]
-                    print(f"IC{idx}: {label} (TMS-muscle score: {muscle_score:.2f})")
+                # Add TMS-muscle scores if using epoched data
+                if is_epochs:
+                    component_scores['tms_muscle'] = artifact_results['tms_muscle']['scores']['ratios']
 
             except Exception as e:
                 print(f"\nWarning: Error in component analysis: {str(e)}")
                 print("Continuing with manual selection without automatic scores")
                 component_scores = None
-                ic_labels = None
 
             # Create synchronization primitives
             selection_complete = threading.Event()
             result_queue = queue.Queue()
 
             def handle_selection(components):
-                """Callback to handle selected components"""
                 try:
                     result_queue.put(components)
                 finally:
                     selection_complete.set()
 
-            # Function to create and show selector
             def create_selector():
                 try:
-                    selector = ICAComponentSelector(root)
-                    selector.select_components(
-                        ica_instance=self.ica,
-                        epochs=self.epochs,
-                        title="First ICA - Select Components to Remove",
-                        callback=handle_selection,
-                        component_scores=component_scores,
-                        component_labels=ic_labels
-                    )
+                    selector = selector_class(root)
+                    if is_epochs:
+                        # Epoched data -> pass epochs
+                        selector.select_components(
+                            ica_instance=self.ica,
+                            epochs=inst,
+                            title="First ICA - Select Components to Remove",
+                            callback=handle_selection,
+                            component_scores=component_scores
+                        )
+                    else:
+                        # Continuous data -> pass raw
+                        selector.select_components(
+                            ica_instance=self.ica,
+                            raw=inst,
+                            title="First ICA - Select Components to Remove",
+                            callback=handle_selection,
+                            component_scores=component_scores
+                        )
                 except Exception as e:
                     print(f"Error creating selector: {str(e)}")
                     import traceback
@@ -671,28 +724,25 @@ class TMSEEGPreprocessor:
                     selection_complete.set()
                     result_queue.put([])
 
-            # Schedule selector creation based on thread
+            # Schedule selector creation
             if threading.current_thread() is threading.main_thread():
                 create_selector()
             else:
                 root.after(0, create_selector)
 
-            # Wait for selection to complete with timeout
-            if not selection_complete.wait(timeout=300):  # 5-minute timeout
+            if not selection_complete.wait(timeout=300):
                 print("\nComponent selection timed out")
                 return
 
             try:
-                # Get selected components from queue
                 selected_components = result_queue.get_nowait()
             except queue.Empty:
                 print("\nNo components selected")
                 return
 
-            # Apply selected components
             if selected_components:
                 print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
-                self.ica.apply(self.epochs, exclude=selected_components)
+                self.ica.apply(inst, exclude=selected_components)
                 self.selected_first_ica_components = selected_components
                 self.preproc_stats['muscle_components'] = selected_components
             else:
@@ -700,98 +750,175 @@ class TMSEEGPreprocessor:
                 self.preproc_stats['muscle_components'] = []
 
         else:
-            # Automatic detection
-            muscle_comps, _ = self.detect_tms_muscle_components(
+            # Automatic detection using TESA methods
+            artifact_results = self.detect_all_artifacts(
                 tms_muscle_thresh=tms_muscle_thresh,
+                blink_thresh=blink_thresh,
+                lat_eye_thresh=lat_eye_thresh,
+                muscle_freq_thresh=muscle_thresh,
+                noise_thresh=noise_thresh,
                 verbose=True
             )
 
-            self.preproc_stats['muscle_components'] = muscle_comps
+            # Combine all detected components
+            exclude_components = []
+            for key in artifact_results:
+                if key == 'tms_muscle' and not is_epochs:
+                    continue  # Skip TMS-muscle components for raw data
+                exclude_components.extend(artifact_results[key]['components'])
+            exclude_components = list(set(exclude_components))  # Remove duplicates
 
-            if muscle_comps:
-                print(f"Excluding {len(muscle_comps)} muscle components: {muscle_comps}")
-                self.ica.apply(self.epochs, exclude=muscle_comps)
+            if exclude_components:
+                print(f"\nExcluding {len(exclude_components)} components: {exclude_components}")
+                self.ica.apply(inst, exclude=exclude_components)
+                self.preproc_stats['muscle_components'] = exclude_components
             else:
-                print("No muscle components detected to exclude")
+                print("\nNo components detected to exclude")
+                self.preproc_stats['muscle_components'] = []
+
+        # Update the appropriate data instance
+        if is_epochs:
+            self.epochs = inst
+        else:
+            self.raw = inst
 
     def run_second_ica(self,
                        method: str = "infomax",
-                       exclude_labels: List[str] = ["eye blink", "heart beat", "muscle artifact",
-                                                    "channel noise", "line noise"],
+                       exclude_labels: List[str] = ["eye blink", "heart beat", "muscle artifact", "channel noise",
+                                                    "line noise"],
+                       blink_thresh: float = 2.5,
+                       lat_eye_thresh: float = 2.0,
+                       muscle_thresh: float = 0.6,
+                       noise_thresh: float = 4.0,
                        manual_mode: bool = False) -> None:
-        """Run second ICA with thread-safe manual component selection."""
-        if not hasattr(self, 'epochs'):
-            raise ValueError("Must have epochs data to run ICA")
+        """
+        Run second ICA with both TESA and ICLabel detection methods.
+        Works with both Raw and Epochs data.
+
+        Parameters
+        ----------
+        method : str
+            ICA method ('fastica' or 'infomax')
+        exclude_labels : list of str
+            Labels of components to exclude if using ICLabel
+        blink_thresh : float
+            Threshold for blink detection
+        lat_eye_thresh : float
+            Threshold for lateral eye movement detection
+        muscle_thresh : float
+            Threshold for muscle artifact detection
+        noise_thresh : float
+            Threshold for noise detection
+        manual_mode : bool
+            Whether to use manual component selection
+        """
+        # Determine if we're working with epochs or raw data
+        if hasattr(self, 'epochs') and self.epochs is not None:
+            inst = self.epochs
+            is_epochs = True
+        else:
+            inst = self.raw
+            is_epochs = False
+
+        if inst is None:
+            raise ValueError("No data available for ICA")
 
         print("\nPreparing for second ICA...")
-        self.set_average_reference()
+        if is_epochs:
+            self.set_average_reference()
 
         # Initialize and fit ICA
         fit_params = dict(extended=True) if method == "infomax" else None
         self.ica2 = ICA(max_iter="auto", method=method, random_state=42, fit_params=fit_params)
-        self.ica2.fit(self.epochs)
+        self.ica2.fit(inst)
         print("Second ICA fit complete")
 
         if manual_mode:
-            # Get the main Tk root window
             import builtins
             root = getattr(builtins, 'GUI_MAIN_ROOT', None)
             if root is None:
                 raise RuntimeError("No main Tk root found")
 
-            # Import the GUI handler here to ensure it's available
-            from .gui.ica_handler import ICAComponentSelector
+            from .gui.ica_handler import ICAComponentSelector, ICAComponentSelectorContinuous
+
+            if is_epochs:
+                selector_class = ICAComponentSelector
+            else:
+                selector_class = ICAComponentSelectorContinuous
 
             self.second_ica_manual = True
             print("\nStarting manual component selection for second ICA...")
-            print("A new window will open for component selection.")
 
             try:
-                # Run ICLabel classification
-                print("\nRunning ICLabel classification...")
-                from mne_icalabel import label_components
-                ic_labels = label_components(self.epochs, self.ica2, method="iclabel")
+                # Run TESA artifact detection (excluding TMS-muscle for continuous data)
+                print("\nRunning TESA artifact detection...")
+                artifact_results = self.detect_all_artifacts(
+                    blink_thresh=blink_thresh,
+                    lat_eye_thresh=lat_eye_thresh,
+                    muscle_freq_thresh=muscle_thresh,
+                    noise_thresh=noise_thresh,
+                    verbose=True
+                )
 
-                # Print component classifications
-                print("\nComponent classifications:")
-                for idx, label in enumerate(ic_labels['labels']):
-                    print(f"IC{idx}: {label}")
+                # Calculate component scores (exclude TMS-muscle for continuous data)
+                component_scores = {
+                    'blink': artifact_results['blink']['scores']['z_scores'],
+                    'lat_eye': artifact_results['lateral_eye']['scores']['z_scores'],
+                    'muscle': artifact_results['muscle']['scores']['power_ratios'],
+                    'noise': artifact_results['noise']['scores']['max_z_scores']
+                }
 
-                # Show suggested components
-                suggested_exclude = [idx for idx, label in enumerate(ic_labels['labels'])
-                                     if label in exclude_labels]
+                # Add TMS-muscle scores if using epoched data
+                if is_epochs:
+                    component_scores['tms_muscle'] = artifact_results['tms_muscle']['scores']['ratios']
+
+                # Combine suggestions
+                suggested_exclude = []
+                for key in artifact_results:
+                    if key == 'tms_muscle' and not is_epochs:
+                        continue  # Skip TMS-muscle components for raw data
+                    suggested_exclude.extend(artifact_results[key]['components'])
+                suggested_exclude = list(set(suggested_exclude))
+
                 if suggested_exclude:
                     print(f"\nSuggested components for removal: {suggested_exclude}")
-                    print("(Based on ICLabel classification)")
+                    print("(Based on TESA artifact detection)")
 
             except Exception as e:
-                print(f"\nWarning: Error in ICLabel classification: {str(e)}")
-                print("Continuing with manual selection without automatic classification")
-                ic_labels = None
+                print(f"\nWarning: Error in component analysis: {str(e)}")
+                component_scores = None
 
             # Create synchronization primitives
             selection_complete = threading.Event()
             result_queue = queue.Queue()
 
             def handle_selection(components):
-                """Callback to handle selected components"""
                 try:
                     result_queue.put(components)
                 finally:
                     selection_complete.set()
 
-            # Function to create and show selector
             def create_selector():
                 try:
-                    selector = ICAComponentSelector(root)
-                    selector.select_components(
-                        ica_instance=self.ica2,
-                        epochs=self.epochs,
-                        title="Second ICA - Select Components to Remove",
-                        callback=handle_selection,
-                        component_scores=None,  # No TMS-muscle scores for second ICA
-                        component_labels=ic_labels
-                    )
+                    selector = selector_class(root)
+                    if is_epochs:
+                        # Epoched data -> pass epochs
+                        selector.select_components(
+                            ica_instance=self.ica2,
+                            epochs=inst,
+                            title="Second - Select Components to Remove",
+                            callback=handle_selection,
+                            component_scores=component_scores
+                        )
+                    else:
+                        # Continuous data -> pass raw
+                        selector.select_components(
+                            ica_instance=self.ica2,
+                            raw=inst,
+                            title="Second ICA - Select Components to Remove",
+                            callback=handle_selection,
+                            component_scores=component_scores
+                        )
                 except Exception as e:
                     print(f"Error creating selector: {str(e)}")
                     import traceback
@@ -799,28 +926,24 @@ class TMSEEGPreprocessor:
                     selection_complete.set()
                     result_queue.put([])
 
-            # Schedule selector creation based on thread
             if threading.current_thread() is threading.main_thread():
                 create_selector()
             else:
                 root.after(0, create_selector)
 
-            # Wait for selection to complete with timeout
-            if not selection_complete.wait(timeout=300):  # 5-minute timeout
+            if not selection_complete.wait(timeout=300):
                 print("\nComponent selection timed out")
                 return
 
             try:
-                # Get selected components from queue
                 selected_components = result_queue.get_nowait()
             except queue.Empty:
                 print("\nNo components selected")
                 return
 
-            # Apply selected components
             if selected_components:
                 print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
-                self.ica2.apply(self.epochs, exclude=selected_components)
+                self.ica2.apply(inst, exclude=selected_components)
                 self.selected_second_ica_components = selected_components
                 self.preproc_stats['excluded_ica_components'] = selected_components
             else:
@@ -828,324 +951,639 @@ class TMSEEGPreprocessor:
                 self.preproc_stats['excluded_ica_components'] = []
 
         else:
-            # Automatic labeling
-            print("\nRunning automatic component labeling...")
+            # Automatic detection using TESA methods
             try:
-                from mne_icalabel import label_components
-                ic_labels = label_components(self.epochs, self.ica2, method="iclabel")
-                labels = ic_labels["labels"]
+                artifact_results = self.detect_all_artifacts(
+                    blink_thresh=blink_thresh,
+                    lat_eye_thresh=lat_eye_thresh,
+                    muscle_freq_thresh=muscle_thresh,
+                    noise_thresh=noise_thresh,
+                    verbose=True
+                )
 
-                print("\nComponent classifications:")
-                for n, lab in enumerate(labels):
-                    print(f"Component {n}: {lab}")
-
-                exclude_idx = [idx for idx, lab in enumerate(labels) if lab in exclude_labels]
+                # Combine detected components
+                exclude_idx = []
+                for key in artifact_results:
+                    if key == 'tms_muscle' and not is_epochs:
+                        continue  # Skip TMS-muscle components for raw data
+                    exclude_idx.extend(artifact_results[key]['components'])
+                exclude_idx = list(set(exclude_idx))
 
                 if exclude_idx:
-                    print(f"\nExcluding {len(exclude_idx)} components in second ICA")
-                    print(f"Excluded components: {exclude_idx}")
-                    self.ica2.apply(self.epochs, exclude=exclude_idx)
+                    print(f"\nExcluding {len(exclude_idx)} components: {exclude_idx}")
+                    self.ica2.apply(inst, exclude=exclude_idx)
                     self.preproc_stats['excluded_ica_components'] = exclude_idx
                 else:
-                    print("\nNo components excluded in second ICA")
+                    print("\nNo components excluded")
                     self.preproc_stats['excluded_ica_components'] = []
 
             except Exception as e:
-                print(f"Warning: Could not run automatic component labeling: {str(e)}")
+                print(f"Warning: Error in automatic component detection: {str(e)}")
                 print("No components will be automatically excluded")
                 self.preproc_stats['excluded_ica_components'] = []
 
+        # Update the appropriate data instance
+        if is_epochs:
+            self.epochs = inst
+        else:
+            self.raw = inst
+
         print('Second ICA complete')
 
-    def detect_tms_muscle_components(self,
-                                     tms_muscle_window: Tuple[float, float] = (11, 30),
-                                     tms_muscle_thresh: float = 2,
-                                     verbose: bool = True) -> Tuple[List[int], Dict]:
-        """Detect muscle components"""
-        if not hasattr(self, 'ica'):
-            raise ValueError("Must run ICA before detecting muscle components")
-
-        if verbose:
-            print(f"Analyzing {self.ica.n_components_} components")
-            print(f"Using muscle window: {tms_muscle_window}ms")
-            print(f"Using threshold: {tms_muscle_thresh}")
-
-        # Get ICA components
-        components = self.ica.get_sources(self.epochs)
-        n_components = components.get_data().shape[1]
-
-        # Get sampling rate and convert windows to samples
-        sfreq = self.epochs.info['sfreq']
-        tms_muscle_window_samples = np.array([np.abs(self.epochs.times - w / 1000).argmin()
-                                              for w in tms_muscle_window])
-
-        # Initialize outputs
-        muscle_components = []
-        component_scores = {
-            'muscle_ratios': np.zeros(n_components),
-            'window_scores': np.zeros(n_components),
-            'total_scores': np.zeros(n_components),
-        }
-
-        # Process each component
-        for comp_idx in range(n_components):
-            if verbose and comp_idx % 5 == 0:
-                print(f"\nAnalyzing component {comp_idx}")
-
-            comp_data = components.get_data()[:, comp_idx, :].reshape(-1)
-            comp_z = zscore(comp_data)
-
-            # Calculate scores
-            muscle_score = np.abs(comp_z)
-            window_score = np.mean(muscle_score[tms_muscle_window_samples[0]:tms_muscle_window_samples[1]])
-            total_score = np.mean(muscle_score)
-            muscle_ratio = window_score / total_score
-
-            if verbose:
-                print(f"Comp. {comp_idx} TMS-evoked muscle ratio is {muscle_ratio:.2f}.")
-
-            # Store metrics
-            component_scores['muscle_ratios'][comp_idx] = muscle_ratio
-            component_scores['window_scores'][comp_idx] = window_score
-            component_scores['total_scores'][comp_idx] = total_score
-
-            # Classify component
-            if muscle_ratio >= tms_muscle_thresh:
-                muscle_components.append(comp_idx)
-
-        return muscle_components, component_scores
-
-    def filter_raw(self, l_freq=1, h_freq=90, notch_freq=50, notch_width=2):
+    def filter_raw(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
         """
-        Apply bandpass and notch filters to raw data.
-        
-        Parameters
-        ----------
-        l_freq : float
-            Lower cutoff frequency for the bandpass filter
-        h_freq : float
-            Upper cutoff frequency for the bandpass filter 
-        notch_freq : float
-            Frequency for the notch filter
-        notch_width : float
-            Width of the notch filter
-        fmax: int
-            Maximum frequency to display
-        """
-        print(f"Applying bandpass and notch filters to raw data with frequency {l_freq}Hz and frequency {h_freq}Hz")
-        
-        # Apply bandpass filter
-        self.raw.filter(
-            l_freq=l_freq, 
-            h_freq=h_freq,
-            picks='eeg',
-            filter_length='auto',
-            l_trans_bandwidth=0.1,
-            h_trans_bandwidth=0.5,
-            method='fir',
-            fir_design='firwin',
-            phase='zero',
-            verbose=True
-        )
-        
-        # Apply notch filter
-        self.raw.notch_filter(
-            freqs=notch_freq,
-            picks='eeg',
-            notch_widths=notch_width,
-            filter_length='auto',
-            method='fir',
-            phase='zero',
-            verbose=True
-        )
-            
-        print("Raw data filtering complete")
-
-    def filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
-        """
-        Filter epoched data using a zero-phase Butterworth filter.
+        Filter raw data using a zero-phase Butterworth filter with improved stability.
 
         Parameters
         ----------
         l_freq : float
-            Lower frequency cutoff for bandpass filter (default: 1 Hz)
+            Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
         h_freq : float
-            Upper frequency cutoff for bandpass filter (default: 100 Hz)
+            Upper frequency cutoff for bandpass filter (default: 45 Hz)
         notch_freq : float
             Frequency for notch filter (default: 50 Hz)
         notch_width : float
-            Width of notch filter (default: 10 Hz)
+            Width of notch filter (default: 2 Hz)
         """
-        from scipy.signal import butter, filtfilt
+        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
+        import numpy as np
 
-        if self.epochs is None:
-            raise ValueError("Must create epochs before filtering")
+        print(f"Applying SciPy filters to raw data with frequency {l_freq}Hz and frequency {h_freq}Hz")
 
-        print(f"Filtering with l_freq :{l_freq} Hz, h_freq: {h_freq} Hz notch_freq: {notch_freq} Hz and notch_width: {notch_width} Hz")
+        # Create a copy of the raw data
+        filtered_raw = self.raw.copy()
 
-        # Create a copy of the epochs object
-        filtered_epochs = self.epochs.copy()
+        # Get data and scale it up for better numerical precision
+        data = filtered_raw.get_data()
+        scale_factor = 1e6  # Convert to microvolts
+        data = data * scale_factor
 
-        # Calculate filter parameters
-        sfreq = filtered_epochs.info['sfreq']
+        print(f"Data shape: {data.shape}")
+        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
+
+        # Ensure data is float64
+        data = data.astype(np.float64)
+
+        sfreq = filtered_raw.info['sfreq']
         nyquist = sfreq / 2
-        order = 2  # Filter order (4th order Butterworth)
-
-        # Bandpass filter
-        low = l_freq / nyquist
-        high = h_freq / nyquist
-        b_bandpass, a_bandpass = butter(order, [low, high], btype='band')
-
-        # Notch filter
-        notch_low = (notch_freq - notch_width / 2) / nyquist
-        notch_high = (notch_freq + notch_width / 2) / nyquist
-        b_notch, a_notch = butter(order, [notch_low, notch_high], btype='bandstop')
 
         try:
-            data = filtered_epochs.get_data()
+            # High-pass filter
+            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
+            data = sosfiltfilt(sos_high, data, axis=-1)
+            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
-            # Apply bandpass filter
-            data_bandpass = filtfilt(b_bandpass, a_bandpass, data, axis=-1)
+            # Low-pass filter
+            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
+            data = sosfiltfilt(sos_low, data, axis=-1)
+            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
-            # Apply notch filter
-            data_notch = filtfilt(b_notch, a_notch, data_bandpass, axis=-1)
+            # Multiple notch filters for harmonics
+            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
+                # Using iirnotch for sharper notch characteristics
+                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
+                data = filtfilt(b, a, data, axis=-1)
+            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
-            # Update the epoched data in the copied epochs object
-            filtered_epochs._data = data_notch
+            # Scale back
+            data = data / scale_factor
+            filtered_raw._data = data
 
         except Exception as e:
             print(f"Error during filtering: {str(e)}")
             raise
 
-        print("\nFiltering complete")
+        print("Filtering complete")
+        self.raw = filtered_raw
 
-        # Replace the original epochs with the filtered epochs
+    def mne_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+        """
+        Filter epoched data using MNE's built-in filtering plus custom notch.
+
+        Parameters
+        ----------
+        l_freq : float
+            Lower frequency bound for bandpass filter
+        h_freq : float
+            Upper frequency bound for bandpass filter
+        notch_freq : float
+            Frequency to notch filter (usually power line frequency)
+        notch_width : float
+            Width of the notch filter
+
+        Returns
+        -------
+        None
+            Updates self.epochs in place
+        """
+        from scipy.signal import iirnotch, filtfilt
+        import numpy as np
+        from mne.time_frequency import psd_array_welch
+
+        if self.epochs is None:
+            raise ValueError("Must create epochs before filtering")
+
+        # Store original epochs for potential recovery
+        original_epochs = self.epochs
+        try:
+            # Create a deep copy to work with
+            filtered_epochs = self.epochs.copy()
+
+            # Get data and sampling frequency
+            data = filtered_epochs.get_data()
+            sfreq = filtered_epochs.info['sfreq']
+            nyquist = sfreq / 2.0
+
+            # Diagnostic before filtering
+            psds, freqs = psd_array_welch(data.reshape(-1, data.shape[-1]),
+                                          sfreq=sfreq,
+                                          fmin=0,
+                                          fmax=200,
+                                          n_per_seg=256,
+                                          n_overlap=128)
+
+            print(f"\nBefore filtering:")
+            print(f"Peak frequency: {freqs[np.argmax(psds.mean(0))]} Hz")
+            print(f"Frequency range with significant power: {freqs[psds.mean(0) > psds.mean(0).max() * 0.1][0]:.1f} - "
+                  f"{freqs[psds.mean(0) > psds.mean(0).max() * 0.1][-1]:.1f} Hz")
+
+            # Apply filters in sequence
+            print("\nApplying low-pass filter...")
+            filtered_epochs.filter(
+                l_freq=None,
+                h_freq=h_freq,
+                picks='eeg',
+                filter_length='auto',
+                h_trans_bandwidth=10,
+                method='fir',
+                fir_window='hamming',
+                fir_design='firwin',
+                phase='zero',
+                verbose=True
+            )
+
+            print("\nApplying high-pass filter...")
+            filtered_epochs.filter(
+                l_freq=l_freq,
+                h_freq=None,
+                picks='eeg',
+                filter_length='auto',
+                l_trans_bandwidth=l_freq / 2,
+                method='fir',
+                fir_window='hamming',
+                fir_design='firwin',
+                phase='zero',
+                verbose=True
+            )
+
+            # Get the filtered data for notch filtering
+            data = filtered_epochs.get_data()
+
+            print("\nApplying notch filters...")
+            for freq in [notch_freq, notch_freq * 2]:
+                print(f"Processing {freq} Hz notch...")
+                Q = 30.0  # Quality factor
+                w0 = freq / nyquist
+                b, a = iirnotch(w0, Q)
+
+                # Apply to each epoch and channel
+                for epoch_idx in range(data.shape[0]):
+                    for ch_idx in range(data.shape[1]):
+                        data[epoch_idx, ch_idx, :] = filtfilt(b, a, data[epoch_idx, ch_idx, :])
+
+            # Update the filtered epochs with notch-filtered data
+            filtered_epochs._data = data
+
+            # Diagnostic after filtering
+            data_filtered = filtered_epochs.get_data()
+            psds, freqs = psd_array_welch(data_filtered.reshape(-1, data_filtered.shape[-1]),
+                                          sfreq=sfreq,
+                                          fmin=0,
+                                          fmax=200,
+                                          n_per_seg=256,
+                                          n_overlap=128)
+
+            print(f"\nAfter filtering:")
+            print(f"Peak frequency: {freqs[np.argmax(psds.mean(0))]} Hz")
+            print(f"Frequency range with significant power: {freqs[psds.mean(0) > psds.mean(0).max() * 0.1][0]:.1f} - "
+                  f"{freqs[psds.mean(0) > psds.mean(0).max() * 0.1][-1]:.1f} Hz")
+
+            # Verify the filtered data
+            if np.any(np.isnan(filtered_epochs._data)):
+                raise ValueError("Filtering produced NaN values")
+
+            if np.any(np.isinf(filtered_epochs._data)):
+                raise ValueError("Filtering produced infinite values")
+
+            # Update the instance's epochs with the filtered version
+            self.epochs = filtered_epochs
+            print("\nFiltering completed successfully")
+
+        except Exception as e:
+            print(f"Error during filtering: {str(e)}")
+            print("Reverting to original epochs")
+            self.epochs = original_epochs
+            raise
+
+
+    def scipy_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+        """
+        Filter epoched data using a zero-phase Butterworth filter with improved stability.
+
+        Parameters
+        ----------
+        l_freq : float
+            Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
+        h_freq : float
+            Upper frequency cutoff for bandpass filter (default: 45 Hz)
+        notch_freq : float
+            Frequency for notch filter (default: 50 Hz)
+        notch_width : float
+            Width of notch filter (default: 2 Hz)
+        """
+        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
+        import numpy as np
+
+        if self.epochs is None:
+            raise ValueError("Must create epochs before filtering")
+
+        # Create a copy of the epochs object
+        filtered_epochs = self.epochs.copy()
+
+        # Get data and scale it up for better numerical precision
+        data = filtered_epochs.get_data()
+        scale_factor = 1e6  # Convert to microvolts
+        data = data * scale_factor
+
+        print(f"Data shape: {data.shape}")
+        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
+
+        # Ensure data is float64
+        data = data.astype(np.float64)
+
+        sfreq = filtered_epochs.info['sfreq']
+        nyquist = sfreq / 2
+
+        try:
+            # High-pass filter
+            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
+            data = sosfiltfilt(sos_high, data, axis=-1)
+            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Low-pass filter
+            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
+            data = sosfiltfilt(sos_low, data, axis=-1)
+            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Multiple notch filters for harmonics
+            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
+                # Using iirnotch for sharper notch characteristics
+                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
+                data = filtfilt(b, a, data, axis=-1)
+            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Scale back
+            data = data / scale_factor
+            filtered_epochs._data = data
+
+        except Exception as e:
+            print(f"Error during filtering: {str(e)}")
+            raise
+
+        print("Filtering complete")
         self.epochs = filtered_epochs
 
-    def detect_tms_muscle_components(self, 
-                                tms_muscle_window: Tuple[float, float] = (11, 30), 
-                                tms_muscle_thresh: float = 2,  
-                                plot_window: Tuple[float, float] = (-200, 500),  
-                                verbose: bool = True) -> Tuple[List[int], Dict]:
+    def detect_all_artifacts(self,
+                             tms_muscle_window=(11, 30),
+                             tms_muscle_thresh=2,
+                             blink_thresh=2.5,
+                             lat_eye_thresh=2.0,
+                             muscle_freq_window=(30, 100),
+                             muscle_freq_thresh=0.6,
+                             noise_thresh=4.0,
+                             verbose=True) -> Dict:
         """
-        Detect TMS-evoked muscle artifacts in ICA components.
-        Python implementation of TESA's tesa_compselect muscle detection.
-        
+        Detect all artifact types following TESA's implementation.
+        Works with both Raw and Epochs data.
+
         Parameters
         ----------
         tms_muscle_window : tuple
-            Time window (in ms) for detecting TMS-evoked muscle activity [start, end]
-            Default is (11, 30) ms post-TMS
+            Time window (ms) for detecting TMS-evoked muscle activity
         tms_muscle_thresh : float
-            Threshold for detecting muscle components
-            Ratio of mean absolute z-score in muscle window vs. entire time course
-        plot_window : tuple
-            Time window for plotting in ms [start, end]
+            Threshold for TMS-evoked muscle components
+        blink_thresh : float
+            Threshold for blink components
+        lat_eye_thresh : float
+            Threshold for lateral eye movement components
+        muscle_freq_window : tuple
+            Frequency window (Hz) for detecting persistent muscle activity
+        muscle_freq_thresh : float
+            Threshold for persistent muscle components
+        noise_thresh : float
+            Threshold for electrode noise components
         verbose : bool
             Whether to print verbose output
-            
+
         Returns
         -------
-        muscle_components : list
-            Indices of components classified as muscle artifacts
-        component_scores : dict
-            Dictionary containing scores and metrics for each component
+        dict
+            Dictionary containing detected components and their scores
         """
         if not hasattr(self, 'ica'):
-            raise ValueError("Must run ICA before detecting muscle components")
-            
+            raise ValueError("Must run ICA before detecting components")
+
+        # Initialize results dictionary
+        results = {
+            'tms_muscle': {'components': [], 'scores': {}},
+            'blink': {'components': [], 'scores': {}},
+            'lateral_eye': {'components': [], 'scores': {}},
+            'muscle': {'components': [], 'scores': {}},
+            'noise': {'components': [], 'scores': {}}
+        }
+
+        # Get ICA weights
+        weights = self.ica.get_components()
+        n_components = self.ica.n_components_
+
+        # Get ICA components (sources)
+        if hasattr(self, 'epochs') and self.epochs is not None:
+            inst = self.epochs
+            components = self.ica.get_sources(inst)
+            is_epochs = True
+        else:
+            inst = self.raw
+            components = self.ica.get_sources(inst)
+            is_epochs = False
+
+        # 1. Detect TMS-evoked muscle artifacts (if using epoched data)
+        if is_epochs:
+            muscle_comps, muscle_scores = self._detect_tms_muscle(
+                components, tms_muscle_window, tms_muscle_thresh)
+            results['tms_muscle']['components'] = muscle_comps
+            results['tms_muscle']['scores'] = muscle_scores
+
+            if verbose:
+                print(f"\nFound {len(muscle_comps)} TMS-muscle components")
+
+        # 2. Detect eye blink artifacts
+        blink_comps, blink_scores = self._detect_blinks(
+            weights, inst, blink_thresh)
+        results['blink']['components'] = blink_comps
+        results['blink']['scores'] = blink_scores
+
         if verbose:
-            print(f"Analyzing {self.ica.n_components_} components")
-            print(f"Using muscle window: {tms_muscle_window}ms")
-            print(f"Using threshold: {tms_muscle_thresh}")
-        
-        # Get ICA components
-        components = self.ica.get_sources(self.epochs)
-        n_components = components.get_data().shape[1]
-        
-        # Get sampling rate and convert windows to samples
+            print(f"Found {len(blink_comps)} blink components")
+
+        # 3. Detect lateral eye movement artifacts
+        lat_eye_comps, lat_eye_scores = self._detect_lateral_eye(
+            weights, inst, lat_eye_thresh)
+        results['lateral_eye']['components'] = lat_eye_comps
+        results['lateral_eye']['scores'] = lat_eye_scores
+
+        if verbose:
+            print(f"Found {len(lat_eye_comps)} lateral eye movement components")
+
+        # 4. Detect persistent muscle artifacts
+        muscle_comps, muscle_scores = self._detect_muscle_frequency(
+            components, inst.info['sfreq'], muscle_freq_window, muscle_freq_thresh)
+        results['muscle']['components'] = muscle_comps
+        results['muscle']['scores'] = muscle_scores
+
+        if verbose:
+            print(f"Found {len(muscle_comps)} persistent muscle components")
+
+        # 5. Detect electrode noise
+        noise_comps, noise_scores = self._detect_electrode_noise(
+            weights, noise_thresh)
+        results['noise']['components'] = noise_comps
+        results['noise']['scores'] = noise_scores
+
+        if verbose:
+            print(f"Found {len(noise_comps)} noisy electrode components")
+
+        return results
+
+    def _detect_tms_muscle(self, components, window=(11, 30), thresh=2.0):
+        """
+        Detect TMS-evoked muscle artifacts following Equation 3.
+        Only works with epoched data.
+        """
+        if not hasattr(self, 'epochs'):
+            return [], {'ratios': [], 'window_means': [], 'total_means': []}
+
+        # Get time window indices
         sfreq = self.epochs.info['sfreq']
-        tms_muscle_window_samples = np.array([np.abs(self.epochs.times - w/1000).argmin() 
-                                            for w in tms_muscle_window])
-        
+        window_samples = np.array([np.abs(self.epochs.times - w / 1000).argmin()
+                                   for w in window])
+
         # Initialize outputs
         muscle_components = []
-        component_scores = {
-            'muscle_ratios': np.zeros(n_components),
-            'window_scores': np.zeros(n_components),
-            'total_scores': np.zeros(n_components),
-        }
-        
-        # Process each component
-        for comp_idx in range(n_components):
-            if verbose and comp_idx % 5 == 0:
-                print(f"\nAnalyzing component {comp_idx}")
-                
-            # Get component time course
-            comp_data = components.get_data()[:, comp_idx, :].reshape(-1)
-            
-            # Z-score the data
-            comp_z = zscore(comp_data)
-            
-            # Calculate scores
-            muscle_score = np.abs(comp_z)
-            window_score = np.mean(muscle_score[tms_muscle_window_samples[0]:tms_muscle_window_samples[1]])
-            total_score = np.mean(muscle_score)
-            muscle_ratio = window_score / total_score
-            
-            if verbose:
-                print(f"Comp. {comp_idx} TMS-evoked muscle ratio is {muscle_ratio:.2f}.")
-                
-            # Store metrics
-            component_scores['muscle_ratios'][comp_idx] = muscle_ratio
-            component_scores['window_scores'][comp_idx] = window_score
-            component_scores['total_scores'][comp_idx] = total_score
-            
-            # Classify component
-            if muscle_ratio >= tms_muscle_thresh:
-                muscle_components.append(comp_idx)
-        
-        return muscle_components, component_scores
+        scores = {'ratios': [], 'window_means': [], 'total_means': []}
 
-    def plot_muscle_components(self, output_dir: str, session_name: str, muscle_components: List[int], 
-                            component_scores: Dict,
-                            plot_window: Tuple[float, float] = (-100, 250)) -> None:
+        # Process each component
+        for comp_idx in range(self.ica.n_components_):
+            # Get component time course averaged across trials
+            comp_data = np.mean(components.get_data()[:, comp_idx, :], axis=0)
+
+            # Take absolute values
+            comp_abs = np.abs(comp_data)
+
+            # Calculate means following TESA formula
+            window_length = window_samples[1] - window_samples[0]
+            window_mean = (1 / window_length) * np.sum(
+                comp_abs[window_samples[0]:window_samples[1]])
+            total_mean = (1 / len(comp_abs)) * np.sum(comp_abs)
+
+            # Calculate ratio
+            muscle_ratio = window_mean / total_mean
+
+            # Store scores
+            scores['ratios'].append(muscle_ratio)
+            scores['window_means'].append(window_mean)
+            scores['total_means'].append(total_mean)
+
+            # Classify component
+            if muscle_ratio >= thresh:
+                muscle_components.append(comp_idx)
+
+        return muscle_components, scores
+
+    def _detect_blinks(self, weights, inst, thresh=2.5):
         """
-        Plot detected muscle components using MNE's plotting functions.
-        
+        Detect eye blink artifacts following Equation 4.
+        Works with both Raw and Epochs data.
+
         Parameters
         ----------
-        muscle_components : list
-            Indices of components classified as muscle artifacts
-        component_scores : dict
-            Dictionary containing component metrics 
-        plot_window : tuple
-            Time window for plotting in ms [start, end]
+        weights : array
+            ICA weight matrix
+        inst : Raw or Epochs
+            MNE Raw or Epochs instance
+        thresh : float
+            Z-score threshold for blink detection
         """
-        if not hasattr(self, 'ica'):
-            raise ValueError("Must run ICA before plotting components")
-            
-        if len(muscle_components) == 0:
-            print("No muscle components detected to plot")
-            
-            # Plot muscle ratios
-            plt.figure(figsize=(10, 4))
-            plt.bar(range(len(component_scores['muscle_ratios'])), 
-                    component_scores['muscle_ratios'])
-            plt.axhline(y=2, color='r', linestyle='--', label='Threshold')
-            plt.xlabel('Component')
-            plt.ylabel('Muscle Ratio')
-            plt.title('TMS-Evoked Muscle Activity')
-            plt.legend()
-            plt.show()
-            return
-        with mne.viz.use_browser_backend("matplotlib"):
-            fig = self.ica.plot_sources(self.epochs, show=False)
-        # Plot detected muscle components
+        # Get electrode indices for Fp1 and Fp2
+        fp_channels = ['Fp1', 'Fp2']
+        fp_idx = [inst.ch_names.index(ch) for ch in fp_channels
+                  if ch in inst.ch_names]
 
-        fig.savefig(os.path.join(output_dir, session_name, f"Muscle components.png"), 
-            dpi=300, bbox_inches='tight')
-        plt.close(fig)
+        if not fp_idx:
+            print("Warning: Could not find Fp1/Fp2 channels for blink detection")
+            return [], {'z_scores': []}
+
+        # Initialize outputs
+        blink_components = []
+        scores = {'z_scores': []}
+
+        # Calculate z-scores for weights
+        w_mean = np.mean(weights, axis=0)
+        w_std = np.std(weights, axis=0)
+
+        for comp_idx in range(weights.shape[1]):
+            # Get average z-score for Fp1/Fp2
+            fp_z_scores = [(weights[fp, comp_idx] - w_mean[comp_idx]) / w_std[comp_idx]
+                           for fp in fp_idx]
+            mean_z = np.abs(np.mean(fp_z_scores))
+
+            scores['z_scores'].append(mean_z)
+
+            # Classify component
+            if mean_z > thresh:
+                blink_components.append(comp_idx)
+
+        return blink_components, scores
+
+    def _detect_lateral_eye(self, weights, inst, thresh=2.0):
+        """
+        Detect lateral eye movement artifacts following Equations 5 & 6.
+        Works with both Raw and Epochs data.
+
+        Parameters
+        ----------
+        weights : array
+            ICA weight matrix
+        inst : Raw or Epochs
+            MNE Raw or Epochs instance
+        thresh : float
+            Z-score threshold for lateral eye movement detection
+        """
+        # Get electrode indices for F7 and F8
+        lat_channels = ['F7', 'F8']
+        lat_idx = [inst.ch_names.index(ch) for ch in lat_channels
+                   if ch in inst.ch_names]
+
+        if len(lat_idx) < 2:
+            print("Warning: Could not find F7/F8 channels for lateral eye detection")
+            return [], {'z_scores': []}
+
+        # Initialize outputs
+        lat_eye_components = []
+        scores = {'z_scores': []}
+
+        # Calculate z-scores for weights
+        w_mean = np.mean(weights, axis=0)
+        w_std = np.std(weights, axis=0)
+
+        for comp_idx in range(weights.shape[1]):
+            # Get z-scores for F7/F8
+            z_scores = [(weights[ch, comp_idx] - w_mean[comp_idx]) / w_std[comp_idx]
+                        for ch in lat_idx]
+
+            scores['z_scores'].append(z_scores)
+
+            # Check for opposite polarity exceeding threshold
+            if ((z_scores[0] > thresh and z_scores[1] < -thresh) or
+                    (z_scores[0] < -thresh and z_scores[1] > thresh)):
+                lat_eye_components.append(comp_idx)
+
+        return lat_eye_components, scores
+
+    def _detect_muscle_frequency(self, components, sfreq, freq_window=(30, 100), thresh=0.6):
+        """
+        Detect persistent muscle artifacts following Equation 7.
+        Works with both Raw and Epochs data.
+
+        Parameters
+        ----------
+        components : array
+            ICA component data
+        sfreq : float
+            Sampling frequency
+        freq_window : tuple
+            Frequency window (Hz) for muscle activity detection
+        thresh : float
+            Threshold for muscle component detection
+        """
+        from scipy.signal import welch
+
+        # Initialize outputs
+        muscle_components = []
+        scores = {'power_ratios': []}
+
+        # Get component data
+        if isinstance(components, mne.BaseEpochs):
+            comp_data = components.get_data()
+        else:  # Raw data
+            comp_data = components.get_data()
+            # Reshape to match epochs format [n_epochs=1, n_components, n_times]
+            comp_data = comp_data.reshape(1, *comp_data.shape)
+
+        # Calculate frequency representation for each component
+        for comp_idx in range(self.ica.n_components_):
+            # Calculate power spectrum
+            freqs, psd = welch(comp_data[:, comp_idx, :], fs=sfreq)
+
+            # Get indices for frequency window
+            freq_idx = np.where((freqs >= freq_window[0]) &
+                                (freqs <= freq_window[1]))[0]
+
+            # Calculate power ratio
+            window_power = np.mean(psd[:, freq_idx])
+            total_power = np.mean(psd)
+            power_ratio = window_power / total_power
+
+            scores['power_ratios'].append(power_ratio)
+
+            # Classify component
+            if power_ratio > thresh:
+                muscle_components.append(comp_idx)
+
+        return muscle_components, scores
+
+    def _detect_electrode_noise(self, weights, thresh=4.0):
+        """
+        Detect electrode noise following Equation 8.
+        Works with both Raw and Epochs data as it only uses ICA weights.
+
+        Parameters
+        ----------
+        weights : array
+            ICA weight matrix
+        thresh : float
+            Z-score threshold for noise detection
+        """
+        # Initialize outputs
+        noise_components = []
+        scores = {'max_z_scores': []}
+
+        # Calculate z-scores for weights
+        w_mean = np.mean(weights, axis=0)
+        w_std = np.std(weights, axis=0)
+
+        for comp_idx in range(weights.shape[1]):
+            # Calculate z-scores for all electrodes
+            z_scores = (weights[:, comp_idx] - w_mean[comp_idx]) / w_std[comp_idx]
+            max_abs_z = np.max(np.abs(z_scores))
+
+            scores['max_z_scores'].append(max_abs_z)
+
+            # Classify component
+            if max_abs_z > thresh:
+                noise_components.append(comp_idx)
+
+        return noise_components, scores
+
 
     def set_average_reference(self):
         '''
@@ -1351,24 +1789,32 @@ class TMSEEGPreprocessor:
         except Exception as e:
             print(f"Error in TMS artifact interpolation: {str(e)}")
 
-
-    def downsample(self, target_sfreq: float = None):
+    def initial_downsample(self):
         """
-        Downsample epochs to the desired sampling frequency if the current sampling frequency is higher.
-
-        Parameters
-        ----------
-        target_sfreq : float or None
-            The target sampling frequency. If None, uses self.ds_sfreq.
+        Perform initial downsampling of raw data to initial_sfreq (default 1000 Hz).
         """
-        if target_sfreq is None:
-            target_sfreq = self.ds_sfreq
-        current_sfreq = self.epochs.info['sfreq']
-        if current_sfreq > target_sfreq:
-            self.epochs = self.epochs.resample(target_sfreq)
-            print(f"Downsampled data to {target_sfreq} Hz")
+        current_sfreq = self.raw.info['sfreq']
+        if current_sfreq > self.initial_sfreq:
+            self.raw = self.raw.resample(self.initial_sfreq)
+            print(f"Initially downsampled raw data to {self.initial_sfreq} Hz")
         else:
-            print("Current sfreq <= target sfreq; no downsampling performed")
+            print(f"Current sfreq ({current_sfreq} Hz) <= initial target sfreq ({self.initial_sfreq} Hz); "
+                  "no initial downsampling performed")
+
+    def final_downsample(self):
+        """
+        Perform final downsampling of epochs to final_sfreq (default 725 Hz).
+        """
+        if self.epochs is None:
+            raise ValueError("Must create epochs before final downsampling")
+
+        current_sfreq = self.epochs.info['sfreq']
+        if current_sfreq > self.final_sfreq:
+            self.epochs = self.epochs.resample(self.final_sfreq)
+            print(f"Final downsample to {self.final_sfreq} Hz")
+        else:
+            print(f"Current sfreq ({current_sfreq} Hz) <= final target sfreq ({self.final_sfreq} Hz); "
+                  "no final downsampling performed")
     
     def save_epochs(self, fpath: str = None):
         """

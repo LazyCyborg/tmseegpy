@@ -8,7 +8,13 @@ import matplotlib.pyplot as plt
 from .preproc import TMSEEGPreprocessor
 from .pcist import PCIst
 from .preproc_vis import plot_raw_segments, plot_epochs_grid
-from .validate_tep import plot_tep_analysis, generate_validation_summary
+from .validate_tep import (
+    analyze_gmfa,
+    analyze_roi,
+    plot_tep_analysis,
+    generate_validation_summary,
+    DEFAULT_TEP_COMPONENTS
+)
 import mne
 import time
 from .neurone_loader import Recording
@@ -43,7 +49,7 @@ def generate_preproc_stats(processor, session_name, output_dir):
         f.write("Recording Parameters\n")
         f.write("-" * 20 + "\n")
         f.write(f"Duration: {processor.raw.times[-1]:.1f} seconds\n")
-        f.write(f"Sampling rate: {processor.raw.info['sfreq']} → {processor.ds_sfreq} Hz\n")
+        f.write(f"Sampling rate: {processor.raw.info['sfreq']} → {processor.final_sfreq} Hz\n")
         f.write(f"Channels: {len(processor.raw.ch_names)}\n\n")
         
         '''# TMS pulse information
@@ -423,12 +429,12 @@ def process_subjects(args):
         if channels_to_drop:
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
-        #if args.plot_preproc:
-           # plot_raw_segments(raw, args.output_dir, step_name='raw')
+        if args.plot_raw:
+           plot_raw_segments(raw, args.output_dir, step_name='raw', session_name=session_name)
 
         # Preprocessing
-        processor = TMSEEGPreprocessor(raw, ds_sfreq=args.ds_sfreq)
-        print("\nRemoving TMS artifact and muscle peaks...")
+        processor = TMSEEGPreprocessor(raw, initial_sfreq=args.initial_sfreq, final_sfreq=args.final_sfreq)
+        print("\nRemoving TMS artifact...")
         if check_stop(): return []
         processor.remove_tms_artifact(cut_times_tms=(-2, 10))  # Step 8
 
@@ -445,6 +451,9 @@ def process_subjects(args):
             if check_stop(): return []
             processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width)
 
+        print("\nPerforming initial downsampling...")
+        processor.initial_downsample()
+
         #if args.plot_preproc:
           #  plot_raw_segments(raw, args.output_dir, step_name='raw_f',)
 
@@ -458,7 +467,7 @@ def process_subjects(args):
         print("\nRemoving bad epochs...")
         processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
         if args.plot_preproc:
-            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='epochs')
+            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='epochs')
 
         print("\nSetting average reference...")
         processor.set_average_reference()
@@ -480,7 +489,7 @@ def process_subjects(args):
             manual_mode=args.first_ica_manual
         )
         if args.plot_preproc:
-            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='ica1')
+            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='ica1')
         if args.clean_muscle_artifacts:
             print("\nCleaning muscle artifacts...")
             if check_stop(): return []
@@ -503,22 +512,30 @@ def process_subjects(args):
 
         if not args.filter_raw:
             print("\nFiltering epoched data...")
-            processor.filter_epochs(
-                l_freq=args.l_freq,
-                h_freq=args.h_freq,
-                notch_freq=args.notch_freq,
-                notch_width=args.notch_width,
-            )
+            if check_stop(): return []
+            if args.mne_filter_epochs:
+                processor.mne_filter_epochs(
+                    l_freq=args.l_freq,
+                    h_freq=args.h_freq,
+                    notch_freq=args.notch_freq,
+                    notch_width=args.notch_width,
+                )
+            else:
+                processor.scipy_filter_epochs(
+                    l_freq=args.l_freq,
+                    h_freq=args.h_freq,
+                    notch_freq=args.notch_freq,
+                    notch_width=args.notch_width,
+                )
 
         if args.plot_preproc:
-            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='filtered')
+            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='filtered')
 
         if not args.no_second_ICA:
             print("\nRunning second ICA...")
             if check_stop(): return []
             processor.run_second_ica(
                 method=args.second_ica_method,
-                exclude_labels=["eye blink", "heart beat", "muscle artifact", "channel noise", "line noise"],
                 manual_mode=args.second_ica_manual
             )
 
@@ -529,15 +546,16 @@ def process_subjects(args):
         print("\nApplying baseline correction...")
         processor.apply_baseline_correction(baseline=(baseline_start_sec, baseline_end_sec))
         if args.plot_preproc:
-            plot_epochs_grid(epochs, args.output_dir, session_name=session_name, step_name='ica2')
+            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='ica2')
         if args.apply_csd:
             print("\nApplying CSD transformation...")
             processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
-    
-        print(f"\nDownsampling to {processor.ds_sfreq} Hz")
-        processor.downsample()
+
+        print("\nPerforming final downsampling...")
+        processor.final_downsample()
+
         if args.plot_preproc:
-            plot_epochs_grid(epochs, args.output_dir, session_name, step_name='final')
+            plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='final')
 
         epochs = processor.epochs
         epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
@@ -546,50 +564,67 @@ def process_subjects(args):
             try:
                 print("\nAnalyzing TEPs...")
                 if check_stop(): return []
-                
-                # Calculate evoked response
-                evoked = epochs.average()
-                
-                # Basic validation checks
-                if not evoked.times.size:
-                    raise ValueError("No time points in evoked data")
-                if not evoked.data.any():
-                    raise ValueError("No data in evoked response")
-                    
-                print(f"Processing TEPs from {evoked.times[0]:.3f}s to {evoked.times[-1]:.3f}s")
-                
-                # Run TEP analysis
-                components = plot_tep_analysis(
-                    evoked=evoked,
+
+                # Define our standard TEP components exactly as in TESA
+                DEFAULT_TEP_COMPONENTS = {
+                    'N15': {'time': (12, 18), 'polarity': 'negative', 'peak': 15},
+                    'P30': {'time': (25, 35), 'polarity': 'positive', 'peak': 30},
+                    'N45': {'time': (36, 57), 'polarity': 'negative', 'peak': 45},
+                    'P60': {'time': (58, 80), 'polarity': 'positive', 'peak': 60},
+                    'N100': {'time': (81, 144), 'polarity': 'negative', 'peak': 100},
+                    'P180': {'time': (145, 250), 'polarity': 'positive', 'peak': 180}
+                }
+
+                # Analyze GMFA
+                print("Analyzing GMFA...")
+                gmfa_results = analyze_gmfa(
+                    epochs=epochs,
+                    components=DEFAULT_TEP_COMPONENTS,
+                    samples=5,  # TESA default
+                    method='largest'  # TESA default
+                )
+
+                # Analyze ROI (if specified channels exist)
+                roi_channels = ['C3', 'C4']  # Example ROI - modify as needed
+                if all(ch in epochs.ch_names for ch in roi_channels):
+                    print(f"Analyzing ROI: {roi_channels}")
+                    roi_results = analyze_roi(
+                        epochs=epochs,
+                        channels=roi_channels,
+                        components=DEFAULT_TEP_COMPONENTS,
+                        samples=5,
+                        method='largest'
+                    )
+
+                # Create visualization
+                print("Generating TEP plots...")
+                plot_tep_analysis(
+                    epochs=epochs,
                     output_dir=args.output_dir,
                     session_name=session_name,
-                    prominence=args.prominence
+                    components=DEFAULT_TEP_COMPONENTS,
+                    analysis_type='gmfa'  # Can be 'roi' if you want to plot ROI analysis
                 )
-                
-                # Check if any components were found
-                if not components:
-                    print("Warning: No TEP components were detected")
-                else:
-                    print(f"Found {len(components)} TEP components")
-                    
-                    if args.save_validation:
-                        generate_validation_summary(
-                            components,
-                            args.output_dir,
-                            session_name
-                        )
-                        print("TEP validation summary saved")
-                        
+
+                # Generate validation summary if requested
+                if args.save_validation:
+                    print("Generating validation summary...")
+                    generate_validation_summary(
+                        components=gmfa_results,  # Use GMFA results for validation
+                        output_dir=args.output_dir,
+                        session_name=session_name
+                    )
+                    print("TEP validation summary saved")
+
             except Exception as e:
                 print(f"Warning: TEP analysis failed: {str(e)}")
                 import traceback
                 print("Detailed error:")
                 print(traceback.format_exc())
-                components = None
         
         # Final quality check
         # Maybe use ylim={'eeg': [-2, 2]},
-        fig = processor.plot_evoked_response(xlim=(-0.1, 0.4), title="Final Evoked Response", show=args.show_evoked)
+        fig = processor.plot_evoked_response(xlim=(-0.1, 0.4), title="Final Evoked Response", show=args.save_evoked)
         fig.savefig(f"{args.output_dir}/evoked_{session_name}.png")  
         plt.close(fig)
         
@@ -638,6 +673,371 @@ def process_subjects(args):
  
     return subject_pcist_values
 
+
+def process_continuous_data(args):
+    """
+    Process TMS-EEG data maintaining continuous signal.
+    Focuses on raw data processing with visualization.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command line arguments controlling processing parameters
+
+    Returns
+    -------
+    list
+        List of processed Raw objects
+    """
+    import builtins
+    setattr(builtins, 'STOP_PROCESSING', False)
+    from .preproc_vis import plot_raw_segments, create_step_directory
+
+    processed_raws = []
+    subject_pcist_values = []  # Initialize as an empty list
+    pcist_objects = []  # Initialize as an empty list
+    pcist_details = []  # Initialize as an empty list
+    session_names = []
+
+    def check_stop():
+        if getattr(builtins, 'STOP_PROCESSING', False):
+            print("\nProcessing stopped by user")
+            return True
+        return False
+
+    # Initialize paths
+    data_dir = Path(args.data_dir)
+    TMS_DATA_PATH = data_dir / 'TMSEEG'
+
+    # Verify paths
+    required_paths = {
+        'Data Directory': data_dir,
+        'TMS Data': TMS_DATA_PATH,
+    }
+    for name, path in required_paths.items():
+        if not path.exists():
+            print(f"WARNING: {name} not found at: {path}")
+        else:
+            print(f"✓ Found {name} at: {path}")
+
+    # Store processed raw objects
+    processed_raws = []
+
+    # Load the raw data
+    from .dataloader import TMSEEGLoader
+    loader = TMSEEGLoader(
+        data_path=TMS_DATA_PATH,
+        format=args.data_format,
+        substitute_zero_events_with=args.substitute_zero_events_with,
+        eeglab_montage_units=args.eeglab_montage_units,
+        verbose=True
+    )
+
+    raw_list = loader.load_data()
+    session_info = loader.get_session_info()
+
+    # Process each raw file
+    for n, raw in enumerate(raw_list):
+        if check_stop():
+            return processed_raws
+
+        session_name = session_info[n]['name']
+        print(f"\nProcessing Session {n}: {session_name}")
+
+        try:
+            # Plot initial raw data
+            if args.plot_raw:
+                print("\nPlotting initial raw data...")
+                plot_raw_segments(raw, args.output_dir, session_name, "01_initial")
+
+            # Get events (needed for TMS artifact removal)
+            try:
+                events = mne.find_events(raw, stim_channel=args.stim_channel)
+            except ValueError:
+                try:
+                    print("No stim channel found, looking for events in annotations...")
+                    unique_descriptions = set(raw.annotations.description)
+                    print(f"Found annotation types: {unique_descriptions}")
+
+                    tms_annotations = ['Stimulation', 'TMS', 'R128', 'Response']
+                    event_id = {}
+                    for desc in unique_descriptions:
+                        if any(tms_str.lower() in desc.lower() for tms_str in tms_annotations):
+                            event_id[desc] = args.substitute_zero_events_with
+
+                    if not event_id:
+                        print("No TMS-related annotations found. Using all annotations...")
+                        for i, desc in enumerate(unique_descriptions, 1):
+                            event_id[desc] = i
+
+                    print(f"Using event mapping: {event_id}")
+                    events, _ = mne.events_from_annotations(raw, event_id=event_id)
+
+                    if len(events) == 0:
+                        raise ValueError("No events found in annotations")
+
+                except Exception as e:
+                    print(f"Could not get events from annotations: {str(e)}")
+                    print("Trying common stim channel names...")
+
+                    stim_channels = mne.pick_types(raw.info, stim=True, exclude=[])
+                    if len(stim_channels) > 0:
+                        stim_ch_name = raw.ch_names[stim_channels[0]]
+                        print(f"Using detected stim channel: {stim_ch_name}")
+                        events = mne.find_events(raw, stim_channel=stim_ch_name)
+                    else:
+                        common_stim_names = ['STI 014', 'STIM', 'STI101', 'trigger', 'STI 001']
+                        found = False
+                        for ch_name in common_stim_names:
+                            if ch_name in raw.ch_names:
+                                print(f"Using stim channel: {ch_name}")
+                                events = mne.find_events(raw, stim_channel=ch_name)
+                                found = True
+                                break
+                        if not found:
+                            raise ValueError(f"Could not find events in data. Available channels: {raw.ch_names}")
+
+            print(f"Found {len(events)} events")
+            annotations = mne.annotations_from_events(
+                events=events,
+                sfreq=raw.info['sfreq'],
+                event_desc={args.substitute_zero_events_with: 'Stimulation'}
+            )
+            raw.set_annotations(annotations)
+
+            # Drop unnecessary channels
+            channels_to_drop = []
+            if 'EMG1' in raw.ch_names:
+                channels_to_drop.append('EMG1')
+            if channels_to_drop:
+                print(f"Dropping channels: {channels_to_drop}")
+                raw.drop_channels(channels_to_drop)
+
+            # Initialize preprocessor with raw data
+            processor = TMSEEGPreprocessor(raw, initial_sfreq=args.initial_sfreq, final_sfreq=args.final_sfreq)
+
+            print("\nRemoving TMS artifact and muscle peaks...")
+            if check_stop():
+                return processed_raws
+
+            processor.remove_tms_artifact(cut_times_tms=(-2, 10))
+            if args.plot_preproc:
+                plot_raw_segments(processor.raw, args.output_dir, session_name, "02_post_tms_removal")
+
+            print("\nInterpolating TMS artifact...")
+            processor.interpolate_tms_artifact(
+                method='cubic',
+                interp_window=1.0,
+                cut_times_tms=(-2, 10)
+            )
+            if args.plot_preproc:
+                plot_raw_segments(processor.raw, args.output_dir, session_name, "03_post_interpolation")
+
+            print("\nPerforming initial downsampling...")
+            processor.initial_downsample()
+            if args.plot_preproc:
+                plot_raw_segments(processor.raw, args.output_dir, session_name, "04_post_downsample")
+
+            print("\nRunning ICA...")
+            if check_stop():
+                return processed_raws
+
+            if args.first_ica_manual:
+                processor.run_ica(
+                    output_dir=args.output_dir,
+                    session_name=session_name,
+                    method=args.ica_method,
+                    tms_muscle_thresh=args.tms_muscle_thresh,
+                    manual_mode=True
+                )
+            else:
+                processor.run_ica(
+                    output_dir=args.output_dir,
+                    session_name=session_name,
+                    method=args.ica_method,
+                    tms_muscle_thresh=args.tms_muscle_thresh,
+                    manual_mode=False
+                )
+
+            if args.plot_preproc:
+                plot_raw_segments(processor.raw, args.output_dir, session_name, "05_post_ica")
+
+
+            print("\nFiltering raw data...")
+            if check_stop():
+                return processed_raws
+            processor.filter_raw(
+                l_freq=args.l_freq,
+                h_freq=args.h_freq,
+                notch_freq=args.notch_freq,
+                notch_width=args.notch_width
+            )
+
+            if not args.no_second_ICA:
+                print("\nRunning second ICA...")
+                if check_stop():
+                    return processed_raws
+
+                if args.second_ica_manual:
+                    processor.run_second_ica(
+                        method=args.second_ica_method,
+                        manual_mode=True
+                    )
+                else:
+                    processor.run_second_ica(
+                        method=args.second_ica_method,
+                        manual_mode=False
+                    )
+
+                if args.plot_preproc:
+                    plot_raw_segments(processor.raw, args.output_dir, session_name, "06_post_filter")
+
+            # Final resampling if needed
+            if processor.raw.info['sfreq'] > args.final_sfreq:
+                print("\nPerforming final resampling...")
+                processor.raw.resample(args.final_sfreq)
+                if args.plot_preproc:
+                    plot_raw_segments(processor.raw, args.output_dir, session_name, "07_final")
+
+            # Save processed raw data
+            output_path = Path(args.output_dir) / f"{session_name}_processed_continuous_raw.fif"
+            processor.raw.save(output_path, overwrite=True)
+            processed_raws.append(processor.raw)
+
+            print(f"\nProcessed continuous data saved to: {output_path}")
+
+            # After continuous processing, create epochs with baseline correction
+            print("\nCreating epochs from continuous data...")
+            baseline_start_sec = args.baseline_start / 1000.0
+            baseline_end_sec = args.baseline_end / 1000.0
+            processor.create_epochs(
+                tmin=args.epochs_tmin,
+                tmax=args.epochs_tmax,
+                baseline=(baseline_start_sec, baseline_end_sec),
+                amplitude_threshold=args.amplitude_threshold
+            )
+
+            print("\nRemoving bad channels...")
+            processor.remove_bad_channels(threshold=args.bad_channels_threshold)
+
+            print("\nRemoving bad epochs...")
+            processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
+
+            if args.plot_preproc:
+                plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='post_continuous')
+
+            if args.apply_csd:
+                print("\nApplying CSD transformation...")
+                processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
+
+            print("\nPerforming final downsampling...")
+            processor.final_downsample()
+
+            if args.plot_preproc:
+                plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='final')
+
+            epochs = processor.epochs
+            epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
+
+
+            if args.validate_teps:
+                try:
+                    print("\nAnalyzing TEPs...")
+                    if check_stop(): return processed_raws
+
+                    # Define standard TEP components exactly as in TESA
+                    DEFAULT_TEP_COMPONENTS = {
+                        'N15': {'time': (12, 18), 'polarity': 'negative', 'peak': 15},
+                        'P30': {'time': (25, 35), 'polarity': 'positive', 'peak': 30},
+                        'N45': {'time': (36, 57), 'polarity': 'negative', 'peak': 45},
+                        'P60': {'time': (58, 80), 'polarity': 'positive', 'peak': 60},
+                        'N100': {'time': (81, 144), 'polarity': 'negative', 'peak': 100},
+                        'P180': {'time': (145, 250), 'polarity': 'positive', 'peak': 180}
+                    }
+
+                    # Analyze GMFA
+                    print("Analyzing GMFA...")
+                    gmfa_results = analyze_gmfa(
+                        epochs=epochs,
+                        components=DEFAULT_TEP_COMPONENTS,
+                        samples=5,  # TESA default
+                        method='largest'  # TESA default
+                    )
+
+                    # Analyze ROI (if specified channels exist)
+                    roi_channels = ['C3', 'C4']  # Example ROI - modify as needed
+                    if all(ch in epochs.ch_names for ch in roi_channels):
+                        print(f"Analyzing ROI: {roi_channels}")
+                        roi_results = analyze_roi(
+                            epochs=epochs,
+                            channels=roi_channels,
+                            components=DEFAULT_TEP_COMPONENTS,
+                            samples=5,
+                            method='largest'
+                        )
+
+                    # Create visualization
+                    print("Generating TEP plots...")
+                    plot_tep_analysis(
+                        epochs=epochs,
+                        output_dir=args.output_dir,
+                        session_name=session_name,
+                        components=DEFAULT_TEP_COMPONENTS,
+                        analysis_type='gmfa'
+                    )
+
+                    if args.save_validation:
+                        print("Generating validation summary...")
+                        generate_validation_summary(
+                            components=gmfa_results,
+                            output_dir=args.output_dir,
+                            session_name=session_name
+                        )
+                        print("TEP validation summary saved")
+
+                except Exception as e:
+                    print(f"Warning: TEP analysis failed: {str(e)}")
+                    import traceback
+                    print("Detailed error:")
+                    print(traceback.format_exc())
+
+                # Plot evoked response
+            fig = processor.plot_evoked_response(xlim=(-0.1, 0.4), title="Final Evoked Response", show=args.save_evoked)
+            fig.savefig(f"{args.output_dir}/evoked_{session_name}.png")
+            plt.close(fig)
+
+            # PCIst analysis
+            pcist = PCIst(epochs)
+            par = {
+                'baseline_window': (args.baseline_start, args.baseline_end),
+                'response_window': (args.response_start, args.response_end),
+                'k': args.k,
+                'min_snr': args.min_snr,
+                'max_var': args.max_var,
+                'embed': args.embed,
+                'n_steps': args.n_steps
+            }
+            value, details = pcist.calc_PCIst(**par, return_details=True)
+            fig = pcist.plot_analysis(details, session_name=session_name)
+            print(f"PCI: {value}")
+            subject_pcist_values.append(value)
+            fig.savefig(f"{args.output_dir}/pcist_{session_name}.png")
+            plt.close(fig)
+
+            pcist_objects.append(pcist)
+            pcist_details.append(details)
+            session_names.append(session_name)
+
+            processed_raws.append(processor.raw)
+
+        except Exception as e:
+            print(f"Error processing session {session_name}: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+            continue
+
+    return processed_raws, subject_pcist_values, pcist_objects, pcist_details, session_names
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process EEG data.')
     parser.add_argument('--data_dir', type=str, default=str(Path.cwd() / 'data'), 
@@ -657,8 +1057,10 @@ if __name__ == "__main__":
                         help='Random seed for reproducibility (default: 42)')
     parser.add_argument('--substitute_zero_events_with', type=int, default=10,
                         help='Value to substitute zero events with (default: 10)')
-    parser.add_argument('--ds_sfreq', type=float, default=725,
-                        help='Downsampling frequency (default: 725)')
+    parser.add_argument('--initial_sfreq', type=float, default=1000,
+                        help='Initial downsampling frequency (default: 1000)')
+    parser.add_argument('--final_sfreq', type=float, default=725,
+                        help='Final downsampling frequency (default: 725)')
     # Trying to match TESA
     parser.add_argument('--initial_window_start', type=float, default=-2,
                     help='Initial TMS artifact window start (TESA default: -2)')
@@ -677,6 +1079,10 @@ if __name__ == "__main__":
                         help='Interpolation method (TESA requires cubic)')
     parser.add_argument('--skip_second_artifact_removal', action='store_true',
                     help='Skip the second stage of TMS artifact removal')
+    parser.add_argument('--mne_filter_epochs', action='store_true',
+                    help='Use built in filter in mne (default: True)')
+    parser.add_argument('--plot_raw', action='store_true',
+                    help='Plot raw data (takes time) (default: False)')
     parser.add_argument('--filter_raw', type=bool, default=False,
                         help='Whether to filter raw data instead of epoched (default: False)')
     parser.add_argument('--l_freq', type=float, default=0.1,
@@ -727,8 +1133,8 @@ if __name__ == "__main__":
                     help='Lambda2 parameter for CSD transformation (default: 1e-5)')
     parser.add_argument('--stiffness', type=int, default=4,
                     help='Stiffness parameter for CSD transformation (default: 4)')
-    parser.add_argument('--show_evoked', action='store_true',
-                    help='Display the evoked plot with TEPs (default: False)')
+    parser.add_argument('--save_evoked', action='store_true',
+                    help='Save evoked plot with TEPs (default: False)')
     parser.add_argument('--validate_teps', action='store_true',
                 help='Perform TEP validation against established criteria')
     parser.add_argument('--save_validation', action='store_true',
@@ -743,8 +1149,8 @@ if __name__ == "__main__":
                         help='Start of response window in ms (default: 0)')
     parser.add_argument('--response_end', type=int, default=299,
                         help='End of response window in ms (default: 299)')
-    parser.add_argument('--amplitude_threshold', type=float, default=300.0,
-                    help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
+   # parser.add_argument('--amplitude_threshold', type=float, default=300.0,
+      #              help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
     parser.add_argument('--k', type=float, default=1.2,
                         help='PCIst parameter k (default: 1.2)')
     parser.add_argument('--min_snr', type=float, default=1.1,

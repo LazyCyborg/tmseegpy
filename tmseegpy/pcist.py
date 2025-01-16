@@ -27,9 +27,9 @@ class PCIst:
     """
     
     def __init__(self, epochs: mne.epochs.Epochs):
-        if not isinstance(epochs, mne.epochs.Epochs):
+        if not isinstance(epochs, (mne.epochs.Epochs, mne.epochs.EpochsArray)):
             print(f"Type of epochs: {type(epochs)}")
-            raise ValueError("Input must be an MNE Epochs object")
+            raise ValueError("Input must be an MNE Epochs or EpochsArray object")
         self.epochs = epochs
         self.PCI = None
 

@@ -71,64 +71,7 @@ For an graphical user interface run:
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
 ### Command-Line Arguments
-The following parameters can be configured either through command-line arguments or the GUI interface:
-
-| Argument                    | Type  | Default  | Description                                                                                |
-|-----------------------------|-------|----------|--------------------------------------------------------------------------------------------|
-| Preprocessing Parameters |
-| --data_dir                  | str   | ./data   | Path to the data directory containing EEG recordings                                       |
-| --plot_preproc              | flag  | False    | Enable plotting during preprocessing for quality checks                                    |
-| --ds_sfreq                  | float | 725      | Desired sampling frequency after downsampling                                             |
-| --random_seed               | int   | 42       | Seed for random number generators for reproducibility                                      |
-| --bad_channels_threshold    | float | 1        | Threshold for detecting bad channels using the FASTER algorithm                           |
-| --bad_epochs_threshold      | float | 1        | Threshold for detecting bad epochs using the FASTER algorithm                             |
-| --apply_ssp                | flag  | False    | Apply Signal Space Projection                                                               |
-| --ssp_n_eeg                | int   | 2        | Number of SSP components to apply                                                         |
-| --substitute_zero_events_with | int   | 10       | Value to substitute zero events in the data                                             |
-| Filtering Parameters |
-| --l_freq                    | float | 1        | Lower cutoff frequency for bandpass filter                                               |
-| --h_freq                    | float | 45       | Upper cutoff frequency for bandpass filter                                               |
-| --notch_freq               | float | 50       | Frequency for notch filter (e.g., to remove powerline noise)                             |
-| --notch_width              | float | 2        | Width of the notch filter                                                                |
-| TMS Artifact Removal Parameters |
-| --initial_cut_start        | float | -2       | Start time (ms) for initial cutting around TMS pulse                                     |
-| --initial_cut_end          | float | 10       | End time (ms) for initial cutting around TMS pulse                                       |
-| --initial_interp_window    | float | 1.0      | Initial interpolation window size (ms)                                                   |
-| --extended_cut_start       | float | -2       | Start time (ms) for extended artifact removal                                            |
-| --extended_cut_end         | float | 15       | End time (ms) for extended artifact removal                                              |
-| --extended_interp_window   | float | 5.0      | Extended interpolation window size (ms)                                                  |
-| --interpolation_method     | str   | 'cubic'  | Interpolation method ('linear' or 'cubic')                                               |
-| Muscle Artifact Parameters |
-| --clean_muscle_artifacts   | flag  | False    | Enable muscle artifact cleaning using tensor decomposition                               |
-| --muscle_window_start      | float | 0.005    | Start time (s) for muscle artifact detection window                                      |
-| --muscle_window_end        | float | 0.030    | End time (s) for muscle artifact detection window                                        |
-| --threshold_factor         | float | 1.0      | Threshold factor for muscle artifact detection                                           |
-| --n_components             | int   | 5        | Number of components for tensor decomposition during muscle artifact cleaning             |
-| ICA Parameters |
-| --ica_method               | str   | 'fastica'| ICA method for the first ICA pass ('fastica' or 'infomax')                              |
-| --tms_muscle_thresh        | float | 2.0      | Threshold for detecting TMS-evoked muscle artifacts during ICA                           |
-| --second_ica_method        | str   | 'infomax'| ICA method for the second ICA pass ('infomax' or 'fastica')                             |
-| CSD Parameters |
-| --apply_csd                | flag  | True    | Apply Current Source Density (CSD) transformation                                        |
-| --lambda2                  | float | 1e-3     | Lambda2 parameter for CSD transformation                                                 |
-| --stiffness               | int   | 3        | Stiffness parameter for CSD transformation                                               |
-| Epoching Parameters |
-| --epochs_tmin              | float | -0.41    | Start time (s) for epochs relative to the event                                         |
-| --epochs_tmax              | float | 0.41     | End time (s) for epochs relative to the event                                           |
-| --baseline_start          | float | -400     | Start time (ms) for baseline correction window                                           |
-| --baseline_end            | float | -50      | End time (ms) for baseline correction window                                             |
-| --amplitude_threshold     | float | 4500     | Amplitude threshold (µV) for epoch rejection                                             |
-| PCIst Parameters |
-| --response_start          | int   | 0        | Start time (ms) for the response window in PCIst analysis                                |
-| --response_end            | int   | 299      | End time (ms) for the response window in PCIst analysis                                  |
-| --k                       | float | 1.2      | PCIst parameter k                                                                        |
-| --min_snr                 | float | 1.1      | Minimum SNR threshold for PCIst analysis                                                 |
-| --max_var                 | float | 99.0     | Maximum variance percentage to retain in PCA during PCIst                                |
-| --embed                   | flag  | False    | Enable time-delay embedding in PCIst analysis                                            |
-| --n_steps                 | int   | 100      | Number of steps for threshold optimization in PCIst analysis                             |
-| Statistics                |
-| --research                | bool  | False    | Output summary statistics of measurements                                                |
-
+Se run.py (bottom of the file) for full list of configurable command line arguments
 
 ### Example Usage
 
@@ -173,131 +116,201 @@ data/
 
 # Processing Pipeline
 
-The pipeline processes TMS-EEG data through these stages which are roughly modelled from the reccomendations in:
+Below is the **updated** pipeline that aligns with the **default parameters** used in the `run.py` script (and in roughly the same order). These steps are still modelled after the recommendations in:
 
-Comolatti, R., Pigorini, A., Casarotto, S., Fecchio, M., Faria, G., Sarasso, S., Rosanova, M., Gosseries, O., Boly, M., Bodart, O., Ledoux, D., Brichant, J. F., Nobili, L., Laureys, S., Tononi, G., Massimini, M., & Casali, A. G. (2019). A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations. Brain Stimulation, 12(5), 1280–1289. https://doi.org/10.1016/j.brs.2019.05.013
+> Comolatti, R., Pigorini, A., Casarotto, S., Fecchio, M., Faria, G., Sarasso, S., Rosanova, M., Gosseries, O., Boly, M., Bodart, O., Ledoux, D., Brichant, J. F., Nobili, L., Laureys, S., Tononi, G., Massimini, M., & Casali, A. G. (2019). A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations. *Brain Stimulation, 12(5)*, 1280–1289. [https://doi.org/10.1016/j.brs.2019.05.013](https://doi.org/10.1016/j.brs.2019.05.013)
 
-and from 
+> [Nigel Rogasch’s TESA toolbox pipeline overview](https://nigelrogasch.gitbook.io/tesa-user-manual/example_pipelines)
 
-https://nigelrogasch.gitbook.io/tesa-user-manual/example_pipelines
+And the TMS-artifact removal + ICA classification steps are guided by the open-source TESA toolbox:
 
-And the custom functions (TMS-artifact removal and classification of ICA components) are modelled after the TESA toolbox:
+> Rogasch NC, Sullivan C, Thomson RH, Rose NS, Bailey NW, Fitzgerald PB, Farzan F, Hernandez-Pavon JC. Analysing concurrent transcranial magnetic stimulation and electroencephalographic data: a review and introduction to the open-source TESA software. *NeuroImage.* 2017; 147:934-951.  
+> Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact-rejection techniques available in TESA, an open-source TMS-EEG toolbox. *Brain Stimulation.* 2020; In press.
 
-Rogasch NC, Sullivan C, Thomson RH, Rose NS, Bailey NW, Fitzgerald PB, Farzan F, Hernandez-Pavon JC. Analysing concurrent transcranial magnetic stimulation and electroencephalographic data: a review and introduction to the open-source TESA software. NeuroImage. 2017; 147:934-951.
+---
 
-Mutanen TP, Biabani M, Sarvas J, Ilmoniemi RJ, Rogasch NC. Source-based artifact-rejection techniques available in TESA, an open-source TMS-EEG toolbox. Brain Stimulation. 2020; In press.
+## Example Pipeline 
 
+Below is the pipeline **I use**, after iterating a lot and verifying that the final EEG looks reasonable (contains typical TEPs and stable PCI-values). It’s primarily tested on recordings from one healthy subject (awake/slightly somnolent). **Use at your own risk**—always visually check data quality.
 
-## Example pipeline (that I used)
+### 1. Initial Data Loading and Setup
 
-This is the pipeline that I used after a lot of trial and error. The only way that I "validate" the pipeline is by checking if the final EEG-data looks reasonable, if the evoked plots contain some sort of TEPs and if the PCI-values are stabel across recordings. The pipeline is only tested on 10 recordings from the same healthy subject who either was awake or slightly somnolent.
+1. **Load raw data** from NeurOne, EEGLAB, BrainVision, or other supported formats.  
+   - Default data format: `'neurone'`  
+   - Data directory must contain a `TMSEEG` folder.
 
-## Initial Data Loading and Setup
-1. Load raw data from Neurone format
-2. Set random seed (42)
-3. Create events from trigger channel ('STI 014' for the Bittium system we used)
-4. Remove non-EEG channels (e.g., EMG1 or similar)
+2. **Set random seed** to ensure reproducibility (`42`).
 
-## Stage 1: Initial TMS Artifact Handling
-5. First-pass TMS artifact removal
-   - Cut window: -2 to 10 ms around TMS pulse and replace with zeros
-6. Initial interpolation of TMS artifact
-   - Method: cubic
-   - Interpolation window: 1.0 ms
-   - Cut times: -2 to 10 ms
+3. **Create events** from the chosen stim channel (by default `STI 014`).  
+   - If no stim channel is present, attempts to read from annotations or other common channel names.
 
-## Stage 2: Filtering and Epoching
-7. Apply frequency filters (I chose a 1 Hz lowpass since the final EEG data had some drift artifacts when using 0.1 Hz)
-   - Low-pass: 1 Hz
-   - High-pass: 45 Hz
-   - Notch filter: 50 Hz (width: 2 Hz)
-8. Create epochs
-   - Time window: -0.41 to 0.41 s
-   - Amplitude threshold for epoch rejection: 4500 µV 
-   - Demeaning 
-9. Remove bad channels
-   - Using FASTER algorithm
-   - Threshold: 1
-10. Remove bad epochs
-    - Using FASTER algorithm
-    - Threshold: 1
-11. Set average reference
+4. **Remove non-EEG channels** (e.g., `EMG1`, etc.) to keep only EEG.
 
-## Stage 3: First Artifact Cleaning
-12. First ICA run
-    - Method: FastICA
-    - TMS muscle threshold: 2.0
+---
 
-- Optional muscle artifact cleaning (PARAFAC) (I did not use this)
-    - Time window: 5-30 ms
-    - Threshold factor: 1.0
-    - Components: 5
+### 2. First-Pass TMS Artifact Removal
 
-## Stage 4: Extended TMS Artifact Handling
-13. Second-pass TMS artifact removal
-    - Extended cut window: -2 to 15 ms
-14. Extended interpolation
-    - Method: cubic
-    - Interpolation window: 5.0 ms
-    - Cut times: -2 to 15 ms
+5. **Remove TMS artifact** (first pass).  
+   - Cut window: **-2 to 10 ms** around the TMS pulse.  
+   - Replace with zeros (or equivalent marking).
 
-## Stage 5: Final Cleaning
-15. Second ICA run
-    - Method: Infomax
-    - Auto-reject components with mne_ica_label, labeled as: eye blink, heart beat, muscle artifact, channel noise, line noise
-- Apply SSP (Optional and I did not use this) (https://mne.tools/stable/auto_tutorials/preprocessing/50_artifact_correction_ssp.html)
-    - Number of EEG components: 2
-16. Apply baseline correction
-    - Window: -400 to -50 ms
-17. CSD transformation (https://mne.tools/stable/auto_examples/preprocessing/eeg_csd.html)
-    - Lambda2: 1e-3
-    - Stiffness: 3
-18. Final downsampling
-    - Target frequency: 725 Hz
+6. **Interpolate TMS artifact** (first pass).  
+   - Interpolation method: **cubic**  
+   - Interpolation window: **1.0 ms**  
+   - Same cut times: **-2 to 10 ms**
 
-## Quality Control and Analysis
-19. TEP validation (optional)
-    - Peak prominence threshold: 0.01
-20. Generate evoked response plot
-    - Time window: -0.3 to 0.3 s
-    - Y-limits: -2 to 2 µV
+---
 
-## PCIst Calculation
-21. Calculate PCIst
-    - Response window: 0 to 299 ms
-    - k parameter: 1.2
-    - Minimum SNR: 1.1
-    - Maximum variance: 99.0%
-    - Steps for threshold optimization: 100
+### 4. Initial Downsampling
 
+8. **Downsample** from the original sampling rate (e.g., 5000 Hz, 2000 Hz) to an **initial frequency** (by default **1000 Hz**) for faster processing. 
 
-## Modules and Classes
+---
 
-### TMSEEGPreprocessor (main class for preprocessing)
+### 5. Epoching and Bad Data Removal
 
-I used this in a jupyter notebook to simply chain steps from mne with FASTER and mne_ica_label as well as the the custom functions for artifact removal, interpolation and ICA component selection based on Z-score threshold based on TESA. 
+9. **Create epochs** around each TMS event.  
+   - Time window: **-0.41 to 0.41 s**  
+   - Amplitude threshold: **4500 µV** (user-defined; you can change)  
+   - Currently, baseline is set to `None` (the actual correction is done later).
 
- Methods included (They are pretty well documented so look in the preproc.py file for more info):
+10. **Remove bad channels** automatically (FASTER-based or similar).  
+    - Threshold: **3** (default in `run.py`)
 
-- `remove_tms_artifact`: Removes TMS artifacts from raw data.
-- `interpolate_tms_artifact`: Interpolates removed TMS artifacts using scipy cubic interpolation.
-- `filter_raw`: Applies bandpass and notch filters to raw data.
-- `create_epochst`: Creates epochs from the mne.raw object and rejects epochs with amplitudes over >4500 (can be changed), and demeans the data. 
-- `remove_bad_channels`: Identifies and interpolates bad channels using MNE-FASTER.
-- `remove_bad_epochs`: Removes bad epochs based on amplitude using MNE-FASTER.
-- `run_ica`: Runs ICA and attempts to classify components as TMS-evoked muscle activity using Z-core threshold.
-- `clean_muscle_artifacts`: Cleans TMS-evoked muscle artifacts using non-negative tensor decomposition (se bellow).
-- `run_second_ica`: Runs ICA to identify and remove residual physiological artifacts using MNE-ICALabel.
-- `apply_ssp`: Aplies signal-space projection (SSP) to epochs.
-- `apply_csd`: Applies current Source Density transformation.
-- `set_average_reference`: Sets the EEG reference to average.
-- `apply_baseline_correction`: Applies baseline correction to epochs.
-- `apply_csd`: Applies Current Source Density transformation.
+11. **Remove bad epochs** automatically (FASTER or similar).  
+    - Threshold: **3** (default in `run.py`)
+
+12. **Set average reference** across remaining channels.
+
+---
+
+### 6. First ICA for TMS-Muscle Artifacts
+
+13. **First ICA run** (commonly `FastICA`):  
+                         
+- tms_muscle_window=(11, 30), tms_muscle_thresh=2,
+         blink_thresh=2.5,
+         lat_eye_thresh=2.0,
+         muscle_freq_window=(30, 100),
+         muscle_freq_thresh=0.6,
+         noise_thresh=4.0, 
+  - Optionally **manual** or **automatic** component classification by thresholds.  
+
+14. **(Optional) Clean muscle artifacts** with PARAFAC (not used by default).  
+    - Typical window: 5–30 ms  
+    - Threshold factor: 1.0  
+    - Up to 5 PARAFAC components
+
+---
+
+### 7. Second-Pass TMS Artifact Removal
+
+15. **Remove TMS artifact** (second pass).  
+    - Extended cut window: **-2 to 15 ms**
+
+16. **Interpolate TMS artifact** (second pass).  
+    - Interpolation method: **cubic**  
+    - Interpolation window: **5.0 ms**  
+    - Cut times: **-2 to 15 ms**
+
+---
+
+### 8. Filter Epoched Data
+
+17. **Filter the epoched data** if raw wasn’t filtered earlier.  
+    - Default band-pass: 0.1–45 Hz  
+    - Notch filter: 50 Hz (width = 2 Hz)
+
+---
+
+### 9. Second ICA for Other Artifacts
+
+18. **Second ICA run** (commonly `FastICA`).  
+    - Same as above 
+    -   - Optionally **manual** or **automatic** component classification by thresholds.  
 
 
-### TMSArtifactCleaner Class (which might work)
+19. **(Optional) Apply SSP**  
+    - Typically 2 EEG components if used (we do **not** use by default).
 
-The TMSArtifactCleaner class is designed to detect and clean transcranial magnetic stimulation (TMS)-evoked muscle artifacts in EEG/MEG data using tensor decomposition techniques. It uses the tensorly library for tensor operations and mne for handling eeg data.
+---
+
+### 10. Baseline Correction, CSD, and Final Downsampling
+
+20. **Baseline correction**  
+    - Window: **-400 to -50 ms** (applies after epoching but before final downsampling).
+
+21. ** (Optional) CSD transformation**  
+    - `lambda2` = 1e-3  
+    - `stiffness` = 3
+
+22. **Final downsampling**  
+    - Target frequency: **725 Hz** (default).
+
+---
+
+### 11. (Optional) TEP Validation
+
+23. **TEP validation**  
+    - Peak prominence threshold: 0.01 (adjust as needed)  
+    - We check GMFA or ROI waveforms to ensure TEP presence.
+
+24. **Generate evoked response**  
+    - Time window for plotting: -0.3 to 0.3 s  
+    - Y-limits (µV): -2 to 2 (adjust as needed)
+
+---
+
+### 12. PCI\_st Calculation
+
+25. **Calculate PCI\_st**  
+    - Response window: 0 to 299 ms  
+    - `k` = 1.2  
+    - Minimum SNR: 1.1  
+    - Maximum variance: 99.0%  
+    - 100 steps for threshold optimization  
+
+---
+
+## Notes on Quality Control
+- During each step, we generate simple QC metrics (e.g., channel retention, epoch retention, ICA components removed).  
+- *Always visually inspect final TMS-EEG waveforms* and confirm TEP latencies/amplitudes are physiologically reasonable.  
+- PCI\_st is only meaningful if the data are relatively artifact-free and well-epoched.
+
+---
+
+## Order of steps actually used by me
+
+
+1. Load data  
+2. Set seed, find/create events  
+3. Drop unused channels (e.g., EMG)  
+4. **(First TMS artifact removal)** -2 to 10 ms  
+5. **(First interpolation)** cubic, 1.0 ms
+6. **(Initial downsampling)** → 1000 Hz  
+7. **Create epochs** (-0.41 to 0.41)  
+8. **Remove bad channels** (threshold=3)  
+9. **Remove bad epochs** (threshold=3)  
+10. **Average reference**  
+11. **First ICA** (FastICA, threshold=3.0)  
+12. **(Optional) Clean muscle (PARAFAC)**  
+13. **(Second TMS artifact removal)** -2 to 15 ms  
+14. **(Second interpolation)** cubic, 5 ms  
+15. **(Filter epoched data)** if raw not filtered  
+16. **Second ICA** (Infomax or label-based)  
+17. **(Optional) SSP**  
+18. **Baseline correction** (-400 to -50 ms)
+19. **Final downsampling** (725 Hz)  
+20. **(Optional) TEP validation**  
+21. **Plot evoked**  
+22. **PCIst**  
+
+
+### TMSArtifactCleaner (which might work)
+
+The TMSArtifactCleaner class is designed to detect and clean transcranial magnetic stimulation (TMS)-evoked muscle artifacts in EEG/MEG data using tensor decomposition techniques. It uses the tensorly library for tensor operations and mne for handling eeg data. and was inspired by the article by Tangwiriyasakul et al., 2019. 
+
+Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richardson, M. P. (2019). Tensor decomposition of TMS-induced EEG oscillations reveals data-driven profiles of antiepileptic drug effects. Scientific Reports, 9(1). https://doi.org/10.1038/s41598-019-53565-9
 
 #### What it does 
 
@@ -407,9 +420,9 @@ The bad channel, and epoch detection uses MNE-FASTER:
 
 - Nolan H, Whelan R, Reilly RB. FASTER: Fully Automated Statistical Thresholding for EEG artifact Rejection. J Neurosci Methods. 2010 Sep 30;192(1):152-62. doi: 10.1016/j.jneumeth.2010.07.015. Epub 2010 Jul 21. PMID: 20654646.
 
-The second ICA uses MNE-ICALabel:
+The PARAFAC decomposition was modellled after:
 
-- Li, A., Feitelberg, J., Saini, A. P., Höchenberger, R., & Scheltienne, M. (2022). MNE-ICALabel: Automatically annotating ICA components with ICLabel in Python. Journal of Open Source Software, 7(76), 4484. https://doi.org/10.21105/joss.04484
+- Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richardson, M. P. (2019). Tensor decomposition of TMS-induced EEG oscillations reveals data-driven profiles of antiepileptic drug effects. Scientific Reports, 9(1). https://doi.org/10.1038/s41598-019-53565-9
 
 Custom functions are modelled after: 
 

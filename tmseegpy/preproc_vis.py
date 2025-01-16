@@ -17,42 +17,75 @@ def create_step_directory(output_dir: str, session_name: str, step_name: str) ->
     step_dir.mkdir(parents=True, exist_ok=True)
     return str(step_dir)
 
-def plot_raw_segments(raw, output_dir: str, session_name: str, step_name: str, duration: float = 5.0, overlap: float = 0.0):
+
+def plot_raw_segments(raw, output_dir: str, session_name: str, step_name: str, duration: float = 5.0,
+                      overlap: float = 0.0):
     step_dir = create_step_directory(output_dir, session_name, step_name)
-    
+
     ch_types = list(set(raw.get_channel_types()))
     data_type = 'csd' if 'csd' in ch_types else 'eeg'
-    
+
+    # Calculate appropriate figure size based on number of channels
+    n_channels = len(raw.ch_names)
+    # Adjust height per channel and overall width
+    height_per_chan = 0.5  # Height in inches per channel
+    fig_height = n_channels * height_per_chan
+    fig_width = 15  # Fixed width, adjust as needed
+
     total_duration = raw.times[-1]
     step = duration - overlap
     start_times = np.arange(0, total_duration - duration, step)
-    
+
+    # Scale parameters for better visualization
+    scalings = dict(eeg=50e-6, csd=50)  # Adjust these values as needed
+
     for i, start in enumerate(start_times):
         with mne.viz.use_browser_backend("matplotlib"):
-            fig = raw.plot(duration=duration, start=start, show=False)
-            plt.suptitle(f"{step_name} ({data_type.upper()}) - Segment {i+1} ({start:.1f}s - {start+duration:.1f}s)")
-            fig.savefig(os.path.join(step_dir, f'{data_type}_segment_{i+1:03d}.png'), 
-                       dpi=300, bbox_inches='tight')
+            fig = raw.plot(duration=duration,
+                           start=start,
+                           show=False,
+                           scalings=scalings,
+                           n_channels=n_channels,  # Show all channels
+                                                     )
+
+            plt.suptitle(
+                f"{step_name} ({data_type.upper()}) - Segment {i + 1} ({start:.1f}s - {start + duration:.1f}s)")
+            fig.savefig(os.path.join(step_dir, f'{data_type}_segment_{i + 1:03d}.png'),
+                        dpi=300, bbox_inches='tight')
             plt.close(fig)
+
 
 def plot_epochs_grid(epochs, output_dir: str, session_name: str, step_name: str, epochs_per_plot: int = 10):
     step_dir = create_step_directory(output_dir, session_name, step_name)
-    
+
     ch_types = list(set(epochs.get_channel_types()))
     data_type = 'csd' if 'csd' in ch_types else 'eeg'
-    
+
+    # Calculate appropriate figure size based on number of channels
+    n_channels = len(epochs.ch_names)
+    height_per_chan = 0.5  # Height in inches per channel
+    fig_height = n_channels * height_per_chan
+    fig_width = 15  # Fixed width, adjust as needed
+
     n_epochs = len(epochs)
     n_plots = (n_epochs + epochs_per_plot - 1) // epochs_per_plot
-    
+
+    # Scale parameters for better visualization
+    scalings = dict(eeg=50e-6, csd=50)  # Adjust these values as needed
+
     for plot_idx in range(n_plots):
         start_idx = plot_idx * epochs_per_plot
         end_idx = min(start_idx + epochs_per_plot, n_epochs)
-        
+
         with mne.viz.use_browser_backend("matplotlib"):
-            fig = epochs[start_idx:end_idx].plot(show=False)
-            plt.suptitle(f"{step_name} ({data_type.upper()}) - Epochs {start_idx+1}-{end_idx}")
-            fig.savefig(os.path.join(step_dir, f'{data_type}_epochs_{plot_idx+1:03d}.png'), 
-                       dpi=300, bbox_inches='tight')
+            fig = epochs[start_idx:end_idx].plot(
+                show=False,
+                scalings=scalings,
+                n_channels=n_channels,  # Show all channels
+            )
+            plt.suptitle(f"{step_name} ({data_type.upper()}) - Epochs {start_idx + 1}-{end_idx}")
+            fig.savefig(os.path.join(step_dir, f'{data_type}_epochs_{plot_idx + 1:03d}.png'),
+                        dpi=300, bbox_inches='tight')
             plt.close(fig)
 
 def plot_evoked_response(epochs: mne.epochs, 

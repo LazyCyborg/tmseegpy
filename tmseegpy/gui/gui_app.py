@@ -62,20 +62,21 @@ class TMSEEG_GUI:
         # Initialize validation rules and tooltips
         self.init_validation_rules()
         self.init_tooltips()
-        
+
         # Create scroll canvas
         self.create_scroll_canvas()
-        
+
         # Create GUI elements
         self.create_gui_elements()
 
     def init_validation_rules(self):
         self.validation_rules = {
-            'ds_sfreq': {'min': 100, 'max': 5000, 'type': float},
+            'initial_sfreq': {'min': 100, 'max': 10000, 'type': float},
+            'final_sfreq': {'min': 100, 'max': 10000, 'type': float},
             'random_seed': {'min': 0, 'max': 1000000, 'type': int},
             'bad_channels_threshold': {'min': 0, 'max': 10, 'type': float},
             'bad_epochs_threshold': {'min': 0, 'max': 10, 'type': float},
-            'amplitude_threshold': {'min': 50, 'max': 5000, 'type': float},
+            #'amplitude_threshold': {'min': 50, 'max': 100000, 'type': float},
             'tms_muscle_thresh': {'min': 0, 'max': 10, 'type': float},
             'n_components': {'min': 1, 'max': 100, 'type': int},
             'ssp_n_eeg': {'min': 1, 'max': 10, 'type': int},
@@ -98,10 +99,6 @@ class TMSEEG_GUI:
             'min_snr': {'min': 0, 'max': 10, 'type': float},
             'max_var': {'min': 0, 'max': 100, 'type': float},
             'n_steps': {'min': 10, 'max': 1000, 'type': int},
-            'n_clusters': {'min': 2, 'max': 20, 'type': int},
-            'n_resamples': {'min': 1, 'max': 100, 'type': int},
-            'n_samples': {'min': 100, 'max': 10000, 'type': int},
-            'min_peak_distance': {'min': 1, 'max': 100, 'type': int},
             'substitute_zero_events_with': {'min': 1, 'max': 100, 'type': int},
             'threshold_factor': {'min': 0.1, 'max': 10.0, 'type': float},
             'lambda2': {'min': 1e-6, 'max': 1e-2, 'type': float},
@@ -112,17 +109,22 @@ class TMSEEG_GUI:
             'second_ica_manual': {'type': 'bool'},
             'response_start': {'min': -1000, 'max': 1000, 'type': int},
             'response_end': {'min': -1000, 'max': 1000, 'type': int},
-            'prominence': {'min': 0.01, 'max': 1.0, 'type': float}
+            'n_samples': {'min': 1, 'max': 20, 'type': int},
+            'min_peak_distance': {'min': 1, 'max': 100, 'type': int},
+            'prominence': {'min': 0.001, 'max': 1.0, 'type': float},
+            'analysis_start': {'min': -1000, 'max': 0, 'type': float},
+            'analysis_end': {'min': 0, 'max': 1000, 'type': float}
             
         }
 
     def init_tooltips(self):
         self.tooltips = {
-            'ds_sfreq': 'Downsampling frequency in Hz',
+            'initial_sfreq': 'Initial downsampling frequency (Hz) for raw data processing (default: 1000 Hz)',
+            'final_sfreq': 'Final downsampling frequency (Hz) for the processed epochs (default: 725 Hz)',
             'random_seed': 'Random seed for reproducibility',
             'bad_channels_threshold': 'Threshold for detecting bad channels',
             'bad_epochs_threshold': 'Threshold for detecting bad epochs',
-            'amplitude_threshold': 'Threshold for epoch rejection based on peak-to-peak amplitude in µV',
+           # 'amplitude_threshold': 'Threshold for epoch rejection based on peak-to-peak amplitude in µV',
             'tms_muscle_thresh': 'Threshold for detecting muscle artifacts',
             'n_components': 'Number of components for PARAFAC',
             'ssp_n_eeg': 'Number of EEG components for SSP',
@@ -158,7 +160,11 @@ class TMSEEG_GUI:
             'stiffness': 'Stiffness parameter for CSD transformation',
             'response_start': 'Start of response window in ms',
             'response_end': 'End of response window in ms',
-            'prominence': 'Minimum prominence for peak detection as fraction of max GFP (default: 0.01)'
+            'n_samples': 'Number of samples to check on each side for peak detection',
+            'min_peak_distance': 'Minimum distance between peaks in milliseconds',
+            'prominence': 'Minimum prominence for peak detection as fraction of max amplitude',
+            'analysis_start': 'Start time for TEP analysis in milliseconds',
+            'analysis_end': 'End time for TEP analysis in milliseconds'
         }
         
     def create_scroll_canvas(self):
@@ -179,32 +185,51 @@ class TMSEEG_GUI:
         
         # Mouse wheel scrolling
         self.root.bind("<MouseWheel>", self._on_mousewheel)
-        
+
     def create_gui_elements(self):
         main_frame = ttk.Frame(self.scrollable_frame, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+
         # Directory selectors (always visible)
         self.create_directory_selectors(main_frame)
-        
-        # Toggle button for advanced options
-        ttk.Checkbutton(main_frame, text="Show Advanced Options", 
+
+        # Create a frame for controls (checkbox, buttons, and progress bar)
+        controls_frame = ttk.Frame(main_frame)
+        controls_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+
+        # Left side: Advanced options checkbox
+        ttk.Checkbutton(controls_frame,
+                        text="Show Advanced Options",
                         variable=self.show_advanced,
                         command=self.toggle_advanced_options).grid(
-                            row=1, column=0, sticky=tk.W, pady=(10,0))
-        
+            row=0, column=0, sticky=tk.W)
+
+        # Right side: Run and Stop buttons with progress bar
+        buttons_frame = ttk.Frame(controls_frame)
+        buttons_frame.grid(row=0, column=1, sticky=tk.E)
+
+        ttk.Button(buttons_frame, text="Run Epoched",
+                   command=lambda: self.run_analysis(continuous=False)).grid(row=0, column=0, padx=5)
+        ttk.Button(buttons_frame, text="Run Continuous",
+                   command=lambda: self.run_analysis(continuous=True)).grid(row=0, column=1, padx=5)
+        ttk.Button(buttons_frame, text="Stop",
+                   command=self.stop_analysis).grid(row=0, column=2, padx=5)
+
+        # Progress bar below the buttons in the same frame
+        self.progress = ttk.Progressbar(controls_frame, length=300, mode='indeterminate')
+        self.progress.grid(row=1, column=0, columnspan=2, pady=5)
+
         # Create frames for options (hidden by default)
         self.options_frame = ttk.Frame(main_frame)
         self.options_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
         self.options_frame.grid_remove()  # Hide initially
-        
+
         # Create basic and advanced options in the hidden frame
         self.create_basic_options(self.options_frame)
         self.create_advanced_options(self.options_frame)
-        
-        # Console always visible at bottom
+
+        # Console at bottom
         self.create_console(main_frame)
-        self.create_control_buttons(main_frame)
 
     def toggle_advanced_options(self):
         if self.show_advanced.get():
@@ -213,7 +238,7 @@ class TMSEEG_GUI:
             self.options_frame.grid_remove()
 
     def create_directory_selectors(self, parent):
-        dir_frame = ttk.LabelFrame(parent, text="Data Selection", padding="10")
+        dir_frame = ttk.LabelFrame(parent, text="Data Selection (data directory must contain a folder named 'TMSEEG)' ", padding="10")
         dir_frame.grid(row=0, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
         
         # Make directory selectors more prominent
@@ -281,9 +306,11 @@ class TMSEEG_GUI:
         var.trace_add('write', validate)  # Updated from trace() to trace_add()
         return var
 
-    def run_analysis(self):
+    def run_analysis(self, continuous=False):
         if self.running:
             return
+
+        self.continuous_mode = continuous
             
         # Validate all parameters before running
         for param, var in self.params.items():
@@ -303,7 +330,7 @@ class TMSEEG_GUI:
             'eeglab_montage_units': self.eeglab_units.get(),
             'plot_preproc': self.plot_preproc.get(),
             'clean_muscle_artifacts': self.clean_muscle.get(),
-            'show_evoked': self.show_evoked.get(),
+            'save_evoked': self.save_evoked.get(),
             'research': self.research_stats.get(),
             'validate_teps': self.validate_teps.get(),
             'save_validation': self.save_validation.get(),
@@ -312,18 +339,19 @@ class TMSEEG_GUI:
             'skip_second_artifact_removal': self.skip_second_artifact_removal.get(),
             'stim_channel': self.stim_channel.get(),
             'filter_raw': self.filter_raw.get(),
+            'plot_raw': self.plot_raw.get(),
+            'mne_filter_epochs': self.mne_filter_epochs.get(),
             'first_ica_manual': self.first_ica_manual.get(),
+            'initial_sfreq': float(self.params['initial_sfreq'].get()),
+            'final_sfreq': float(self.params['final_sfreq'].get()),
             'second_ica_manual': self.second_ica_manual.get(),
-            'exclude_labels': [label.replace('_', ' ')
-                               for label, var in self.exclude_labels.items()
-                               if var.get()],
-
             'muscle_window_start': float(self.params['muscle_window_start'].get()),
             'muscle_window_end': float(self.params['muscle_window_end'].get()),
             'threshold_factor': float(self.params['threshold_factor'].get()),
             'n_components': int(self.params['n_components'].get()),
 
             # Set default values
+            'continuous_mode': continuous,
             'substitute_zero_events_with': int(self.params['substitute_zero_events_with'].get()),
             'interpolation_method': 'cubic',
             'interp_window': 1.0,
@@ -385,65 +413,73 @@ class TMSEEG_GUI:
     
     def _on_mousewheel(self, event):
         self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
+
     def create_basic_options(self, parent):
         options_frame = ttk.LabelFrame(parent, text="Basic Options", padding="5")
         options_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
-        
-        # First row
-        self.plot_preproc = tk.BooleanVar()
-        plot_button = ttk.Checkbutton(options_frame, text="Plot Preprocessing Steps", 
-                    variable=self.plot_preproc)
-        plot_button.grid(row=3, column=1, sticky=tk.W)
-        ToolTip(plot_button, "Show preprocessing visualization steps")
-        
+
+        # Create two columns for better organization
+        left_frame = ttk.Frame(options_frame)
+        left_frame.grid(row=0, column=0, padx=10, sticky=(tk.N, tk.W))
+
+        right_frame = ttk.Frame(options_frame)
+        right_frame.grid(row=0, column=1, padx=10, sticky=(tk.N, tk.W))
+
+        # Left column - Processing Options
+        processing_frame = ttk.LabelFrame(left_frame, text="Processing Options", padding="5")
+        processing_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
+
         self.clean_muscle = tk.BooleanVar()
-        ttk.Checkbutton(options_frame, text="Clean Muscle Artifacts with PARAFAC decomposition", 
-                    variable=self.clean_muscle).grid(row=0, column=0, sticky=tk.W)
-        
-        # Second row
-        self.show_evoked = tk.BooleanVar()
-        ttk.Checkbutton(options_frame, text="Show Evoked Plot", 
-                    variable=self.show_evoked).grid(row=3, column=0, sticky=tk.W)
-        
-        self.research_stats = tk.BooleanVar()
-        ttk.Checkbutton(options_frame, text="Generate Research Statistics", 
-                    variable=self.research_stats).grid(row=0, column=1, sticky=tk.W)
-        
-        # Third row
-        self.apply_ssp = tk.BooleanVar(value=False)  
-        ssp_button = ttk.Checkbutton(options_frame, text="Apply SSP", 
-                    variable=self.apply_ssp)
-        ssp_button.grid(row=1, column=0, sticky=tk.W)
-        ToolTip(ssp_button, "Apply Signal Space Projection for artifact removal")
-        
-        #self.preproc_qc = tk.BooleanVar()
-       # ttk.Checkbutton(options_frame, text="Generate Preprocessing QC", 
-                   # variable=self.preproc_qc).grid(row=0, column=1, sticky=tk.W)
-        
-        # Fourth row
+        muscle_btn = ttk.Checkbutton(processing_frame,
+                                     text="Clean Muscle Artifacts (PARAFAC)",
+                                     variable=self.clean_muscle)
+        muscle_btn.grid(row=0, column=0, sticky=tk.W)
+        ToolTip(muscle_btn, "Use PARAFAC decomposition to clean muscle artifacts")
+
+        self.apply_ssp = tk.BooleanVar(value=False)
+        ssp_btn = ttk.Checkbutton(processing_frame,
+                                  text="Apply SSP",
+                                  variable=self.apply_ssp)
+        ssp_btn.grid(row=1, column=0, sticky=tk.W)
+        ToolTip(ssp_btn, "Apply Signal Space Projection for artifact removal")
+
         self.apply_csd = tk.BooleanVar(value=False)
-        csd_button = ttk.Checkbutton(options_frame, text="Apply CSD", 
-                    variable=self.apply_csd)
-        csd_button.grid(row=2, column=0, sticky=tk.W)
-        ToolTip(csd_button, "Apply Current Source Density transformation")
+        csd_btn = ttk.Checkbutton(processing_frame,
+                                  text="Apply CSD",
+                                  variable=self.apply_csd)
+        csd_btn.grid(row=2, column=0, sticky=tk.W)
+        ToolTip(csd_btn, "Apply Current Source Density transformation")
 
-  
-        self.validate_teps = tk.BooleanVar()  
-        validate_button = ttk.Checkbutton(options_frame, text="Validate TEPs", 
-                    variable=self.validate_teps)
-        validate_button.grid(row=1, column=1, sticky=tk.W)
-        ToolTip(validate_button, "Perform TEP validation and generate reports")
-        
-        self.save_validation = tk.BooleanVar() 
-        save_button = ttk.Checkbutton(options_frame, text="Save Validation Reports & Plots", 
-                    variable=self.save_validation)
-        save_button.grid(row=2, column=1, sticky=tk.W)
-        ToolTip(save_button, "Save validation reports and plots to output directory")
+        # Right column - Visualization & Analysis Options
+        viz_frame = ttk.LabelFrame(right_frame, text="Visualization & Analysis", padding="5")
+        viz_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
 
-        format_frame = ttk.LabelFrame(options_frame, text="Data Format", padding="5")
-        format_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        self.plot_preproc = tk.BooleanVar()
+        plot_btn = ttk.Checkbutton(viz_frame,
+                                   text="Save preprocessing plots",
+                                   variable=self.plot_preproc)
+        plot_btn.grid(row=0, column=0, sticky=tk.W)
+        ToolTip(plot_btn, "Show preprocessing visualization steps")
 
+        self.plot_raw = tk.BooleanVar(value=False)
+        raw_btn = ttk.Checkbutton(viz_frame,
+                                  text="Plot raw data",
+                                  variable=self.plot_raw)
+        raw_btn.grid(row=1, column=0, sticky=tk.W)
+        ToolTip(raw_btn, "Plot raw data (may take time)")
+
+        self.save_evoked = tk.BooleanVar()
+        evoked_btn = ttk.Checkbutton(viz_frame,
+                                     text="Save Evoked Plot",
+                                     variable=self.save_evoked)
+        evoked_btn.grid(row=2, column=0, sticky=tk.W)
+        ToolTip(evoked_btn, "Display evoked response plots")
+
+        # Bottom frame - Data Format Settings
+        format_frame = ttk.LabelFrame(options_frame, text="Data Settings", padding="5")
+        format_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        # Data Format
         ttk.Label(format_frame, text="Data Format:").grid(row=0, column=0, sticky=tk.W, padx=5)
         self.data_format = tk.StringVar(value='neurone')
         format_combo = ttk.Combobox(format_frame, textvariable=self.data_format, width=15)
@@ -452,59 +488,83 @@ class TMSEEG_GUI:
         format_combo.state(['readonly'])
         ToolTip(format_combo, "Format of input data files")
 
-        ttk.Label(format_frame, text="EEGLAB Units:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        # EEGLAB Units
+        ttk.Label(format_frame, text="EEGLAB Units:").grid(row=0, column=2, sticky=tk.W, padx=5)
         self.eeglab_units = tk.StringVar(value='auto')
         units_combo = ttk.Combobox(format_frame, textvariable=self.eeglab_units, width=15)
         units_combo['values'] = ('auto', 'mm', 'm', 'cm')
-        units_combo.grid(row=1, column=1, padx=5, pady=2)
+        units_combo.grid(row=0, column=3, padx=5, pady=2)
         units_combo.state(['readonly'])
         ToolTip(units_combo, "Units for EEGLAB channel positions")
 
-        ttk.Label(options_frame, text="Stim Channel:").grid(row=5, column=0, sticky=tk.W, padx=5)
+        # Stim Channel
+        ttk.Label(format_frame, text="Stim Channel:").grid(row=1, column=0, sticky=tk.W, padx=5)
         self.stim_channel = tk.StringVar(value='STI 014')
-        stim_entry = ttk.Entry(options_frame, textvariable=self.stim_channel, width=15)
-        stim_entry.grid(row=5, column=1, padx=5, pady=2)
+        stim_entry = ttk.Entry(format_frame, textvariable=self.stim_channel, width=15)
+        stim_entry.grid(row=1, column=1, padx=5, pady=2)
         ToolTip(stim_entry, "Name of the stimulus channel in your data")
-            
-        
+
+        # Validation Options
+        validation_frame = ttk.LabelFrame(options_frame, text="Validation Options", padding="5")
+        validation_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        self.validate_teps = tk.BooleanVar()
+        validate_btn = ttk.Checkbutton(validation_frame,
+                                       text="Validate TEPs",
+                                       variable=self.validate_teps)
+        validate_btn.grid(row=0, column=0, sticky=tk.W, padx=5)
+        ToolTip(validate_btn, "Perform TEP validation and generate reports")
+
+        self.save_validation = tk.BooleanVar()
+        save_btn = ttk.Checkbutton(validation_frame,
+                                   text="Save Validation Reports",
+                                   variable=self.save_validation)
+        save_btn.grid(row=0, column=1, sticky=tk.W, padx=5)
+        ToolTip(save_btn, "Save validation reports and plots to output directory")
+
+        self.research_stats = tk.BooleanVar()
+        stats_btn = ttk.Checkbutton(validation_frame,
+                                    text="Generate Research Statistics",
+                                    variable=self.research_stats)
+        stats_btn.grid(row=0, column=2, sticky=tk.W, padx=5)
+        ToolTip(stats_btn, "Generate additional research statistics")
+
     def create_advanced_options(self, parent):
         # Notebook for advanced parameters
         notebook = ttk.Notebook(parent)
         notebook.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
-        
-        # Create different tabs for parameter categories
-        self.params = {}
-        
-        # Preprocessing Parameters
-        preproc_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(preproc_frame, text="Preprocessing")
-        self.add_parameter_group(preproc_frame, {
-            'Downsampling Frequency (Hz)': ('ds_sfreq', 725),
-            'Random Seed': ('random_seed', 42),
-            'Bad Channels Threshold': ('bad_channels_threshold', 1),
-            'Bad Epochs Threshold': ('bad_epochs_threshold', 2),
-            'SSP EEG Components': ('ssp_n_eeg', 2),
-            'Substitute Zero Events With': ('substitute_zero_events_with', 10),
-        })
-        
-        # Filtering Parameters
-        filter_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(filter_frame, text="Filtering")
-        self.add_parameter_group(filter_frame, {
-            'Low Frequency (Hz)': ('l_freq', 0.1), # 0.1 is the standard in the PCIst article by Comolatti et al., 2019
-            'High Frequency (Hz)': ('h_freq', 45), # 45 is the standard in the PCIst article by Comolatti et al., 2019
-            'Notch Frequency (Hz)': ('notch_freq', 50),
-            'Notch Width': ('notch_width', 2),
-        })
-        self.filter_raw = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filter_frame, text="Filter raw data",
-                        variable=self.filter_raw).grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
-        
-        # TMS Parameters
-        tms_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(tms_frame, text="TMS Settings")
 
-        # Create sub-frames for each stage
+        # Initialize params dictionary
+        self.params = {}
+
+        # 1. General Settings Tab (basic setup params)
+        preproc_frame = ttk.Frame(notebook, padding="5")
+        notebook.add(preproc_frame, text="General")
+
+        # Create frame specifically for sampling rates
+        sampling_frame = ttk.LabelFrame(preproc_frame, text="Downsampling", padding="5")
+        sampling_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5, padx=5)
+
+        self.add_parameter_group(sampling_frame, {
+            'Initial Sampling Rate (Hz)': ('initial_sfreq', 1000),
+            'Final Sampling Rate (Hz)': ('final_sfreq', 725)
+        })
+
+        ttk.Label(sampling_frame,
+                  text="Data will first be downsampled to initial rate,\n" +
+                       "then to final rate after preprocessing",
+                  wraplength=250).grid(row=2, column=0, columnspan=2, pady=5)
+
+        other_frame = ttk.LabelFrame(preproc_frame, text="Other Settings", padding="5")
+        other_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5, padx=5)
+        self.add_parameter_group(other_frame, {
+            'Random Seed': ('random_seed', 42),
+        })
+
+        # 2. TMS Artifact Removal Tab
+        tms_frame = ttk.Frame(notebook, padding="5")
+        notebook.add(tms_frame, text="TMS Artifact")
+
         stage1_frame = ttk.LabelFrame(tms_frame, text="Stage 1 (Initial Removal)", padding="5")
         stage1_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
         self.add_parameter_group(stage1_frame, {
@@ -521,7 +581,6 @@ class TMSEEG_GUI:
             'Extended Interp Window (ms)': ('extended_interp_window', 5.0),
         })
 
-        # Common parameters
         common_frame = ttk.LabelFrame(tms_frame, text="Common Settings", padding="5")
         common_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
         self.add_parameter_group(common_frame, {
@@ -529,27 +588,35 @@ class TMSEEG_GUI:
         })
 
         self.skip_second_artifact_removal = tk.BooleanVar()
-        ttk.Checkbutton(stage2_frame, text="Skip Second TMS Artifact Removal", 
+        ttk.Checkbutton(stage2_frame, text="Skip Second TMS Artifact Removal",
                         variable=self.skip_second_artifact_removal).grid(row=0, column=2, padx=5, pady=2, sticky=tk.W)
-        
-        # Muscle Artifact Parameters
-        muscle_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(muscle_frame, text="Muscle Artifacts (PARAFAC)")
-        self.add_parameter_group(muscle_frame, {
-            'Muscle Window Start (s)': ('muscle_window_start', 0.005),
-            'Muscle Window End (s)': ('muscle_window_end', 0.030),
-            'Threshold Factor': ('threshold_factor', 1.0),
-            'Number of PARAFAC Components': ('n_components', 5),
+
+        # 3. Epoching Tab
+        epoch_frame = ttk.Frame(notebook, padding="5")
+        notebook.add(epoch_frame, text="Epoching")
+        self.add_parameter_group(epoch_frame, {
+            'Epoch Start Time (s)': ('epochs_tmin', -0.41),
+            'Epoch End Time (s)': ('epochs_tmax', 0.41),
+            'Baseline Start (ms)': ('baseline_start', -400),
+            'Baseline End (ms)': ('baseline_end', -50),
+            #'Amplitude Threshold (µV)': ('amplitude_threshold', 4500),
+            'Bad Channels Threshold': ('bad_channels_threshold', 1),
+            'Bad Epochs Threshold': ('bad_epochs_threshold', 2),
+            'Substitute Zero Events With': ('substitute_zero_events_with', 10),
         })
 
+        # 4. ICA and Muscle Artifacts Tab
         ica_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(ica_frame, text="ICA Settings")
+        notebook.add(ica_frame, text="ICA, filter & PARAFAC")
+
+        # Configure grid weights to allow expansion
+        ica_frame.columnconfigure(0, weight=1)
+        ica_frame.columnconfigure(1, weight=1)
 
         # First ICA Frame
         first_ica_frame = ttk.LabelFrame(ica_frame, text="First ICA (TMS-Muscle)", padding="5")
-        first_ica_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
+        first_ica_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5, padx=5)
 
-        # Add manual selection checkbox
         self.first_ica_manual = tk.BooleanVar(value=True)
         first_manual_check = ttk.Checkbutton(first_ica_frame,
                                              text="Enable Manual Component Selection",
@@ -557,7 +624,6 @@ class TMSEEG_GUI:
         first_manual_check.grid(row=0, column=0, columnspan=2, sticky=tk.W)
         ToolTip(first_manual_check, "Enable interactive selection of ICA components to remove")
 
-        # Method selection for first ICA
         ttk.Label(first_ica_frame, text="ICA Method:").grid(row=1, column=0, sticky=tk.W)
         self.params['ica_method'] = tk.StringVar(value='fastica')
         method_combo = ttk.Combobox(first_ica_frame,
@@ -567,29 +633,67 @@ class TMSEEG_GUI:
                                     width=10)
         method_combo.grid(row=1, column=1, padx=5, pady=2)
 
-        # Auto threshold for first ICA
-        ttk.Label(first_ica_frame, text="TMS Muscle Threshold:").grid(row=2, column=0, sticky=tk.W)
-        self.params['tms_muscle_thresh'] = tk.StringVar(value='2.0')
-        thresh_entry = ttk.Entry(first_ica_frame,
-                                 textvariable=self.params['tms_muscle_thresh'],
-                                 width=10)
-        thresh_entry.grid(row=2, column=1, padx=5, pady=2)
-        ToolTip(thresh_entry,
-                "Threshold for automatic muscle component detection (used if manual selection is disabled)")
+        # Filtering Parameters Frame
+        filter_frame = ttk.LabelFrame(ica_frame, text="Filtering Parameters", padding="5")
+        filter_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5, padx=5)
+
+        filter_params = {
+            'Low Frequency (Hz)': ('l_freq', 0.1),
+            'High Frequency (Hz)': ('h_freq', 45),
+            'Notch Frequency (Hz)': ('notch_freq', 50),
+            'Notch Width': ('notch_width', 2),
+        }
+
+        row = 0
+        for label, (param_name, default_val) in filter_params.items():
+            ttk.Label(filter_frame, text=label).grid(row=row, column=0, sticky=tk.W)
+            self.params[param_name] = tk.StringVar(value=str(default_val))
+            ttk.Entry(filter_frame,
+                      textvariable=self.params[param_name],
+                      width=10).grid(row=row, column=1, padx=5, pady=2)
+            row += 1
+
+        # Filter Checkboxes
+        self.filter_raw = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filter_frame, text="Filter raw data (Not after ICA 1)",
+                        variable=self.filter_raw).grid(row=row, column=0, columnspan=2, padx=5, pady=2, sticky=tk.W)
+        row += 1
+
+        self.mne_filter_epochs = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filter_frame, text="Use built in filters in mne",
+                        variable=self.mne_filter_epochs).grid(row=row, column=0, columnspan=2, padx=5, pady=2,
+                                                              sticky=tk.W)
+
+        # Muscle Artifact Frame
+        muscle_frame = ttk.LabelFrame(ica_frame, text="Muscle Artifacts (PARAFAC)", padding="5")
+        muscle_frame.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
+
+        muscle_params = {
+            'Muscle Window Start (s)': ('muscle_window_start', 0.005),
+            'Muscle Window End (s)': ('muscle_window_end', 0.030),
+            'Threshold Factor': ('threshold_factor', 1.0),
+            'Number of PARAFAC Components': ('n_components', 5),
+        }
+
+        row = 0
+        for label, (param_name, default_val) in muscle_params.items():
+            ttk.Label(muscle_frame, text=label).grid(row=row, column=0, sticky=tk.W)
+            self.params[param_name] = tk.StringVar(value=str(default_val))
+            ttk.Entry(muscle_frame,
+                      textvariable=self.params[param_name],
+                      width=10).grid(row=row, column=1, padx=5, pady=2)
+            row += 1
 
         # Second ICA Frame
         second_ica_frame = ttk.LabelFrame(ica_frame, text="Second ICA (Other Artifacts)", padding="5")
-        second_ica_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        second_ica_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5, padx=5)
 
-        # Add manual selection checkbox
         self.second_ica_manual = tk.BooleanVar(value=True)
         second_manual_check = ttk.Checkbutton(second_ica_frame,
                                               text="Enable Manual Component Selection",
                                               variable=self.second_ica_manual)
         second_manual_check.grid(row=0, column=0, columnspan=2, sticky=tk.W)
-        ToolTip(second_manual_check, "Enable interactive selection of ICA components to remove")
 
-        # Method selection for second ICA
         ttk.Label(second_ica_frame, text="ICA Method:").grid(row=1, column=0, sticky=tk.W)
         self.params['second_ica_method'] = tk.StringVar(value='fastica')
         second_method_combo = ttk.Combobox(second_ica_frame,
@@ -599,49 +703,81 @@ class TMSEEG_GUI:
                                            width=10)
         second_method_combo.grid(row=1, column=1, padx=5, pady=2)
 
-        # Auto-exclude labels frame
-        exclude_frame = ttk.LabelFrame(second_ica_frame, text="Auto-Exclude Labels", padding="5")
-        exclude_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
-        # Checkbox grid for exclude labels
-        self.exclude_labels = {
-            'eye_blink': tk.BooleanVar(value=True),
-            'muscle': tk.BooleanVar(value=True),
-            'heart_beat': tk.BooleanVar(value=True),
-            'channel_noise': tk.BooleanVar(value=True),
-            'line_noise': tk.BooleanVar(value=True)
-        }
+        # 5. Filtering Tab
+        #filter_frame = ttk.Frame(notebook, padding="5")
+        #notebook.add(filter_frame, text="Filtering")
 
-        for i, (label, var) in enumerate(self.exclude_labels.items()):
-            ttk.Checkbutton(exclude_frame,
-                            text=label.replace('_', ' ').title(),
-                            variable=var).grid(row=i // 2, column=i % 2, sticky=tk.W, padx=5, pady=2)
-        
-        # CSD Parameters
-        csd_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(csd_frame, text="CSD Settings")
-        self.add_parameter_group(csd_frame, {
-            'Lambda2': ('lambda2', 1e-3),
-            'Stiffness': ('stiffness', 3),
+
+        # 5. SSP & CSD Tab
+        transform_frame = ttk.Frame(notebook, padding="5")
+        notebook.add(transform_frame, text="SSP & CSD")
+        self.add_parameter_group(transform_frame, {
+            'SSP EEG Components': ('ssp_n_eeg', 2),
+            'Lambda2 (CSD)': ('lambda2', 1e-3),
+            'Stiffness (CSD)': ('stiffness', 3),
         })
-        
-        # Epoch Parameters
-        epoch_frame = ttk.Frame(notebook, padding="5")
-        notebook.add(epoch_frame, text="Epoching")
-        self.add_parameter_group(epoch_frame, {
-            'Epoch Start Time (s)': ('epochs_tmin', -0.41),
-            'Epoch End Time (s)': ('epochs_tmax', 0.41),
-            'Baseline Start (ms)': ('baseline_start', -400),
-            'Baseline End (ms)': ('baseline_end', -50),
-            'Amplitude Threshold (µV)': ('amplitude_threshold', 4500), 
-        })
+
+        # 7. TEP Analysis Tab
         tep_frame = ttk.Frame(notebook, padding="5")
         notebook.add(tep_frame, text="TEP Analysis")
-        self.add_parameter_group(tep_frame, {
-            'Prominence': ('prominence', 0.01)  
-        })
-        
-        # PCIst Parameters
+
+        analysis_type_frame = ttk.LabelFrame(tep_frame, text="Analysis Type", padding="5")
+        analysis_type_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        self.params['tep_analysis_type'] = tk.StringVar(value='gmfa')
+        ttk.Radiobutton(analysis_type_frame, text="GMFA",
+                        variable=self.params['tep_analysis_type'],
+                        value='gmfa').grid(row=0, column=0, padx=5)
+        ttk.Radiobutton(analysis_type_frame, text="ROI",
+                        variable=self.params['tep_analysis_type'],
+                        value='roi').grid(row=0, column=1, padx=5)
+
+        roi_frame = ttk.LabelFrame(tep_frame, text="ROI Channels", padding="5")
+        roi_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        self.params['roi_channels'] = tk.StringVar(value='C3, C4')
+        ttk.Label(roi_frame, text="Channels:").grid(row=0, column=0, sticky=tk.W)
+        roi_entry = ttk.Entry(roi_frame, textvariable=self.params['roi_channels'], width=30)
+        roi_entry.grid(row=0, column=1, padx=5)
+
+        peak_frame = ttk.LabelFrame(tep_frame, text="Peak Detection", padding="5")
+        peak_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        peak_params = {
+            'Number of Samples': ('n_samples', 5),
+            'Minimum Peak Distance (ms)': ('min_peak_distance', 10),
+            'Prominence': ('prominence', 0.01)
+        }
+        self.add_parameter_group(peak_frame, peak_params)
+
+        ttk.Label(peak_frame, text="Peak Selection Method:").grid(row=len(peak_params), column=0, sticky=tk.W)
+        self.params['peak_method'] = tk.StringVar(value='largest')
+        method_combo = ttk.Combobox(peak_frame,
+                                    textvariable=self.params['peak_method'],
+                                    values=['largest', 'centre'],
+                                    state='readonly',
+                                    width=10)
+        method_combo.grid(row=len(peak_params), column=1, padx=5)
+
+        comp_frame = ttk.LabelFrame(tep_frame, text="TEP Components", padding="5")
+        comp_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        components_text = ("Default components:\n"
+                           "N15 (12-18ms), P30 (25-35ms), N45 (36-57ms),\n"
+                           "P60 (58-80ms), N100 (81-144ms), P180 (145-250ms)")
+        ttk.Label(comp_frame, text=components_text).pack(pady=5)
+
+        time_frame = ttk.LabelFrame(tep_frame, text="Analysis Time Windows", padding="5")
+        time_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        window_params = {
+            'Analysis Start (ms)': ('analysis_start', -100),
+            'Analysis End (ms)': ('analysis_end', 400)
+        }
+        self.add_parameter_group(time_frame, window_params)
+
+        # 8. PCIst Tab (Final analysis)
         pcist_frame = ttk.Frame(notebook, padding="5")
         notebook.add(pcist_frame, text="PCIst")
         self.add_parameter_group(pcist_frame, {
@@ -676,7 +812,7 @@ class TMSEEG_GUI:
         button_frame = ttk.Frame(parent)
         button_frame.grid(row=2, column=0, columnspan=3, pady=10)
         
-        ttk.Button(button_frame, text="Get PCIst", command=self.run_analysis).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Run tmseegpy", command=self.run_analysis).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Stop", command=self.stop_analysis).pack(side=tk.LEFT, padx=5)
         
         self.progress = ttk.Progressbar(parent, length=300, mode='indeterminate')
@@ -712,17 +848,17 @@ class TMSEEG_GUI:
             self.root.after(100, self.update_gui)
 
     def run_analysis_thread(self, args):
-        """Modified thread function to handle ICA selection and GUI updates"""
+        """Modified thread function to handle both continuous and epoched processing"""
         try:
             # Redirect output to console
             self.redirect_output()
 
             # Configure matplotlib for thread-safe operation
             import matplotlib
-            matplotlib.use('Agg')  # Use non-interactive backend for the processing thread
+            matplotlib.use('Agg')
 
             # Import needed modules
-            from ..run import process_subjects
+            from ..run import process_subjects, process_continuous_data
             import builtins
             import queue
 
@@ -730,12 +866,12 @@ class TMSEEG_GUI:
             if not hasattr(builtins, 'GUI_MAIN_ROOT'):
                 builtins.GUI_MAIN_ROOT = self.root
 
-            # Create an event queue for GUI updates
+            # Create and start GUI queue processing
             gui_queue = queue.Queue()
 
             def check_gui_queue():
                 try:
-                    while True:  # Process all pending GUI updates
+                    while True:
                         callback, args = gui_queue.get_nowait()
                         callback(*args)
                 except queue.Empty:
@@ -746,21 +882,20 @@ class TMSEEG_GUI:
             def schedule_on_gui(callback, *args):
                 gui_queue.put((callback, args))
 
-            # Add GUI scheduling function to builtins
             builtins.schedule_on_gui = schedule_on_gui
-
-            # Start checking GUI queue
             self.root.after(0, check_gui_queue)
 
-            # Reset stop flag before starting
+            # Reset stop flag
             setattr(builtins, 'STOP_PROCESSING', False)
 
-            # Run the processing
-            pcists = process_subjects(args)
-
-            # Only show completion if we weren't stopped
-            if not getattr(builtins, 'STOP_PROCESSING', False):
-                schedule_on_gui(self.analysis_complete, pcists)
+            # Run appropriate processing based on mode
+            if args.continuous_mode:
+                results = process_continuous_data(args)
+                schedule_on_gui(self.continuous_analysis_complete, results)
+            else:
+                pcists = process_subjects(args)
+                if not getattr(builtins, 'STOP_PROCESSING', False):
+                    schedule_on_gui(self.analysis_complete, pcists)
 
         except Exception as e:
             import traceback
@@ -768,9 +903,7 @@ class TMSEEG_GUI:
             gui_queue.put((self.analysis_error, (error_msg,)))
 
         finally:
-            # Cleanup
             schedule_on_gui(self.cleanup_after_stop)
-            # Restore original backend
             matplotlib.use('Agg')
             
     def analysis_complete(self, pcists):
@@ -797,6 +930,31 @@ class TMSEEG_GUI:
             except Exception:
                 pass
                 
+        messagebox.showinfo("Complete", message)
+
+    def continuous_analysis_complete(self, raw_list):
+        """Completion handler for continuous processing mode"""
+        self.progress.stop()
+        self.running = False
+
+        # Build completion message
+        n_sessions = len(raw_list) if raw_list else 0
+        message = f"Continuous processing completed successfully!\n"
+        message += f"Processed {n_sessions} session{'s' if n_sessions != 1 else ''}"
+
+        output_dir = self.output_dir.get()
+        try:
+            processed_files = [f for f in os.listdir(output_dir)
+                               if f.endswith('_processed_continuous_raw.fif')]
+            if processed_files:
+                message += "\n\nProcessed files:"
+                for f in processed_files[:5]:
+                    message += f"\n- {f}"
+                if len(processed_files) > 5:
+                    message += f"\n... and {len(processed_files) - 5} more files"
+        except Exception:
+            pass
+
         messagebox.showinfo("Complete", message)
         
     def analysis_error(self, error_msg):
