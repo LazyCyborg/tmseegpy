@@ -1,6 +1,8 @@
 # tmseegpy
 
-This repository contains my attempt at building some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data. The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019). The analysis of PCIst is just a copy paste from https://github.com/renzocom/PCIst/blob/master/PCIst/pci_st.py which is written by Renzo Comolatti. The code is mostly adapted from a very long jupyter notebook which used mostly native MNE-Python methods which I expanded to a toolbox that I have been using in my analyses. So the code base might not be very efficient. 
+This repository contains my attempt at building some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data using python. I ahve attempted to implement some of the functionality found in TESA (https://github.com/nigelrogasch/TESA) which has been my guide and benchmark for the development. 
+
+The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019). The analysis of PCIst is just a copy paste from https://github.com/renzocom/PCIst/blob/master/PCIst/pci_st.py which is written by Renzo Comolatti. The code is mostly adapted from a very long jupyter notebook which used mostly native MNE-Python methods which I expanded to a toolbox that I have been using in my analyses. So the code base might not be very efficient. 
 
 Currently the code is only tested on TMS-EEG data recorded in .ses format from the Bittium NeurOne 5kHz sampling rate amplifer. Feel free to modify the preproc module to fit other types of recorded TMS-EEG data. If you have trouble with the current dataloader and creates one that is compatible with multiple systems (maybe out of frustration) feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. I am also using the 0.7.0 version (cloned) of mne_ica_label since there were some compatibility issues with the current version of mne.
 
@@ -240,22 +242,18 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 20. **Baseline correction**  
     - Window: **-400 to -50 ms** (applies after epoching but before final downsampling).
 
-21. ** (Optional) CSD transformation**  
-    - `lambda2` = 1e-3  
-    - `stiffness` = 3
-
-22. **Final downsampling**  
+21. **Final downsampling**  
     - Target frequency: **725 Hz** (default).
 
 ---
 
 ### 11. (Optional) TEP Validation
 
-23. **TEP validation**  
+22. **TEP validation**  
     - Peak prominence threshold: 0.01 (adjust as needed)  
     - We check GMFA or ROI waveforms to ensure TEP presence.
 
-24. **Generate evoked response**  
+23. **Generate evoked response**  
     - Time window for plotting: -0.3 to 0.3 s  
     - Y-limits (µV): -2 to 2 (adjust as needed)
 
@@ -263,7 +261,7 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 
 ### 12. PCI\_st Calculation
 
-25. **Calculate PCI\_st**  
+24. **Calculate PCI\_st**  
     - Response window: 0 to 299 ms  
     - `k` = 1.2  
     - Minimum SNR: 1.1  
@@ -273,7 +271,6 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 ---
 
 ## Notes on Quality Control
-- During each step, we generate simple QC metrics (e.g., channel retention, epoch retention, ICA components removed).  
 - *Always visually inspect final TMS-EEG waveforms* and confirm TEP latencies/amplitudes are physiologically reasonable.  
 - PCI\_st is only meaningful if the data are relatively artifact-free and well-epoched.
 
