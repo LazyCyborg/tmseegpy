@@ -18,14 +18,6 @@ Currently the code is only tested on TMS-EEG data recorded in .ses format from t
 - [Data Preparation](#data-preparation)
 - [Processing Pipeline](#processing-pipeline)
 - [Example pipeline](#example-pipeline-that-i-used)
-  - [Initial Data Loading and Setup](#initial-data-loading-and-setup)
-  - [Stage 1: Initial TMS Artifact Handling](#stage-1-initial-tms-artifact-handling)
-  - [Stage 2: Filtering and Epoching](#stage-2-filtering-and-epoching)
-  - [Stage 3: First Artifact Cleaning](#stage-3-first-artifact-cleaning)
-  - [Stage 4: Extended TMS Artifact Handling](#stage-4-extended-tms-artifact-handling)
-  - [Stage 5: Final Cleaning](#stage-5-final-cleaning)
-  - [Quality Control and Analysis](#quality-control-and-analysis)
-  - [PCIst Calculation](#pcist-calculation)
 - [Modules and Classes](#modules-and-classes)
   - [TMSEEGPreprocessor](#tmseegpreprocessor-main-class-for-preprocessing)
   - [TMSArtifactCleaner Class](#tmsartifactcleaner-class-which-might-work)
@@ -158,7 +150,7 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 13. **(Second TMS artifact removal)** -2 to 15 ms  
 14. **(Second interpolation)** cubic, 5 ms  
 15. **(Filter epoched data)** if raw not filtered  
-16. **Second ICA** (Infomax or label-based)  
+16. **Second ICA** (FastICA)  
 17. **(Optional) SSP**  
 18. **Baseline correction** (-400 to -50 ms)
 19. **Final downsampling** (725 Hz)  
@@ -178,86 +170,6 @@ Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richa
 - Artifact Detection: Uses Non-negative PARAFAC tensor decomposition to detect muscle artifacts in EEG epochs.
 - Artifact Cleaning: Uses Tucker decomposition to clean the detected artifacts.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
-
-
-#### Parameters:
-- epochs (mne.Epochs): The EEG epochs to process.
-- verbose (bool, optional): Whether to print progress messages.
-
-#### Methods
-
-##### _normalize_data(data)
-
-Normalizes the data across channels and time points using standard scaling.
-
-##### Parameters:
-- data (numpy.ndarray): The raw data to normalize.
-
-##### Returns:
-- normalized_data (numpy.ndarray): The normalized data.
-- scalers (list): List of scalers used for each channel.
-
-##### detect_muscle_artifacts(muscle_window=(0.005, 0.05), threshold_factor=5.0, n_jobs=-1, verbose=None)
-
-Detects TMS-evoked muscle artifacts using parallel processing and Non-negative PARAFAC tensor decomposition.
-
-###### Parameters:
-- muscle_window (tuple, optional): Time window for artifact detection (in seconds).
-- threshold_factor (float, optional): Threshold for detecting artifacts.
-- n_jobs (int, optional): Number of parallel jobs (-1 uses all available CPUs).
-- verbose (bool, optional): Whether to print progress messages.
-
-###### Returns:
-- artifact_info (dict): Information about detected artifacts and statistics.
-
-##### clean_muscle_artifacts(n_components=2, verbose=None)
-
-Cleans the detected muscle artifacts using Tucker decomposition.
-
-###### Parameters:
-- n_components (int, optional): Number of components for Tucker decomposition.
-- verbose (bool, optional): Whether to print progress messages.
-
-###### Returns:
-- epochs_clean (mne.Epochs): The cleaned epochs.
-
-##### find_optimal_threshold(muscle_window=(0.005, 0.05), target_detection_rate=0.5, initial_threshold=0.9, max_iter=100, tol=0.01, verbose=None)
-
-Finds the optimal threshold for artifact detection using a binary search algorithm to match a target detection rate.
-
-###### Parameters:
-- muscle_window (tuple, optional): Time window for artifact detection (in seconds).
-- target_detection_rate (float, optional): Desired detection rate for artifacts.
-- initial_threshold (float, optional): Starting threshold for the search.
-- max_iter (int, optional): Maximum number of iterations.
-- tol (float, optional): Tolerance for convergence.
-- verbose (bool, optional): Whether to print progress messages.
-
-###### Returns:
-- best_threshold (float): The optimal threshold found.
-
-##### validate_cleaning(cleaned_epochs)
-
-Validates the cleaning results 
-
-###### Parameters:
-- cleaned_epochs (mne.Epochs): The epochs after cleaning.
-
-###### Returns:
-- is_valid (bool): True if the cleaning is valid, False otherwise.
-
-
-### PCIst
-
-Class implementation of PCIst for calculating the Perturbational Complexity Index.
-
-Methods:
-
-- `calc_PCIst`: Calculates the PCIst value.
-- `dimensionality_reduction`: Performs dimensionality reduction using SVD.
-- `state_transition_quantification`: Quantifies state transitions in the signal.
-- `plot_analysis`: Plots the analysis steps for visualization.
-
 
 ## Contributing
 
