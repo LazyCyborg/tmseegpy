@@ -6,30 +6,6 @@ The pipeline includes steps for artifact removal, filtering, Independent Compone
 
 Currently the code is only tested on TMS-EEG data recorded in .ses format from the Bittium NeurOne 5kHz sampling rate amplifer. Feel free to modify the preproc module to fit other types of recorded TMS-EEG data. If you have trouble with the current dataloader and creates one that is compatible with multiple systems (maybe out of frustration) feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. I am also using the 0.7.0 version (cloned) of mne_ica_label since there were some compatibility issues with the current version of mne.
 
-# Table of Contents
-
-- [Installation](#installation)
-  - [Use the scripts](#installation-use-the-scripts)
-  - [Install as a package](#install-as-a-package)
-- [Usage](#usage)
-  - [GUI](#gui)
-  - [Command-Line Arguments](#command-line-arguments)
-  - [Example Usage](#example-usage)
-- [Data Preparation](#data-preparation)
-- [Processing Pipeline](#processing-pipeline)
-- [Example pipeline](#example-pipeline-that-i-used)
-- [Modules and Classes](#modules-and-classes)
-  - [TMSEEGPreprocessor](#tmseegpreprocessor-main-class-for-preprocessing)
-  - [TMSArtifactCleaner Class](#tmsartifactcleaner-class-which-might-work)
-    - [What it does](#what-it-does)
-    - [Parameters](#parameters)
-    - [Methods](#methods)
-  - [PCIst](#pcist)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
-
-
 ## Installation 
 
 1. Clone the repository:
