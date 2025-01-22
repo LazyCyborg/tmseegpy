@@ -2,29 +2,20 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Tab } from '@headlessui/react';
 import { api } from './services/api';
 import './styles/Console.css';
-import { socket, connectWebSocket, isConnected } from './services/websocket';
+import { socket } from './services/websocket';
 import {
     Settings,
     Check,
-    Play,
     FileInput,
     Activity,
     Sliders,
     Brain,
-    Filter,
-    Waveform,
-    Gauge,
-    Binary,
-    LineChart,
-    Database,
     Loader2,
     AlertTriangle,
     FolderOpen,
-    Folder,
     X,
     Download
 } from 'lucide-react';
-
 
 
 function classNames(...classes) {
