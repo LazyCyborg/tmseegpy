@@ -33,11 +33,31 @@ The pipeline is designed to be run from the command line or through the simple G
 
 ### GUI
 
-For an graphical user interface run:
+## GUI Application
 
-   ```bash
-   tmseegpy
-   ```
+A graphical user interface is available in the `tmseegpy-gui-react` directory. 
+To use the GUI version:
+
+### Download Releases
+Download the latest GUI release for your platform from:
+https://github.com/LazyCyborg/tmseegpy/releases (look for GUI releases tagged with `gui-v*`)
+
+### Or Build from Source
+```bash
+# Navigate to the GUI directory
+cd tmseegpy-gui-react
+
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run electron:dev
+
+# Build the application
+npm run electron:build
+
+```
+
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
 ### Command-Line Arguments

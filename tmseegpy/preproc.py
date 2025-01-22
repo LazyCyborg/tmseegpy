@@ -45,8 +45,8 @@ from mne import (compute_raw_covariance,
 from mne.viz import plot_alignment, plot_bem
 
 # Required for ICA and component labeling
-#from .mne_icalabel import label_components
-# A working version of mne_icalabel is found on the backup branch of tmseegpy.
+
+
 # I currently disabled ica_label functionality since it is not used but the references to it are only commented out
 from mne.preprocessing import ICA
 
