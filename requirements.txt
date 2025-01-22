@@ -2,7 +2,6 @@ numpy>=1.16.0
 scipy>=1.2.0
 mne>=1.1
 mne-bids
-scikit-picard>=0.7
 pooch
 torch
 scikit-learn
@@ -20,5 +19,3 @@ pywavelets>=1.1
 xlrd>=2.0
 openpyxl>=3.0
 pymatreader>=0.0.30
-importlib-metadata; python_version<"3.8"
-importlib-resources; python_version<"3.9"

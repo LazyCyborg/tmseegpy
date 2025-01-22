@@ -24,6 +24,7 @@ setup(
         'numpy >= 1.16.0',
         'scipy >= 1.2.0',
         'mne >= 1.1',
+        'PyQt6>=6.4.0',
         'pooch',
         'torch',
         "scikit-learn",
@@ -34,13 +35,11 @@ setup(
         "mne-faster",
         'psutil',
         'construct',
-        'importlib-metadata; python_version<"3.8"',
-        'importlib-resources; python_version<"3.9"',
 
     ],
     entry_points={
-        "console_scripts": [
-            "tmseegpy=tmseegpy.gui:main",
+        'console_scripts': [
+            'tmseegpy=tmseegpy.main:main',  # Changed from tmseegpy.ica_selector_gui.main to tmseegpy.main
         ],
-    },
+    }
 )

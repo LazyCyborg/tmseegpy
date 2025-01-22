@@ -1,105 +1,163 @@
-# dataloader.py
 from pathlib import Path
 import mne
-from typing import Optional, Union, Dict, List, Tuple
-from .neurone_loader import Recording  # Keep NeurOne support
+from typing import Optional, Union, Dict, List, Any
+from .neurone_loader import Recording
+
 
 class TMSEEGLoader:
-    """
-    A flexible data loader for TMS-EEG data that supports multiple formats.
-    Default support for NeurOne (.ses) files, with additional support for
-    other common EEG formats.
-    
-    Parameters
-    ----------
-    data_path : str or Path
-        Path to the data directory or file
-    format : str, optional
-        Data format to load ('neurone', 'brainvision', 'edf', 'cnt', 'eeglab', or 'auto')
-        Default is 'neurone'
-    substitute_zero_events_with : int, optional 
-        Value to substitute zero events with in NeurOne data
-    eeglab_montage_units : str, optional
-        Units for EEGLAB channel positions ('auto', 'mm', 'm', etc.)
-    """
-    
+    """Flexible data loader for TMS-EEG data supporting multiple formats"""
+
     SUPPORTED_FORMATS = {
         'neurone': ('.ses',),
-        'brainvision': ('.vhdr', '.eeg', '.vmrk'),
+        'brainvision': ('.vhdr', '.vmrk', '.eeg'),
         'edf': ('.edf',),
         'cnt': ('.cnt',),
-        'eeglab': ('.set',),
+        'eeglab': ('.set', '.fdt'),
+        'auto': ('.ses', '.vhdr', '.edf', '.cnt', '.set')
     }
-    
-    def __init__(self, 
+
+    def __init__(self,
                  data_path: Union[str, Path],
-                 format: str = 'neurone',
+                 format: str = 'auto',
                  substitute_zero_events_with: int = 10,
                  eeglab_montage_units: str = 'auto',
-                 verbose: Optional[Union[bool, str, int]] = None):
+                 verbose: bool = False):
+        """Initialize loader."""
         self.data_path = Path(data_path)
         self.format = format.lower()
         self.substitute_zero_events_with = substitute_zero_events_with
         self.eeglab_montage_units = eeglab_montage_units
         self.verbose = verbose
-        
-        if self.format not in self.SUPPORTED_FORMATS and self.format != 'auto':
-            raise ValueError(f"Unsupported format: {format}. "
-                           f"Supported formats are: {list(self.SUPPORTED_FORMATS.keys())}")
-        
-        # For storing loaded sessions
+
+        if not self.data_path.exists():
+            raise ValueError(f"Path does not exist: {self.data_path}")
+
+        # Initialize containers
         self.sessions = []
         self.raw_list = []
         self.session_info = []
-        
+
+        # Validate format
+        if self.format not in self.SUPPORTED_FORMATS:
+            raise ValueError(f"Unsupported format: {format}. "
+                           f"Supported formats are: {list(self.SUPPORTED_FORMATS.keys())}")
+
     def detect_format(self) -> str:
-        """
-        Detect the data format based on file extensions in the directory.
-        
-        Returns
-        -------
-        str
-            Detected format name
-        """
+        """Detect data format based on file extensions"""
         if self.data_path.is_file():
             ext = self.data_path.suffix.lower()
             for fmt, extensions in self.SUPPORTED_FORMATS.items():
-                if ext in extensions:
+                if fmt != 'auto' and ext in extensions:
                     return fmt
         else:
-            # Check directory contents for each format
+            # Look for known file types in directory
             for fmt, extensions in self.SUPPORTED_FORMATS.items():
-                if any(self.data_path.glob(f"**/*{extensions[0]}")):
-                    return fmt
-        
-        raise ValueError("Could not detect data format")
+                if fmt != 'auto':
+                    for ext in extensions:
+                        if any(self.data_path.glob(f"**/*{ext}")):
+                            return fmt
 
-    def load_data(self) -> List[mne.io.Raw]:
-        """
-        Load TMS-EEG data in the specified format.
-        
-        Returns
-        -------
-        List[mne.io.Raw]
-            List of loaded Raw objects
-        """
+        raise ValueError(f"Could not detect format for {self.data_path}")
+
+    def _find_data_files(self) -> List[Path]:
+        """Find all relevant data files"""
         if self.format == 'auto':
             self.format = self.detect_format()
-            print(f"Detected format: {self.format}")
-            
-        # Dictionary mapping formats to their loading methods
-        format_loaders = {
-            'neurone': self._load_neurone,
-            'brainvision': self._load_brainvision,
-            'edf': self._load_edf,
-            'cnt': self._load_cnt,
-            'eeglab': self._load_eeglab
-        }
-        
-        if self.format not in format_loaders:
-            raise ValueError(f"Unsupported format: {self.format}")
-            
-        return format_loaders[self.format]()
+            if self.verbose:
+                print(f"Detected format: {self.format}")
+
+        extensions = self.SUPPORTED_FORMATS[self.format]
+
+        if self.data_path.is_file():
+            return [self.data_path]
+
+        files = []
+        for ext in extensions:
+            files.extend(self.data_path.glob(f"**/*{ext}"))
+
+        # Filter out secondary files
+        if self.format == 'eeglab':
+            files = [f for f in files if f.suffix != '.fdt']
+        elif self.format == 'brainvision':
+            files = [f for f in files if f.suffix == '.vhdr']
+
+        return sorted(files)
+
+    def load_data(self) -> List[mne.io.Raw]:
+        """Load all data files"""
+        if not self.data_path.exists():
+            raise ValueError(f"Data path does not exist: {self.data_path}")
+
+        if self.format == 'auto':
+            self.format = self.detect_format()
+            if self.verbose:
+                print(f"Detected format: {self.format}")
+
+        # Special handling for NeurOne format
+        if self.format == 'neurone':
+            raw_list = self._load_neurone()
+            if not raw_list:
+                print(f"No data loaded from {self.data_path}")
+                return []
+            return raw_list
+
+        # Handle other formats
+        data_files = self._find_data_files()
+        if not data_files:
+            print(f"No {self.format} files found in {self.data_path}")
+            return []
+
+        self.raw_list = []
+        self.session_info = []
+
+        for file_path in data_files:
+            try:
+                if self.verbose:
+                    print(f"Loading {file_path}")
+                raw = self._load_single_file(file_path)
+                if raw is not None:
+                    if not isinstance(raw, mne.io.Raw):
+                        print(f"Warning: Loaded data from {file_path} is not an MNE Raw object")
+                        continue
+                    self.raw_list.append(raw)
+                    self.session_info.append({
+                        'name': file_path.stem,
+                        'format': self.format,
+                        'path': str(file_path)
+                    })
+            except Exception as e:
+                print(f"Error loading {file_path}: {str(e)}")
+                continue
+
+        if not self.raw_list:
+            print("Warning: No data was successfully loaded")
+
+        return self.raw_list
+
+    def _load_single_file(self, file_path: Path) -> Optional[mne.io.Raw]:
+        """Load a single data file"""
+        try:
+            if file_path.suffix.lower() in ('.vhdr', '.eeg', '.vmrk'):
+                return mne.io.read_raw_brainvision(file_path, preload=True)
+            elif file_path.suffix.lower() == '.edf':
+                return mne.io.read_raw_edf(file_path, preload=True)
+            elif file_path.suffix.lower() == '.cnt':
+                return mne.io.read_raw_cnt(file_path, preload=True)
+            elif file_path.suffix.lower() == '.set':
+                return mne.io.read_raw_eeglab(
+                    file_path,
+                    preload=True,
+                    montage_units=self.eeglab_montage_units
+                )
+            elif file_path.suffix.lower() == '.ses':
+                rec = Recording(str(file_path))
+                if rec.sessions:
+                    return rec.sessions[0].to_mne(
+                        substitute_zero_events_with=self.substitute_zero_events_with
+                    )
+        except Exception as e:
+            print(f"Error loading {file_path}: {str(e)}")
+            return None
 
     def _load_neurone(self) -> List[mne.io.Raw]:
         """
@@ -116,209 +174,37 @@ class TMSEEGLoader:
             session.to_mne(substitute_zero_events_with=self.substitute_zero_events_with)
             for session in rec.sessions
         ]
-        
+
         # Modified session info creation
         self.session_info = []
         for session in rec.sessions:
             # Get session path as Path object and extract name
             session_path = Path(session.path)
             session_name = session_path.name if isinstance(session_path, Path) else Path(session.path).name
-            
+
             self.session_info.append({
                 'name': session_name,
                 'format': 'neurone',
                 'path': str(session.path)
             })
-        
-        return self.raw_list
 
-    def _load_brainvision(self) -> List[mne.io.Raw]:
-        """
-        Load BrainVision files.
-        
-        Returns
-        -------
-        List[mne.io.Raw]
-            List of loaded Raw objects
-        """
-        if self.data_path.is_file():
-            # Single file
-            raw = mne.io.read_raw_brainvision(self.data_path, preload=True, verbose=self.verbose)
-            self.raw_list = [raw]
-            self.session_info = [{
-                'name': self.data_path.stem,
-                'format': 'brainvision',
-                'path': str(self.data_path)
-            }]
-        else:
-            # Directory with multiple files
-            vhdr_files = list(self.data_path.glob("**/*.vhdr"))
-            self.raw_list = []
-            self.session_info = []
-            
-            for f in vhdr_files:
-                try:
-                    raw = mne.io.read_raw_brainvision(f, preload=True, verbose=self.verbose)
-                    self.raw_list.append(raw)
-                    self.session_info.append({
-                        'name': f.stem,
-                        'format': 'brainvision',
-                        'path': str(f)
-                    })
-                except Exception as e:
-                    print(f"Warning: Could not load {f}: {str(e)}")
-                    
-        return self.raw_list
-
-    def _load_edf(self) -> List[mne.io.Raw]:
-        """
-        Load EDF files.
-        
-        Returns
-        -------
-        List[mne.io.Raw]
-            List of loaded Raw objects
-        """
-        if self.data_path.is_file():
-            raw = mne.io.read_raw_edf(self.data_path, preload=True, verbose=self.verbose)
-            self.raw_list = [raw]
-            self.session_info = [{
-                'name': self.data_path.stem,
-                'format': 'edf',
-                'path': str(self.data_path)
-            }]
-        else:
-            edf_files = list(self.data_path.glob("**/*.edf"))
-            self.raw_list = []
-            self.session_info = []
-            
-            for f in edf_files:
-                try:
-                    raw = mne.io.read_raw_edf(f, preload=True, verbose=self.verbose)
-                    self.raw_list.append(raw)
-                    self.session_info.append({
-                        'name': f.stem,
-                        'format': 'edf',
-                        'path': str(f)
-                    })
-                except Exception as e:
-                    print(f"Warning: Could not load {f}: {str(e)}")
-                    
-        return self.raw_list
-
-    def _load_cnt(self) -> List[mne.io.Raw]:
-        """
-        Load Neuroscan .cnt files.
-        
-        Returns
-        -------
-        List[mne.io.Raw]
-            List of loaded Raw objects
-        """
-        if self.data_path.is_file():
-            raw = mne.io.read_raw_cnt(self.data_path, preload=True, verbose=self.verbose)
-            self.raw_list = [raw]
-            self.session_info = [{
-                'name': self.data_path.stem,
-                'format': 'cnt',
-                'path': str(self.data_path)
-            }]
-        else:
-            cnt_files = list(self.data_path.glob("**/*.cnt"))
-            self.raw_list = []
-            self.session_info = []
-            
-            for f in cnt_files:
-                try:
-                    raw = mne.io.read_raw_cnt(f, preload=True, verbose=self.verbose)
-                    self.raw_list.append(raw)
-                    self.session_info.append({
-                        'name': f.stem,
-                        'format': 'cnt',
-                        'path': str(f)
-                    })
-                except Exception as e:
-                    print(f"Warning: Could not load {f}: {str(e)}")
-                    
-        return self.raw_list
-
-    def _load_eeglab(self) -> List[mne.io.Raw]:
-        """
-        Load EEGLAB .set files.
-        
-        Returns
-        -------
-        List[mne.io.Raw]
-            List of loaded Raw objects
-        """
-        if self.data_path.is_file():
-            raw = mne.io.read_raw_eeglab(
-                self.data_path,
-                preload=True,
-                montage_units=self.eeglab_montage_units,
-                eog='auto',
-                verbose=self.verbose
-            )
-            self.raw_list = [raw]
-            self.session_info = [{
-                'name': self.data_path.stem,
-                'format': 'eeglab',
-                'path': str(self.data_path)
-            }]
-        else:
-            set_files = list(self.data_path.glob("**/*.set"))
-            self.raw_list = []
-            self.session_info = []
-            
-            for f in set_files:
-                try:
-                    raw = mne.io.read_raw_eeglab(
-                        f,
-                        preload=True,
-                        montage_units=self.eeglab_montage_units,
-                        eog='auto',
-                        verbose=self.verbose
-                    )
-                    self.raw_list.append(raw)
-                    self.session_info.append({
-                        'name': f.stem,
-                        'format': 'eeglab',
-                        'path': str(f)
-                    })
-                except Exception as e:
-                    print(f"Warning: Could not load {f}: {str(e)}")
-                    
         return self.raw_list
 
     def get_session_names(self) -> List[str]:
-        """
-        Get list of session names.
-        
-        Returns
-        -------
-        List[str]
-            List of session names
-        """
-        return [info['name'] for info in self.session_info] if self.session_info else []
-    
-    def get_session_info(self) -> List[Dict]:
-        """
-        Get detailed information about loaded sessions.
-        
-        Returns
-        -------
-        List[Dict]
-            List of dictionaries containing session information
-        """
+        """Get list of session names"""
+        return [info['name'] for info in self.session_info]
+
+    def get_session_info(self) -> List[Dict[str, Any]]:
+        """Get detailed information about sessions"""
         return self.session_info
-    
+
     def print_summary(self) -> None:
-        """Print a summary of loaded data."""
+        """Print summary of loaded data"""
         print(f"\nData Format: {self.format}")
         print(f"Number of sessions: {len(self.raw_list)}")
         print("\nSession Details:")
         for i, info in enumerate(self.session_info):
-            print(f"\nSession {i+1}:")
+            print(f"\nSession {i + 1}:")
             print(f"  Name: {info['name']}")
             print(f"  Format: {info['format']}")
             print(f"  Path: {info['path']}")

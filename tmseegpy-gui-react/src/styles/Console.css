@@ -1,0 +1,46 @@
+/* src/styles/Console.css */
+
+#console-output {
+    font-family: 'Courier New', Courier, monospace;
+    background-color: #1e1e1e;
+    color: #00ff00;
+    padding: 10px;
+    height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+#console-output::-webkit-scrollbar {
+    width: 12px;
+}
+
+#console-output::-webkit-scrollbar-track {
+    background: #2e2e2e;
+}
+
+#console-output::-webkit-scrollbar-thumb {
+    background-color: #888;
+    border-radius: 6px;
+    border: 3px solid #2e2e2e;
+}
+
+/* Optional: Style for error messages */
+.console-error {
+    color: #ff4444;
+}
+
+/* Optional: Style for warning messages */
+.console-warning {
+    color: #ffbb33;
+}
+
+/* Optional: Style for success messages */
+.console-success {
+    color: #00C851;
+}
+
+/* Optional: Style for info messages */
+.console-info {
+    color: #33b5e5;
+}

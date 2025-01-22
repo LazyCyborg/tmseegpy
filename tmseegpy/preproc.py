@@ -1,4 +1,6 @@
 # preproc.py
+
+#### Debug mne_filter epochs after PARAFAC which might not work
 import numpy as np
 from scipy import stats, signal
 from scipy.interpolate import interp1d
@@ -22,7 +24,7 @@ import mne
 from mne.preprocessing import ICA
 from typing import List
 
-from typing import Optional, Union, Dict, List, Tuple, Any
+from typing import List, Optional, Callable, Dict, Union, Tuple, Any, TypeVar
 import warnings
 import os
 
@@ -590,8 +592,9 @@ class TMSEEGPreprocessor:
                 lat_eye_thresh: float = 2.0,
                 muscle_thresh: float = 0.6,
                 noise_thresh: float = 4.0,
-                plot_components: bool = False,
-                manual_mode: bool = False) -> None:
+                #plot_components: bool = False,
+                manual_mode: bool = False,
+                ica_callback: Optional[Callable] = None) -> None:
         """
         Run first ICA decomposition with TESA artifact detection.
         Works with both Raw and Epochs data.
@@ -618,6 +621,8 @@ class TMSEEGPreprocessor:
             Whether to plot ICA components
         manual_mode : bool
             Whether to use manual component selection
+        ica_callback : callable, optional
+            Callback function for GUI-based component selection
         """
         # Store copy of data before ICA
         if hasattr(self, 'epochs') and self.epochs is not None:
@@ -640,22 +645,9 @@ class TMSEEGPreprocessor:
         print("ICA fit complete")
 
         if manual_mode:
-            # Get the main Tk root window
-            import builtins
-            root = getattr(builtins, 'GUI_MAIN_ROOT', None)
-            if root is None:
-                raise RuntimeError("No main Tk root found")
-
             self.first_ica_manual = True
             print("\nStarting manual component selection...")
             print("A new window will open for component selection.")
-
-            from .gui.ica_handler import ICAComponentSelector, ICAComponentSelectorContinuous
-
-            if is_epochs:
-                selector_class = ICAComponentSelector
-            else:
-                selector_class = ICAComponentSelectorContinuous
 
             try:
                 # Run all TESA artifact detection methods
@@ -681,72 +673,37 @@ class TMSEEGPreprocessor:
                 if is_epochs:
                     component_scores['tms_muscle'] = artifact_results['tms_muscle']['scores']['ratios']
 
+                # Print suggested components
+                suggested_exclude = []
+                for key in artifact_results:
+                    if key == 'tms_muscle' and not is_epochs:
+                        continue
+                    suggested_exclude.extend(artifact_results[key]['components'])
+                suggested_exclude = list(set(suggested_exclude))
+
+                if suggested_exclude:
+                    print(f"\nSuggested components for removal: {suggested_exclude}")
+                    print("(Based on TESA artifact detection)")
+
             except Exception as e:
                 print(f"\nWarning: Error in component analysis: {str(e)}")
                 print("Continuing with manual selection without automatic scores")
                 component_scores = None
 
-            # Create synchronization primitives
-            selection_complete = threading.Event()
-            result_queue = queue.Queue()
+            if ica_callback is not None:
+                # Use the provided callback for GUI-based selection
+                selected_components = ica_callback(self.ica, inst, component_scores)
 
-            def handle_selection(components):
-                try:
-                    result_queue.put(components)
-                finally:
-                    selection_complete.set()
-
-            def create_selector():
-                try:
-                    selector = selector_class(root)
-                    if is_epochs:
-                        # Epoched data -> pass epochs
-                        selector.select_components(
-                            ica_instance=self.ica,
-                            epochs=inst,
-                            title="First ICA - Select Components to Remove",
-                            callback=handle_selection,
-                            component_scores=component_scores
-                        )
-                    else:
-                        # Continuous data -> pass raw
-                        selector.select_components(
-                            ica_instance=self.ica,
-                            raw=inst,
-                            title="First ICA - Select Components to Remove",
-                            callback=handle_selection,
-                            component_scores=component_scores
-                        )
-                except Exception as e:
-                    print(f"Error creating selector: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-                    selection_complete.set()
-                    result_queue.put([])
-
-            # Schedule selector creation
-            if threading.current_thread() is threading.main_thread():
-                create_selector()
+                if selected_components:
+                    print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
+                    self.ica.apply(inst, exclude=selected_components)
+                    self.selected_first_ica_components = selected_components
+                    self.preproc_stats['muscle_components'] = selected_components
+                else:
+                    print("\nNo components selected for exclusion")
+                    self.preproc_stats['muscle_components'] = []
             else:
-                root.after(0, create_selector)
-
-            if not selection_complete.wait(timeout=300):
-                print("\nComponent selection timed out")
-                return
-
-            try:
-                selected_components = result_queue.get_nowait()
-            except queue.Empty:
-                print("\nNo components selected")
-                return
-
-            if selected_components:
-                print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
-                self.ica.apply(inst, exclude=selected_components)
-                self.selected_first_ica_components = selected_components
-                self.preproc_stats['muscle_components'] = selected_components
-            else:
-                print("\nNo components selected for exclusion")
+                print("\nWarning: Manual mode selected but no callback provided")
                 self.preproc_stats['muscle_components'] = []
 
         else:
@@ -782,15 +739,17 @@ class TMSEEGPreprocessor:
         else:
             self.raw = inst
 
+        #if plot_components:
+            #self._plot_and_save_components(output_dir, session_name)
+
     def run_second_ica(self,
                        method: str = "infomax",
-                       exclude_labels: List[str] = ["eye blink", "heart beat", "muscle artifact", "channel noise",
-                                                    "line noise"],
                        blink_thresh: float = 2.5,
                        lat_eye_thresh: float = 2.0,
                        muscle_thresh: float = 0.6,
                        noise_thresh: float = 4.0,
-                       manual_mode: bool = False) -> None:
+                       manual_mode: bool = False,
+                       ica_callback: Optional[Callable] = None) -> None:
         """
         Run second ICA with both TESA and ICLabel detection methods.
         Works with both Raw and Epochs data.
@@ -811,6 +770,8 @@ class TMSEEGPreprocessor:
             Threshold for noise detection
         manual_mode : bool
             Whether to use manual component selection
+        ica_callback : callable, optional
+            Callback function for GUI-based component selection
         """
         # Determine if we're working with epochs or raw data
         if hasattr(self, 'epochs') and self.epochs is not None:
@@ -834,18 +795,6 @@ class TMSEEGPreprocessor:
         print("Second ICA fit complete")
 
         if manual_mode:
-            import builtins
-            root = getattr(builtins, 'GUI_MAIN_ROOT', None)
-            if root is None:
-                raise RuntimeError("No main Tk root found")
-
-            from .gui.ica_handler import ICAComponentSelector, ICAComponentSelectorContinuous
-
-            if is_epochs:
-                selector_class = ICAComponentSelector
-            else:
-                selector_class = ICAComponentSelectorContinuous
-
             self.second_ica_manual = True
             print("\nStarting manual component selection for second ICA...")
 
@@ -860,7 +809,7 @@ class TMSEEGPreprocessor:
                     verbose=True
                 )
 
-                # Calculate component scores (exclude TMS-muscle for continuous data)
+                # Calculate component scores
                 component_scores = {
                     'blink': artifact_results['blink']['scores']['z_scores'],
                     'lat_eye': artifact_results['lateral_eye']['scores']['z_scores'],
@@ -872,11 +821,11 @@ class TMSEEGPreprocessor:
                 if is_epochs:
                     component_scores['tms_muscle'] = artifact_results['tms_muscle']['scores']['ratios']
 
-                # Combine suggestions
+                # Print suggested components
                 suggested_exclude = []
                 for key in artifact_results:
                     if key == 'tms_muscle' and not is_epochs:
-                        continue  # Skip TMS-muscle components for raw data
+                        continue
                     suggested_exclude.extend(artifact_results[key]['components'])
                 suggested_exclude = list(set(suggested_exclude))
 
@@ -888,66 +837,20 @@ class TMSEEGPreprocessor:
                 print(f"\nWarning: Error in component analysis: {str(e)}")
                 component_scores = None
 
-            # Create synchronization primitives
-            selection_complete = threading.Event()
-            result_queue = queue.Queue()
+            if ica_callback is not None:
+                # Use the provided callback for GUI-based selection
+                selected_components = ica_callback(self.ica2, inst, component_scores)
 
-            def handle_selection(components):
-                try:
-                    result_queue.put(components)
-                finally:
-                    selection_complete.set()
-
-            def create_selector():
-                try:
-                    selector = selector_class(root)
-                    if is_epochs:
-                        # Epoched data -> pass epochs
-                        selector.select_components(
-                            ica_instance=self.ica2,
-                            epochs=inst,
-                            title="Second - Select Components to Remove",
-                            callback=handle_selection,
-                            component_scores=component_scores
-                        )
-                    else:
-                        # Continuous data -> pass raw
-                        selector.select_components(
-                            ica_instance=self.ica2,
-                            raw=inst,
-                            title="Second ICA - Select Components to Remove",
-                            callback=handle_selection,
-                            component_scores=component_scores
-                        )
-                except Exception as e:
-                    print(f"Error creating selector: {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-                    selection_complete.set()
-                    result_queue.put([])
-
-            if threading.current_thread() is threading.main_thread():
-                create_selector()
+                if selected_components:
+                    print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
+                    self.ica2.apply(inst, exclude=selected_components)
+                    self.selected_second_ica_components = selected_components
+                    self.preproc_stats['excluded_ica_components'] = selected_components
+                else:
+                    print("\nNo components selected for exclusion")
+                    self.preproc_stats['excluded_ica_components'] = []
             else:
-                root.after(0, create_selector)
-
-            if not selection_complete.wait(timeout=300):
-                print("\nComponent selection timed out")
-                return
-
-            try:
-                selected_components = result_queue.get_nowait()
-            except queue.Empty:
-                print("\nNo components selected")
-                return
-
-            if selected_components:
-                print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
-                self.ica2.apply(inst, exclude=selected_components)
-                self.selected_second_ica_components = selected_components
-                self.preproc_stats['excluded_ica_components'] = selected_components
-            else:
-                print("\nNo components selected for exclusion")
+                print("\nWarning: Manual mode selected but no callback provided")
                 self.preproc_stats['excluded_ica_components'] = []
 
         else:
@@ -958,14 +861,15 @@ class TMSEEGPreprocessor:
                     lat_eye_thresh=lat_eye_thresh,
                     muscle_freq_thresh=muscle_thresh,
                     noise_thresh=noise_thresh,
-                    verbose=True
+                    verbose=True,
+                    ica_instance=self.ica2,
                 )
 
                 # Combine detected components
                 exclude_idx = []
                 for key in artifact_results:
                     if key == 'tms_muscle' and not is_epochs:
-                        continue  # Skip TMS-muscle components for raw data
+                        continue
                     exclude_idx.extend(artifact_results[key]['components'])
                 exclude_idx = list(set(exclude_idx))
 
@@ -990,268 +894,6 @@ class TMSEEGPreprocessor:
 
         print('Second ICA complete')
 
-    def filter_raw(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
-        """
-        Filter raw data using a zero-phase Butterworth filter with improved stability.
-
-        Parameters
-        ----------
-        l_freq : float
-            Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
-        h_freq : float
-            Upper frequency cutoff for bandpass filter (default: 45 Hz)
-        notch_freq : float
-            Frequency for notch filter (default: 50 Hz)
-        notch_width : float
-            Width of notch filter (default: 2 Hz)
-        """
-        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
-        import numpy as np
-
-        print(f"Applying SciPy filters to raw data with frequency {l_freq}Hz and frequency {h_freq}Hz")
-
-        # Create a copy of the raw data
-        filtered_raw = self.raw.copy()
-
-        # Get data and scale it up for better numerical precision
-        data = filtered_raw.get_data()
-        scale_factor = 1e6  # Convert to microvolts
-        data = data * scale_factor
-
-        print(f"Data shape: {data.shape}")
-        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
-
-        # Ensure data is float64
-        data = data.astype(np.float64)
-
-        sfreq = filtered_raw.info['sfreq']
-        nyquist = sfreq / 2
-
-        try:
-            # High-pass filter
-            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
-            data = sosfiltfilt(sos_high, data, axis=-1)
-            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Low-pass filter
-            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
-            data = sosfiltfilt(sos_low, data, axis=-1)
-            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Multiple notch filters for harmonics
-            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
-                # Using iirnotch for sharper notch characteristics
-                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
-                data = filtfilt(b, a, data, axis=-1)
-            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Scale back
-            data = data / scale_factor
-            filtered_raw._data = data
-
-        except Exception as e:
-            print(f"Error during filtering: {str(e)}")
-            raise
-
-        print("Filtering complete")
-        self.raw = filtered_raw
-
-    def mne_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
-        """
-        Filter epoched data using MNE's built-in filtering plus custom notch.
-
-        Parameters
-        ----------
-        l_freq : float
-            Lower frequency bound for bandpass filter
-        h_freq : float
-            Upper frequency bound for bandpass filter
-        notch_freq : float
-            Frequency to notch filter (usually power line frequency)
-        notch_width : float
-            Width of the notch filter
-
-        Returns
-        -------
-        None
-            Updates self.epochs in place
-        """
-        from scipy.signal import iirnotch, filtfilt
-        import numpy as np
-        from mne.time_frequency import psd_array_welch
-
-        if self.epochs is None:
-            raise ValueError("Must create epochs before filtering")
-
-        # Store original epochs for potential recovery
-        original_epochs = self.epochs
-        try:
-            # Create a deep copy to work with
-            filtered_epochs = self.epochs.copy()
-
-            # Get data and sampling frequency
-            data = filtered_epochs.get_data()
-            sfreq = filtered_epochs.info['sfreq']
-            nyquist = sfreq / 2.0
-
-            # Diagnostic before filtering
-            psds, freqs = psd_array_welch(data.reshape(-1, data.shape[-1]),
-                                          sfreq=sfreq,
-                                          fmin=0,
-                                          fmax=200,
-                                          n_per_seg=256,
-                                          n_overlap=128)
-
-            print(f"\nBefore filtering:")
-            print(f"Peak frequency: {freqs[np.argmax(psds.mean(0))]} Hz")
-            print(f"Frequency range with significant power: {freqs[psds.mean(0) > psds.mean(0).max() * 0.1][0]:.1f} - "
-                  f"{freqs[psds.mean(0) > psds.mean(0).max() * 0.1][-1]:.1f} Hz")
-
-            # Apply filters in sequence
-            print("\nApplying low-pass filter...")
-            filtered_epochs.filter(
-                l_freq=None,
-                h_freq=h_freq,
-                picks='eeg',
-                filter_length='auto',
-                h_trans_bandwidth=10,
-                method='fir',
-                fir_window='hamming',
-                fir_design='firwin',
-                phase='zero',
-                verbose=True
-            )
-
-            print("\nApplying high-pass filter...")
-            filtered_epochs.filter(
-                l_freq=l_freq,
-                h_freq=None,
-                picks='eeg',
-                filter_length='auto',
-                l_trans_bandwidth=l_freq / 2,
-                method='fir',
-                fir_window='hamming',
-                fir_design='firwin',
-                phase='zero',
-                verbose=True
-            )
-
-            # Get the filtered data for notch filtering
-            data = filtered_epochs.get_data()
-
-            print("\nApplying notch filters...")
-            for freq in [notch_freq, notch_freq * 2]:
-                print(f"Processing {freq} Hz notch...")
-                Q = 30.0  # Quality factor
-                w0 = freq / nyquist
-                b, a = iirnotch(w0, Q)
-
-                # Apply to each epoch and channel
-                for epoch_idx in range(data.shape[0]):
-                    for ch_idx in range(data.shape[1]):
-                        data[epoch_idx, ch_idx, :] = filtfilt(b, a, data[epoch_idx, ch_idx, :])
-
-            # Update the filtered epochs with notch-filtered data
-            filtered_epochs._data = data
-
-            # Diagnostic after filtering
-            data_filtered = filtered_epochs.get_data()
-            psds, freqs = psd_array_welch(data_filtered.reshape(-1, data_filtered.shape[-1]),
-                                          sfreq=sfreq,
-                                          fmin=0,
-                                          fmax=200,
-                                          n_per_seg=256,
-                                          n_overlap=128)
-
-            print(f"\nAfter filtering:")
-            print(f"Peak frequency: {freqs[np.argmax(psds.mean(0))]} Hz")
-            print(f"Frequency range with significant power: {freqs[psds.mean(0) > psds.mean(0).max() * 0.1][0]:.1f} - "
-                  f"{freqs[psds.mean(0) > psds.mean(0).max() * 0.1][-1]:.1f} Hz")
-
-            # Verify the filtered data
-            if np.any(np.isnan(filtered_epochs._data)):
-                raise ValueError("Filtering produced NaN values")
-
-            if np.any(np.isinf(filtered_epochs._data)):
-                raise ValueError("Filtering produced infinite values")
-
-            # Update the instance's epochs with the filtered version
-            self.epochs = filtered_epochs
-            print("\nFiltering completed successfully")
-
-        except Exception as e:
-            print(f"Error during filtering: {str(e)}")
-            print("Reverting to original epochs")
-            self.epochs = original_epochs
-            raise
-
-
-    def scipy_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
-        """
-        Filter epoched data using a zero-phase Butterworth filter with improved stability.
-
-        Parameters
-        ----------
-        l_freq : float
-            Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
-        h_freq : float
-            Upper frequency cutoff for bandpass filter (default: 45 Hz)
-        notch_freq : float
-            Frequency for notch filter (default: 50 Hz)
-        notch_width : float
-            Width of notch filter (default: 2 Hz)
-        """
-        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
-        import numpy as np
-
-        if self.epochs is None:
-            raise ValueError("Must create epochs before filtering")
-
-        # Create a copy of the epochs object
-        filtered_epochs = self.epochs.copy()
-
-        # Get data and scale it up for better numerical precision
-        data = filtered_epochs.get_data()
-        scale_factor = 1e6  # Convert to microvolts
-        data = data * scale_factor
-
-        print(f"Data shape: {data.shape}")
-        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
-
-        # Ensure data is float64
-        data = data.astype(np.float64)
-
-        sfreq = filtered_epochs.info['sfreq']
-        nyquist = sfreq / 2
-
-        try:
-            # High-pass filter
-            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
-            data = sosfiltfilt(sos_high, data, axis=-1)
-            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Low-pass filter
-            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
-            data = sosfiltfilt(sos_low, data, axis=-1)
-            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Multiple notch filters for harmonics
-            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
-                # Using iirnotch for sharper notch characteristics
-                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
-                data = filtfilt(b, a, data, axis=-1)
-            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Scale back
-            data = data / scale_factor
-            filtered_epochs._data = data
-
-        except Exception as e:
-            print(f"Error during filtering: {str(e)}")
-            raise
-
-        print("Filtering complete")
-        self.epochs = filtered_epochs
 
     def detect_all_artifacts(self,
                              tms_muscle_window=(11, 30),
@@ -1261,7 +903,8 @@ class TMSEEGPreprocessor:
                              muscle_freq_window=(30, 100),
                              muscle_freq_thresh=0.6,
                              noise_thresh=4.0,
-                             verbose=True) -> Dict:
+                             verbose=True,
+                             ica_instance=None) -> Dict:
         """
         Detect all artifact types following TESA's implementation.
         Works with both Raw and Epochs data.
@@ -1284,12 +927,17 @@ class TMSEEGPreprocessor:
             Threshold for electrode noise components
         verbose : bool
             Whether to print verbose output
+        ica_instance : mne.preprocessing.ICA, optional
+            Specific ICA instance to use. If None, uses self.ica
 
         Returns
         -------
         dict
             Dictionary containing detected components and their scores
         """
+        # Use provided ICA instance or default to self.ica
+        ica = ica_instance if ica_instance is not None else self.ica
+
         if not hasattr(self, 'ica'):
             raise ValueError("Must run ICA before detecting components")
 
@@ -1302,18 +950,21 @@ class TMSEEGPreprocessor:
             'noise': {'components': [], 'scores': {}}
         }
 
+        # Use provided ICA instance or default to self.ica
+        ica = ica_instance if ica_instance is not None else self.ica
+
         # Get ICA weights
-        weights = self.ica.get_components()
-        n_components = self.ica.n_components_
+        weights = ica.get_components()
+        n_components = ica.n_components_
 
         # Get ICA components (sources)
         if hasattr(self, 'epochs') and self.epochs is not None:
             inst = self.epochs
-            components = self.ica.get_sources(inst)
+            components = ica.get_sources(inst)
             is_epochs = True
         else:
             inst = self.raw
-            components = self.ica.get_sources(inst)
+            components = ica.get_sources(inst)
             is_epochs = False
 
         # 1. Detect TMS-evoked muscle artifacts (if using epoched data)
@@ -1583,6 +1234,270 @@ class TMSEEGPreprocessor:
                 noise_components.append(comp_idx)
 
         return noise_components, scores
+
+
+    def filter_raw(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+        """
+        Filter raw data using a zero-phase Butterworth filter with improved stability.
+
+        Parameters
+        ----------
+        l_freq : float
+            Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
+        h_freq : float
+            Upper frequency cutoff for bandpass filter (default: 45 Hz)
+        notch_freq : float
+            Frequency for notch filter (default: 50 Hz)
+        notch_width : float
+            Width of notch filter (default: 2 Hz)
+        """
+        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
+        import numpy as np
+
+        print(f"Applying SciPy filters to raw data with frequency {l_freq}Hz and frequency {h_freq}Hz")
+
+        # Create a copy of the raw data
+        filtered_raw = self.raw.copy()
+
+        # Get data and scale it up for better numerical precision
+        data = filtered_raw.get_data()
+        scale_factor = 1e6  # Convert to microvolts
+        data = data * scale_factor
+
+        print(f"Data shape: {data.shape}")
+        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
+
+        # Ensure data is float64
+        data = data.astype(np.float64)
+
+        sfreq = filtered_raw.info['sfreq']
+        nyquist = sfreq / 2
+
+        try:
+            # High-pass filter
+            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
+            data = sosfiltfilt(sos_high, data, axis=-1)
+            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Low-pass filter
+            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
+            data = sosfiltfilt(sos_low, data, axis=-1)
+            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Multiple notch filters for harmonics
+            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
+                # Using iirnotch for sharper notch characteristics
+                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
+                data = filtfilt(b, a, data, axis=-1)
+            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Scale back
+            data = data / scale_factor
+            filtered_raw._data = data
+
+        except Exception as e:
+            print(f"Error during filtering: {str(e)}")
+            raise
+
+        print("Filtering complete")
+        self.raw = filtered_raw
+
+    def mne_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+        """
+        Filter epoched data using MNE's built-in filtering plus custom notch.
+
+        Parameters
+        ----------
+        l_freq : float
+            Lower frequency bound for bandpass filter
+        h_freq : float
+            Upper frequency bound for bandpass filter
+        notch_freq : float
+            Frequency to notch filter (usually power line frequency)
+        notch_width : float
+            Width of the notch filter
+
+        Returns
+        -------
+        None
+            Updates self.epochs in place
+        """
+        from scipy.signal import iirnotch, filtfilt
+        import numpy as np
+        from mne.time_frequency import psd_array_welch
+
+        if self.epochs is None:
+            raise ValueError("Must create epochs before filtering")
+
+        # Store original epochs for potential recovery
+        original_epochs = self.epochs
+        try:
+            # Create a deep copy to work with
+            filtered_epochs = self.epochs.copy()
+
+            # Get data and sampling frequency
+            data = filtered_epochs.get_data()
+            sfreq = filtered_epochs.info['sfreq']
+            nyquist = sfreq / 2.0
+
+            # Diagnostic before filtering
+            psds, freqs = psd_array_welch(data.reshape(-1, data.shape[-1]),
+                                          sfreq=sfreq,
+                                          fmin=0,
+                                          fmax=200,
+                                          n_per_seg=256,
+                                          n_overlap=128)
+
+            print(f"\nBefore filtering:")
+            print(f"Peak frequency: {freqs[np.argmax(psds.mean(0))]} Hz")
+            print(f"Frequency range with significant power: {freqs[psds.mean(0) > psds.mean(0).max() * 0.1][0]:.1f} - "
+                  f"{freqs[psds.mean(0) > psds.mean(0).max() * 0.1][-1]:.1f} Hz")
+
+            # Apply filters in sequence
+            print("\nApplying low-pass filter...")
+            filtered_epochs.filter(
+                l_freq=None,
+                h_freq=h_freq,
+                picks='eeg',
+                filter_length='auto',
+                h_trans_bandwidth=10,
+                method='fir',
+                fir_window='hamming',
+                fir_design='firwin',
+                phase='zero',
+                verbose=True
+            )
+
+            print("\nApplying high-pass filter...")
+            filtered_epochs.filter(
+                l_freq=l_freq,
+                h_freq=None,
+                picks='eeg',
+                filter_length='auto',
+                l_trans_bandwidth=l_freq / 2,
+                method='fir',
+                fir_window='hamming',
+                fir_design='firwin',
+                phase='zero',
+                verbose=True
+            )
+
+            # Get the filtered data for notch filtering
+            data = filtered_epochs.get_data()
+
+            print("\nApplying notch filters...")
+            for freq in [notch_freq, notch_freq * 2]:
+                print(f"Processing {freq} Hz notch...")
+                Q = 30.0  # Quality factor
+                w0 = freq / nyquist
+                b, a = iirnotch(w0, Q)
+
+                # Apply to each epoch and channel
+                for epoch_idx in range(data.shape[0]):
+                    for ch_idx in range(data.shape[1]):
+                        data[epoch_idx, ch_idx, :] = filtfilt(b, a, data[epoch_idx, ch_idx, :])
+
+            # Update the filtered epochs with notch-filtered data
+            filtered_epochs._data = data
+
+            # Diagnostic after filtering
+            data_filtered = filtered_epochs.get_data()
+            psds, freqs = psd_array_welch(data_filtered.reshape(-1, data_filtered.shape[-1]),
+                                          sfreq=sfreq,
+                                          fmin=0,
+                                          fmax=200,
+                                          n_per_seg=256,
+                                          n_overlap=128)
+
+            print(f"\nAfter filtering:")
+            print(f"Peak frequency: {freqs[np.argmax(psds.mean(0))]} Hz")
+            print(f"Frequency range with significant power: {freqs[psds.mean(0) > psds.mean(0).max() * 0.1][0]:.1f} - "
+                  f"{freqs[psds.mean(0) > psds.mean(0).max() * 0.1][-1]:.1f} Hz")
+
+            # Verify the filtered data
+            if np.any(np.isnan(filtered_epochs._data)):
+                raise ValueError("Filtering produced NaN values")
+
+            if np.any(np.isinf(filtered_epochs._data)):
+                raise ValueError("Filtering produced infinite values")
+
+            # Update the instance's epochs with the filtered version
+            self.epochs = filtered_epochs
+            print("\nFiltering completed successfully")
+
+        except Exception as e:
+            print(f"Error during filtering: {str(e)}")
+            print("Reverting to original epochs")
+            self.epochs = original_epochs
+            raise
+
+
+    def scipy_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+        """
+        Filter epoched data using a zero-phase Butterworth filter with improved stability.
+
+        Parameters
+        ----------
+        l_freq : float
+            Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
+        h_freq : float
+            Upper frequency cutoff for bandpass filter (default: 45 Hz)
+        notch_freq : float
+            Frequency for notch filter (default: 50 Hz)
+        notch_width : float
+            Width of notch filter (default: 2 Hz)
+        """
+        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
+        import numpy as np
+
+        if self.epochs is None:
+            raise ValueError("Must create epochs before filtering")
+
+        # Create a copy of the epochs object
+        filtered_epochs = self.epochs.copy()
+
+        # Get data and scale it up for better numerical precision
+        data = filtered_epochs.get_data()
+        scale_factor = 1e6  # Convert to microvolts
+        data = data * scale_factor
+
+        print(f"Data shape: {data.shape}")
+        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
+
+        # Ensure data is float64
+        data = data.astype(np.float64)
+
+        sfreq = filtered_epochs.info['sfreq']
+        nyquist = sfreq / 2
+
+        try:
+            # High-pass filter
+            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
+            data = sosfiltfilt(sos_high, data, axis=-1)
+            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Low-pass filter
+            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
+            data = sosfiltfilt(sos_low, data, axis=-1)
+            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Multiple notch filters for harmonics
+            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
+                # Using iirnotch for sharper notch characteristics
+                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
+                data = filtfilt(b, a, data, axis=-1)
+            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
+
+            # Scale back
+            data = data / scale_factor
+            filtered_epochs._data = data
+
+        except Exception as e:
+            print(f"Error during filtering: {str(e)}")
+            raise
+
+        print("Filtering complete")
+        self.epochs = filtered_epochs
 
 
     def set_average_reference(self):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tmseegpy"
-version = "0.1.7"
+version = "0.1.8"
 description = "A pipeline for preprocessing and analyzing TMS-EEG data"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -27,15 +27,14 @@ dependencies = [
     "matplotlib",
     "seaborn",
     "tqdm",
+    "PyQt6",
     "mne-faster",
     "psutil",
     "construct",
-    "importlib-metadata; python_version < '3.8'",
-    "importlib-resources; python_version < '3.9'"
 ]
 
 [project.scripts]
-tmseegpy = "tmseegpy.gui:main"
+tmseegpy = "tmseegpy.main:main"
 
 [tool.setuptools]
 include-package-data = true

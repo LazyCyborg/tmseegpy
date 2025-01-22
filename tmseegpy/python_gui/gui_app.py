@@ -7,7 +7,7 @@ import sys
 import io
 import os
 
-from ..run import process_subjects
+from tmseegpy.run import process_subjects
 
 
 class ToolTip(object):
@@ -846,7 +846,7 @@ class TMSEEG_GUI:
             self.root.update_idletasks()
             # Schedule next update
             self.root.after(100, self.update_gui)
-
+    '''
     def run_analysis_thread(self, args):
         """Modified thread function to handle both continuous and epoched processing"""
         try:
@@ -872,7 +872,7 @@ class TMSEEG_GUI:
             def check_gui_queue():
                 try:
                     while True:
-                        callback, args = gui_queue.get_nowait()
+                        #callback, args = gui_queue.get_nowait()
                         callback(*args)
                 except queue.Empty:
                     pass
@@ -891,7 +891,7 @@ class TMSEEG_GUI:
             # Run appropriate processing based on mode
             if args.continuous_mode:
                 results = process_continuous_data(args)
-                schedule_on_gui(self.continuous_analysis_complete, results)
+                #schedule_on_gui(self.continuous_analysis_complete, results)
             else:
                 pcists = process_subjects(args)
                 if not getattr(builtins, 'STOP_PROCESSING', False):
@@ -901,10 +901,8 @@ class TMSEEG_GUI:
             import traceback
             error_msg = traceback.format_exc()
             gui_queue.put((self.analysis_error, (error_msg,)))
+            '''
 
-        finally:
-            schedule_on_gui(self.cleanup_after_stop)
-            matplotlib.use('Agg')
             
     def analysis_complete(self, pcists):
         self.progress.stop()

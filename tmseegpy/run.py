@@ -1,14 +1,51 @@
 # run.py
 import os
 from pathlib import Path
+import sys
+
+
+# Automatically set up Qt plugin path
+def setup_qt_plugin_path():
+    try:
+        # Get conda environment path
+        conda_prefix = os.environ.get('CONDA_PREFIX')
+        if conda_prefix:
+            # Look for PyQt6 plugins in the conda environment
+            possible_plugin_paths = [
+                Path(conda_prefix) / "lib" / "python3.9" / "site-packages" / "PyQt6" / "Qt6" / "plugins" / "platforms",
+                Path(conda_prefix) / "lib" / "python3.9" / "site-packages" / "PyQt6" / "Qt" / "plugins" / "platforms",
+                Path(conda_prefix) / "Library" / "plugins" / "platforms",  # Windows path
+            ]
+
+            # Find the first valid path
+            for path in possible_plugin_paths:
+                if path.exists():
+                    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(path)
+                    print(f"Set QT_QPA_PLATFORM_PLUGIN_PATH to: {path}")
+                    break
+        else:
+            # If not in conda environment, try to find PyQt6 in system Python
+            import PyQt6
+            qt_path = Path(PyQt6.__file__).parent / "Qt6" / "plugins" / "platforms"
+            if qt_path.exists():
+                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(qt_path)
+                print(f"Set QT_QPA_PLATFORM_PLUGIN_PATH to: {qt_path}")
+    except Exception as e:
+        print(f"Warning: Could not automatically set Qt plugin path: {e}")
+
+
+# Call this before any Qt imports
+setup_qt_plugin_path()
 from tabnanny import verbose
 
 import numpy as np
 import matplotlib.pyplot as plt
-from .preproc import TMSEEGPreprocessor
-from .pcist import PCIst
-from .preproc_vis import plot_raw_segments, plot_epochs_grid
-from .validate_tep import (
+from tmseegpy.preproc import TMSEEGPreprocessor  # absolute import
+from tmseegpy.dataloader import TMSEEGLoader
+from tmseegpy.cli_ica_selector import get_cli_ica_callback
+from tmseegpy.pcist import PCIst
+from tmseegpy.preproc_vis import plot_raw_segments, plot_epochs_grid
+from tmseegpy.validate_tep import (
     analyze_gmfa,
     analyze_roi,
     plot_tep_analysis,
@@ -256,45 +293,6 @@ def generate_research_stats(pcist_values, pcist_objects, details_list, session_n
     return output_file
 
 
-'''def schedule_on_main_thread(ica_instance, epochs, title="Manual ICA"):
-    """Schedule ICA component selection on the main thread."""
-    import builtins
-    from .gui.ica_handler import select_ica_components
-    import queue
-    import threading
-
-    # Get the main Tk root from builtins
-    root = getattr(builtins, "GUI_MAIN_ROOT", None)
-    if root is None:
-        raise RuntimeError("No main Tk root found in builtins.GUI_MAIN_ROOT")
-
-    result_queue = queue.Queue()
-    selection_complete = threading.Event()
-
-    def run_selection():
-        try:
-            # Create the dialog in the main thread
-            result = select_ica_components(ica_instance, epochs, title, root=root)
-            result_queue.put(result)
-        except Exception as e:
-            print(f"Error in ICA selection: {str(e)}")
-            result_queue.put([])
-        finally:
-            selection_complete.set()
-
-    # If we're already in main thread, run directly
-    if threading.current_thread() is threading.main_thread():
-        run_selection()
-    else:
-        # Schedule on main thread and wait for completion
-        root.after(0, run_selection)
-        selection_complete.wait(timeout=300)  # 5-minute timeout
-
-    try:
-        return result_queue.get_nowait()
-    except queue.Empty:
-        print("No components selected within timeout period")
-        return []'''
 
 def process_subjects(args):
     import builtins
@@ -304,9 +302,15 @@ def process_subjects(args):
             print("\nProcessing stopped by user")
             return True
         return False
+
     data_dir = Path(args.data_dir)
-    # Specific paths for the subject
-    TMS_DATA_PATH = data_dir / 'TMSEEG'
+
+    # Check if the path already ends with TMSEEG
+    if data_dir.name == 'TMSEEG':
+        TMS_DATA_PATH = data_dir
+    else:
+        TMS_DATA_PATH = data_dir / 'TMSEEG'
+
     # Verify paths exist
     required_paths = {
         'Data Directory': data_dir,
@@ -451,8 +455,8 @@ def process_subjects(args):
             if check_stop(): return []
             processor.filter_raw(l_freq=args.l_freq, h_freq=args.h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width)
 
-        print("\nPerforming initial downsampling...")
-        processor.initial_downsample()
+        #print("\nPerforming initial downsampling...")
+       # processor.initial_downsample()
 
         #if args.plot_preproc:
           #  plot_raw_segments(raw, args.output_dir, step_name='raw_f',)
@@ -474,24 +478,37 @@ def process_subjects(args):
 
         print("\nRunning first ICA...")
         if check_stop(): return []
-        if args.plot_preproc:
-            plot_components = True
-        else:
-            plot_components = False
+
+        #plot_components = False
 
         # Modified first ICA call
-        processor.run_ica(
-            output_dir=args.output_dir,
-            session_name=session_name,
-            method=args.ica_method,
-            tms_muscle_thresh=args.tms_muscle_thresh,
-            plot_components=plot_components,
-            manual_mode=args.first_ica_manual
-        )
+        if args.first_ica_manual and hasattr(args, 'ica_callback'):
+            processor.run_ica(
+                output_dir=args.output_dir,
+                session_name=session_name,
+                method=args.ica_method,
+                tms_muscle_thresh=args.tms_muscle_thresh,
+                blink_thresh=args.blink_thresh,  # Add these
+                lat_eye_thresh=args.lat_eye_thresh,  # Add these
+                muscle_thresh=args.muscle_thresh,  # Add these
+                noise_thresh=args.noise_thresh,  # Add these
+                manual_mode=True,
+                ica_callback=args.ica_callback
+            )
+        else:
+            processor.run_ica(
+                output_dir=args.output_dir,
+                session_name=session_name,
+                method=args.ica_method,
+                tms_muscle_thresh=args.tms_muscle_thresh,
+                manual_mode=False
+            )
+
         if args.plot_preproc:
             plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='ica1')
-        if args.clean_muscle_artifacts:
-            print("\nCleaning muscle artifacts...")
+
+        if args.parafac_muscle_artifacts:
+            print("\nCleaning muscle artifacts with PARAFAC decomposition...")
             if check_stop(): return []
             processor.clean_muscle_artifacts(
                 muscle_window=(args.muscle_window_start, args.muscle_window_end),
@@ -499,16 +516,16 @@ def process_subjects(args):
                 n_components=args.n_components,
                 verbose=True
             )
+
         if not args.skip_second_artifact_removal:
             print("\nExtending TMS artifact removal window...")
-            processor.remove_tms_artifact(cut_times_tms=(-2, 15))  
-            
+            if check_stop(): return []
+            processor.remove_tms_artifact(cut_times_tms=(-2, 15))
+
             print("\nInterpolating extended TMS artifact...")
             processor.interpolate_tms_artifact(method='cubic',
-                                            interp_window=5.0,  
-                                            cut_times_tms=(-2, 15))
-            
-        # https://mne.tools/mne-icalabel/stable/generated/examples/00_iclabel.html#sphx-glr-generated-examples-00-iclabel-py
+                                               interp_window=5.0,
+                                               cut_times_tms=(-2, 15))
 
         if not args.filter_raw:
             print("\nFiltering epoched data...")
@@ -528,15 +545,26 @@ def process_subjects(args):
                     notch_width=args.notch_width,
                 )
 
-        if args.plot_preproc:
-            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='filtered')
+            if args.plot_preproc:
+                plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='filtered')
 
-        if not args.no_second_ICA:
-            print("\nRunning second ICA...")
-            if check_stop(): return []
+
+        print("\nRunning second ICA...")
+        if check_stop(): return []
+        if args.second_ica_manual and hasattr(args, 'ica_callback'):
             processor.run_second_ica(
                 method=args.second_ica_method,
-                manual_mode=args.second_ica_manual
+                blink_thresh=args.blink_thresh,  # Add these
+                lat_eye_thresh=args.lat_eye_thresh,  # Add these
+                muscle_thresh=args.muscle_thresh,  # Add these
+                noise_thresh=args.noise_thresh,  # Add these
+                manual_mode=True,
+                ica_callback=args.ica_callback
+            )
+        else:
+            processor.run_second_ica(
+                method=args.second_ica_method,
+                manual_mode=False
             )
 
         if args.apply_ssp:    
@@ -557,8 +585,10 @@ def process_subjects(args):
         if args.plot_preproc:
             plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='final')
 
-        epochs = processor.epochs
-        epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
+        if not args.no_preproc_output:
+
+            epochs = processor.epochs
+            epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
 
         if args.validate_teps:
             try:
@@ -575,26 +605,38 @@ def process_subjects(args):
                     'P180': {'time': (145, 250), 'polarity': 'positive', 'peak': 180}
                 }
 
-                # Analyze GMFA
-                print("Analyzing GMFA...")
-                gmfa_results = analyze_gmfa(
-                    epochs=epochs,
-                    components=DEFAULT_TEP_COMPONENTS,
-                    samples=5,  # TESA default
-                    method='largest'  # TESA default
-                )
+                results = {}
 
-                # Analyze ROI (if specified channels exist)
-                roi_channels = ['C3', 'C4']  # Example ROI - modify as needed
-                if all(ch in epochs.ch_names for ch in roi_channels):
-                    print(f"Analyzing ROI: {roi_channels}")
-                    roi_results = analyze_roi(
+                # Analyze GMFA if requested
+                if args.tep_analysis_type in ['gmfa', 'both']:
+                    print("Analyzing GMFA...")
+                    gmfa_results = analyze_gmfa(
                         epochs=epochs,
-                        channels=roi_channels,
                         components=DEFAULT_TEP_COMPONENTS,
-                        samples=5,
-                        method='largest'
+                        samples=args.tep_samples,
+                        method=args.tep_method
                     )
+                    results['gmfa'] = gmfa_results
+
+                # Analyze ROI if requested
+                if args.tep_analysis_type in ['roi', 'both']:
+                    # Verify specified channels exist
+                    available_channels = [ch for ch in args.tep_roi_channels
+                                          if ch in epochs.ch_names]
+
+                    if available_channels:
+                        print(f"Analyzing ROI: {available_channels}")
+                        roi_results = analyze_roi(
+                            epochs=epochs,
+                            channels=available_channels,
+                            components=DEFAULT_TEP_COMPONENTS,
+                            samples=args.tep_samples,
+                            method=args.tep_method
+                        )
+                        results['roi'] = roi_results
+                    else:
+                        print(f"Warning: None of the specified ROI channels {args.tep_roi_channels} "
+                              "found in data")
 
                 # Create visualization
                 print("Generating TEP plots...")
@@ -603,18 +645,25 @@ def process_subjects(args):
                     output_dir=args.output_dir,
                     session_name=session_name,
                     components=DEFAULT_TEP_COMPONENTS,
-                    analysis_type='gmfa'  # Can be 'roi' if you want to plot ROI analysis
+                    analysis_type=args.tep_analysis_type
                 )
 
                 # Generate validation summary if requested
                 if args.save_validation:
                     print("Generating validation summary...")
-                    generate_validation_summary(
-                        components=gmfa_results,  # Use GMFA results for validation
-                        output_dir=args.output_dir,
-                        session_name=session_name
-                    )
-                    print("TEP validation summary saved")
+                    # Use appropriate results based on analysis type
+                    validation_results = (results.get('gmfa', None) or
+                                          results.get('roi', None))
+
+                    if validation_results:
+                        generate_validation_summary(
+                            components=validation_results,
+                            output_dir=args.output_dir,
+                            session_name=session_name
+                        )
+                        print("TEP validation summary saved")
+                    else:
+                        print("Warning: No results available for validation summary")
 
             except Exception as e:
                 print(f"Warning: TEP analysis failed: {str(e)}")
@@ -833,22 +882,28 @@ def process_continuous_data(args):
             if args.plot_preproc:
                 plot_raw_segments(processor.raw, args.output_dir, session_name, "03_post_interpolation")
 
-            print("\nPerforming initial downsampling...")
-            processor.initial_downsample()
-            if args.plot_preproc:
-                plot_raw_segments(processor.raw, args.output_dir, session_name, "04_post_downsample")
+           # print("\nPerforming initial downsampling...")
+            #processor.initial_downsample()
+           # if args.plot_preproc:
+            #    plot_raw_segments(processor.raw, args.output_dir, session_name, "04_post_downsample")
 
             print("\nRunning ICA...")
             if check_stop():
                 return processed_raws
 
-            if args.first_ica_manual:
+            # Modify the ICA handling to properly use the callback:
+            if args.first_ica_manual and hasattr(args, 'ica_callback'):
                 processor.run_ica(
                     output_dir=args.output_dir,
                     session_name=session_name,
                     method=args.ica_method,
                     tms_muscle_thresh=args.tms_muscle_thresh,
-                    manual_mode=True
+                    blink_thresh=args.blink_thresh,  # Add these
+                    lat_eye_thresh=args.lat_eye_thresh,  # Add these
+                    muscle_thresh=args.muscle_thresh,  # Add these
+                    noise_thresh=args.noise_thresh,  # Add these
+                    manual_mode=True,
+                    ica_callback=args.ica_callback
                 )
             else:
                 processor.run_ica(
@@ -878,10 +933,15 @@ def process_continuous_data(args):
                 if check_stop():
                     return processed_raws
 
-                if args.second_ica_manual:
+                if args.second_ica_manual and hasattr(args, 'ica_callback'):
                     processor.run_second_ica(
                         method=args.second_ica_method,
-                        manual_mode=True
+                        blink_thresh=args.blink_thresh,  # Add these
+                        lat_eye_thresh=args.lat_eye_thresh,  # Add these
+                        muscle_thresh=args.muscle_thresh,  # Add these
+                        noise_thresh=args.noise_thresh,  # Add these
+                        manual_mode=True,
+                        ica_callback=args.ica_callback
                     )
                 else:
                     processor.run_second_ica(
@@ -939,13 +999,12 @@ def process_continuous_data(args):
             epochs = processor.epochs
             epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
 
-
             if args.validate_teps:
                 try:
                     print("\nAnalyzing TEPs...")
-                    if check_stop(): return processed_raws
+                    if check_stop(): return []
 
-                    # Define standard TEP components exactly as in TESA
+                    # Define our standard TEP components exactly as in TESA
                     DEFAULT_TEP_COMPONENTS = {
                         'N15': {'time': (12, 18), 'polarity': 'negative', 'peak': 15},
                         'P30': {'time': (25, 35), 'polarity': 'positive', 'peak': 30},
@@ -955,26 +1014,38 @@ def process_continuous_data(args):
                         'P180': {'time': (145, 250), 'polarity': 'positive', 'peak': 180}
                     }
 
-                    # Analyze GMFA
-                    print("Analyzing GMFA...")
-                    gmfa_results = analyze_gmfa(
-                        epochs=epochs,
-                        components=DEFAULT_TEP_COMPONENTS,
-                        samples=5,  # TESA default
-                        method='largest'  # TESA default
-                    )
+                    results = {}
 
-                    # Analyze ROI (if specified channels exist)
-                    roi_channels = ['C3', 'C4']  # Example ROI - modify as needed
-                    if all(ch in epochs.ch_names for ch in roi_channels):
-                        print(f"Analyzing ROI: {roi_channels}")
-                        roi_results = analyze_roi(
+                    # Analyze GMFA if requested
+                    if args.tep_analysis_type in ['gmfa', 'both']:
+                        print("Analyzing GMFA...")
+                        gmfa_results = analyze_gmfa(
                             epochs=epochs,
-                            channels=roi_channels,
                             components=DEFAULT_TEP_COMPONENTS,
-                            samples=5,
-                            method='largest'
+                            samples=args.tep_samples,
+                            method=args.tep_method
                         )
+                        results['gmfa'] = gmfa_results
+
+                    # Analyze ROI if requested
+                    if args.tep_analysis_type in ['roi', 'both']:
+                        # Verify specified channels exist
+                        available_channels = [ch for ch in args.tep_roi_channels
+                                              if ch in epochs.ch_names]
+
+                        if available_channels:
+                            print(f"Analyzing ROI: {available_channels}")
+                            roi_results = analyze_roi(
+                                epochs=epochs,
+                                channels=available_channels,
+                                components=DEFAULT_TEP_COMPONENTS,
+                                samples=args.tep_samples,
+                                method=args.tep_method
+                            )
+                            results['roi'] = roi_results
+                        else:
+                            print(f"Warning: None of the specified ROI channels {args.tep_roi_channels} "
+                                  "found in data")
 
                     # Create visualization
                     print("Generating TEP plots...")
@@ -983,17 +1054,25 @@ def process_continuous_data(args):
                         output_dir=args.output_dir,
                         session_name=session_name,
                         components=DEFAULT_TEP_COMPONENTS,
-                        analysis_type='gmfa'
+                        analysis_type=args.tep_analysis_type
                     )
 
+                    # Generate validation summary if requested
                     if args.save_validation:
                         print("Generating validation summary...")
-                        generate_validation_summary(
-                            components=gmfa_results,
-                            output_dir=args.output_dir,
-                            session_name=session_name
-                        )
-                        print("TEP validation summary saved")
+                        # Use appropriate results based on analysis type
+                        validation_results = (results.get('gmfa', None) or
+                                              results.get('roi', None))
+
+                        if validation_results:
+                            generate_validation_summary(
+                                components=validation_results,
+                                output_dir=args.output_dir,
+                                session_name=session_name
+                            )
+                            print("TEP validation summary saved")
+                        else:
+                            print("Warning: No results available for validation summary")
 
                 except Exception as e:
                     print(f"Warning: TEP analysis failed: {str(e)}")
@@ -1005,30 +1084,30 @@ def process_continuous_data(args):
             fig = processor.plot_evoked_response(xlim=(-0.1, 0.4), title="Final Evoked Response", show=args.save_evoked)
             fig.savefig(f"{args.output_dir}/evoked_{session_name}.png")
             plt.close(fig)
+            if not args.no_pcist:
+                # PCIst analysis
+                pcist = PCIst(epochs)
+                par = {
+                    'baseline_window': (args.baseline_start, args.baseline_end),
+                    'response_window': (args.response_start, args.response_end),
+                    'k': args.k,
+                    'min_snr': args.min_snr,
+                    'max_var': args.max_var,
+                    'embed': args.embed,
+                    'n_steps': args.n_steps
+                }
+                value, details = pcist.calc_PCIst(**par, return_details=True)
+                fig = pcist.plot_analysis(details, session_name=session_name)
+                print(f"PCI: {value}")
+                subject_pcist_values.append(value)
+                fig.savefig(f"{args.output_dir}/pcist_{session_name}.png")
+                plt.close(fig)
 
-            # PCIst analysis
-            pcist = PCIst(epochs)
-            par = {
-                'baseline_window': (args.baseline_start, args.baseline_end),
-                'response_window': (args.response_start, args.response_end),
-                'k': args.k,
-                'min_snr': args.min_snr,
-                'max_var': args.max_var,
-                'embed': args.embed,
-                'n_steps': args.n_steps
-            }
-            value, details = pcist.calc_PCIst(**par, return_details=True)
-            fig = pcist.plot_analysis(details, session_name=session_name)
-            print(f"PCI: {value}")
-            subject_pcist_values.append(value)
-            fig.savefig(f"{args.output_dir}/pcist_{session_name}.png")
-            plt.close(fig)
+                pcist_objects.append(pcist)
+                pcist_details.append(details)
+                session_names.append(session_name)
 
-            pcist_objects.append(pcist)
-            pcist_details.append(details)
-            session_names.append(session_name)
-
-            processed_raws.append(processor.raw)
+                processed_raws.append(processor.raw)
 
         except Exception as e:
             print(f"Error processing session {session_name}: {str(e)}")
@@ -1040,6 +1119,11 @@ def process_continuous_data(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process EEG data.')
+    # Add this new argument
+    parser.add_argument('--processing_mode',
+                        choices=['epoched', 'continuous'],
+                        default='epoched',
+                        help='Processing mode: epoched or continuous (default: epoched)')
     parser.add_argument('--data_dir', type=str, default=str(Path.cwd() / 'data'), 
                         help='Path to the data directory (default: ./data)')
     parser.add_argument('--output_dir', type=str, default=str(Path.cwd() / 'output'), 
@@ -1047,12 +1131,16 @@ if __name__ == "__main__":
     parser.add_argument('--data_format', type=str, default='neurone',
                    choices=['neurone', 'brainvision', 'edf', 'cnt', 'eeglab', 'auto'],
                    help='Format of input data (default: neurone)')
+    parser.add_argument('--no_preproc_output', action='store_true', default=False,
+                    help='Skip saving preprocessed epochs (default: False)')
+    parser.add_argument('--no_pcist', action='store_true', default=False,
+                    help='Skip PCIst calculation and only preprocess (default: False)')
     parser.add_argument('--eeglab_montage_units', type=str, default='auto',
                    help='Units for EEGLAB channel positions (default: auto)')
     parser.add_argument('--stim_channel', type=str, default='STI 014',
                     help='Name of the stimulus channel (default: STI 014)')
-    parser.add_argument('--plot_preproc', action='store_true',
-                    help='Enable muscle artifact cleaning (default: False)')
+    parser.add_argument('--plot_preproc', action='store_true', default=False,
+                    help='Save plots between preprocessing steps (default: False)')
     parser.add_argument('--random_seed', type=int, default=42,
                         help='Random seed for reproducibility (default: 42)')
     parser.add_argument('--substitute_zero_events_with', type=int, default=10,
@@ -1079,8 +1167,8 @@ if __name__ == "__main__":
                         help='Interpolation method (TESA requires cubic)')
     parser.add_argument('--skip_second_artifact_removal', action='store_true',
                     help='Skip the second stage of TMS artifact removal')
-    parser.add_argument('--mne_filter_epochs', action='store_true',
-                    help='Use built in filter in mne (default: True)')
+    parser.add_argument('--mne_filter_epochs', action='store_true', default=False,
+                    help='Use built in filter in mne (default: False)')
     parser.add_argument('--plot_raw', action='store_true',
                     help='Plot raw data (takes time) (default: False)')
     parser.add_argument('--filter_raw', type=bool, default=False,
@@ -1097,15 +1185,23 @@ if __name__ == "__main__":
                         help='Start time for epochs (default: -0.41)')
     parser.add_argument('--epochs_tmax', type=float, default=0.41,
                         help='End time for epochs (default: 0.41)')
-    parser.add_argument('--bad_channels_threshold', type=float, default=3,
-                        help='Threshold for removing bad channels (default: 3)')
-    parser.add_argument('--bad_epochs_threshold', type=float, default=3,
-                        help='Threshold for removing bad epochs (default: 3)')
+    parser.add_argument('--bad_channels_threshold', type=float, default=2,
+                        help='Threshold (std) for removing bad channels with mne_faster (default: 2)')
+    parser.add_argument('--bad_epochs_threshold', type=float, default=2,
+                        help='Threshold (std) for removing bad epochs with mne_faster (default: 2)')
     parser.add_argument('--ica_method', type=str, default='fastica',
                         help='ICA method (default: fastica)')
-    parser.add_argument('--tms_muscle_thresh', type=float, default=3.0,
-                        help='Threshold for TMS muscle artifact (default: 3.0)')
-    parser.add_argument('--clean_muscle_artifacts', action='store_true',
+    parser.add_argument('--blink_thresh', type=float, default=2.5,
+                        help='Threshold for blink detection (default: 2.5)')
+    parser.add_argument('--lat_eye_thresh', type=float, default=2.0,
+                        help='Threshold for lateral eye movement detection (default: 2.0)')
+    parser.add_argument('--noise_thresh', type=float, default=4.0,
+                        help='Threshold for noise detection (default: 4.0)')
+    parser.add_argument('--tms_muscle_thresh', type=float, default=2.0,
+                        help='Threshold for TMS muscle artifact (default: 2.0)')
+    parser.add_argument('--muscle_thresh', type=float, default=0.6,
+                        help='Threshold for ongoing muscle contamination (default: 0.6)')
+    parser.add_argument('--parafac_muscle_artifacts', action='store_true', default=False,
                     help='Enable muscle artifact cleaning (default: False)')
     parser.add_argument('--muscle_window_start', type=float, default=0.005,
                     help='Start time for muscle artifact window (default: 0.005)')
@@ -1113,16 +1209,16 @@ if __name__ == "__main__":
                     help='End time for muscle artifact window (default: 0.030)')
     parser.add_argument('--threshold_factor', type=float, default=1.0,
                     help='Threshold factor for muscle artifact cleaning (default: 1.0)')
-    parser.add_argument('--first_ica_manual', action='store_true',
-                        help='Enable manual component selection for first ICA')
-    parser.add_argument('--second_ica_manual', action='store_true',
-                        help='Enable manual component selection for second ICA')
+    parser.add_argument('--first_ica_manual', action='store_true', default=False,
+                        help='Enable manual component selection for first ICA (default: False)')
+    parser.add_argument('--second_ica_manual', action='store_true', default=False,
+                        help='Enable manual component selection for second ICA (default: False)')
     parser.add_argument('--n_components', type=int, default=5,
                     help='Number of components for muscle artifact cleaning (default: 5)')
     parser.add_argument('--no_second_ICA', action='store_true',
                     help='Disable seconds ICA using ICA_label (default: False)')
-    parser.add_argument('--second_ica_method', type=str, default='infomax',
-                        help='Second ICA method (default: infomax)')
+    parser.add_argument('--second_ica_method', type=str, default='fastica',
+                        help='Second ICA method (default: fastica)')
     parser.add_argument('--apply_ssp', action='store_true',
                     help='Apply SSP (default: False)')
     parser.add_argument('--ssp_n_eeg', type=int, default=2,
@@ -1135,12 +1231,22 @@ if __name__ == "__main__":
                     help='Stiffness parameter for CSD transformation (default: 4)')
     parser.add_argument('--save_evoked', action='store_true',
                     help='Save evoked plot with TEPs (default: False)')
-    parser.add_argument('--validate_teps', action='store_true',
-                help='Perform TEP validation against established criteria')
+    parser.add_argument('--validate_teps', action='store_true', default=True,
+                help='Find TEPs that normally exist (default: True)')
     parser.add_argument('--save_validation', action='store_true',
                 help='Save TEP validation summary (default: False)')
-    parser.add_argument('--prominence', type=float, default=0.01,
-                    help='Minimum prominence for peak detection (default: 0.01)')
+    parser.add_argument('--tep_analysis_type', type=str, default='gmfa',
+                        choices=['gmfa', 'roi', 'both'],
+                        help='Type of TEP analysis to perform (default: gmfa)')
+    parser.add_argument('--tep_roi_channels', type=str, nargs='+',
+                        default=['C3', 'C4'],
+                        help='Channels to use for ROI analysis (default: C3 C4)')
+    parser.add_argument('--tep_method', type=str, default='largest',
+                        choices=['largest', 'centre'],
+                        help='Method for peak detection (default: largest)')
+    parser.add_argument('--tep_samples', type=int, default=5,
+                        help='Number of samples for peak detection (default: 5)')
+
     parser.add_argument('--baseline_start', type=int, default=-400,
                         help='Start time for baseline in ms (default: -400)')
     parser.add_argument('--baseline_end', type=int, default=-50,
@@ -1149,8 +1255,8 @@ if __name__ == "__main__":
                         help='Start of response window in ms (default: 0)')
     parser.add_argument('--response_end', type=int, default=299,
                         help='End of response window in ms (default: 299)')
-   # parser.add_argument('--amplitude_threshold', type=float, default=300.0,
-      #              help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
+    parser.add_argument('--amplitude_threshold', type=float, default=300.0,
+                    help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
     parser.add_argument('--k', type=float, default=1.2,
                         help='PCIst parameter k (default: 1.2)')
     parser.add_argument('--min_snr', type=float, default=1.1,
@@ -1171,7 +1277,17 @@ if __name__ == "__main__":
                         help='End of the post-TMS window in ms (default: 300)')
     parser.add_argument('--research', action='store_true',
                     help='Output summary statistics of measurements (default: False)')
+
     args = parser.parse_args()
 
-    pcists = process_subjects(args)
-    print(f"PCIst values: {pcists}")
+    # Add CLI ICA callback if manual mode is enabled
+    if args.first_ica_manual or args.second_ica_manual:
+        from tmseegpy.cli_ica_selector import get_cli_ica_callback
+        args.ica_callback = get_cli_ica_callback()
+
+    if args.processing_mode == 'epoched':
+        pcists, subject_pcist_values, pcist_objects, pcist_details, session_names = process_subjects(args)
+        print(f"PCIst values: {pcists}")
+    else:
+        processed_raws, subject_pcist_values, pcist_objects, pcist_details, session_names = process_continuous_data(args)
+        print(f"PCIst values: {subject_pcist_values}")

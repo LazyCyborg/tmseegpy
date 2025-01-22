@@ -1,0 +1,59 @@
+appId: com.tmseegpy.app
+productName: TMSeegpy GUI
+copyright: Copyright © 2024
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - "build/**/*"
+  - "node_modules/**/*"
+  - "electron/**/*"
+  - "package.json"
+  - "!**/*.map"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+
+extraResources:
+  # Include the tmseegpy package
+  - from: "../tmseegpy"
+    to: "app/tmseegpy"
+    filter: ["**/*"]
+  # Include the backend
+  - from: "../backend"
+    to: "app/backend"
+    filter: ["**/*"]
+  # If you have any Python dependencies or requirements
+  - from: "../requirements.txt"
+    to: "app/requirements.txt"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: ${productName}-${version}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
