@@ -27,6 +27,9 @@ function TmseegpyGUI() {
     const logOutputRef = useRef(null);
 
     // File and Processing State
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [processingStatus, setProcessingStatus] = useState('idle');
+    const [processingStep, setProcessingStep] = useState('');
     const [progress, setProgress] = useState(0);
     const [processingLogs, setProcessingLogs] = useState([]);
     const [error, setError] = useState(null);
@@ -36,6 +39,7 @@ function TmseegpyGUI() {
     const [resultsSummary, setResultsSummary] = useState([]);
     const [statusMessage, setStatusMessage] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
+    const [logOutput, setLogOutput] = useState('');
     const [selectedDirectory, setSelectedDirectory] = useState('');
     const [selectedFiles, setSelectedFiles] = useState([]);
     const [updateAvailable, setUpdateAvailable] = useState(false);
