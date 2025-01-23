@@ -3,27 +3,57 @@ on:
   push:
     tags:
       - 'gui-v*'
+
 jobs:
   release:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
+
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - name: Checkout repository
+        uses: actions/checkout@v3
         with:
-          node-version: '18'
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: tmseegpy-gui-react/package-lock.json
+
+      - name: Create .env file
+        run: |
+          cd tmseegpy-gui-react
+          echo "ESLINT_NO_DEV_ERRORS=true" > .env
+          echo "CI=false" >> .env
+
       - name: Install Dependencies
         run: |
           cd tmseegpy-gui-react
           npm ci
+
+      # Add this new step
+      - name: Prepare electron files
+        run: |
+          cd tmseegpy-gui-react
+          mkdir -p public
+          cp electron/main.js public/electron.js
+          cp electron/preload.js public/
+          cp -r electron build/ || mkdir -p build/electron && cp -r electron/* build/electron/
+
       - name: Build/release Electron app
         uses: samuelmeuli/action-electron-builder@v1
         env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
           ESLINT_NO_DEV_ERRORS: true
           CI: false
         with:
           github_token: ${{ secrets.GH_RELEASE_TOKEN }}
           release: ${{ startsWith(github.ref, 'refs/tags/gui-v') }}
           package_root: tmseegpy-gui-react
+          build_script_name: build
+          args: "--publish always"

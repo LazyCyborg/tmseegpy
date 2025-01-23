@@ -2,9 +2,10 @@
   "name": "tmseegpy-gui",
   "version": "0.1.8",
   "private": true,
+  "homepage": "./",
   "author": "LazyCyborg <hjarneko@gmail.com>",
   "description": "GUI for the tmseegpy Toolbox",
-  "main": "electron/main.js",
+  "main": "public/electron.js",
   "dependencies": {
     "@headlessui/react": "^2.2.0",
     "@heroicons/react": "^2.2.0",
@@ -33,15 +34,17 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "react-scripts build && npm run copy-electron",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
+    "copy-electron": "cp -r electron/* public/ && mkdir -p build/electron && cp -r electron/* build/electron/",
     "electron:dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npm run build && electron-builder",
     "electron:start": "electron .",
     "dist": "electron-builder",
     "pack": "electron-builder --dir",
-    "release": "electron-builder --publish always"
+    "release": "electron-builder --publish always",
+    "postinstall": "electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.lazycyborg.tmseegpy-gui",
@@ -49,6 +52,7 @@
     "copyright": "Copyright © 2024 LazyCyborg",
     "files": [
       "build/**/*",
+      "public/**/*",
       "electron/**/*",
       "node_modules/**/*",
       "package.json"
@@ -60,23 +64,28 @@
     "extraResources": [
       {
         "from": "../tmseegpy",
-        "to": "app/tmseegpy",
-        "filter": [
-          "**/*"
-        ]
+        "to": "tmseegpy",
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
       },
       {
         "from": "../backend",
-        "to": "app/backend",
-        "filter": [
-          "**/*"
-        ]
+        "to": "backend",
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
       }
     ],
+    "extraMetadata": {
+      "main": "build/electron/main.js"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/python-shell/**/*"
+    ],
+    "beforeBuild": ["npm run build"],
+    "afterSign": "electron-builder-notarize",
     "publish": {
       "provider": "github",
       "owner": "LazyCyborg",
-      "repo": "tmseegpy-gui",
+      "repo": "tmseegpy",
       "private": false,
       "releaseType": "release"
     },
@@ -84,9 +93,7 @@
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "icon": "assets/icon.ico",
@@ -96,23 +103,22 @@
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
+          "arch": ["x64", "arm64"]
         }
       ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.developer-tools",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "linux": {
       "target": [
         {
           "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "icon": "assets/icon.png",
