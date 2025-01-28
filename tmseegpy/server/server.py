@@ -27,6 +27,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Qt5Agg')
 import mne
+from PyQt6.QtWidgets import QApplication
 
 # Project imports
 from tmseegpy.run import process_subjects, process_continuous_data, setup_qt_plugin_path
@@ -37,7 +38,9 @@ from .server_logger import ServerLogger
 
 
 # Configure environment
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+if sys.platform == "darwin":
+    os.environ["QT_QPA_PLATFORM"] = "cocoa"
+
 
 # Constants
 ALLOWED_EXTENSIONS = {'ses', 'set', 'eeg', 'vhdr', 'edf', 'cnt', 'fif', 'vmrk', 'fdt'}
@@ -267,51 +270,40 @@ def validate_file(file):
 
 def handle_ica_selection(ica_obj, inst, component_scores=None):
     """Handle ICA component selection ensuring main thread execution"""
-    import threading
-    from multiprocessing import Process, Pipe
-    import json
-    import os
+    import queue
+    from PyQt6.QtCore import QThread, QObject, pyqtSignal
 
-    def emit_ica_status(message, status_type='info'):
-        """Helper to emit ICA status messages"""
-        try:
-            socketio.emit('ica_status', {
-                'message': message,
-                'type': status_type
-            }, namespace='/')
-            # Also send as processing output for console display
-            socketio.emit('processing_output', {
-                'output': message
-            }, namespace='/')
-        except Exception as e:
-            server_logger.error(f"Error emitting ICA status: {str(e)}")
+    class ICAHelper(QObject):
+        finished = pyqtSignal(list)
 
+        def __init__(self):
+            super().__init__()
+            self.result_queue = queue.Queue()
+
+        def run_selection(self, ica_obj, inst, component_scores):
+            try:
+                selector = CLIICASelector()
+                result = selector.select_components(ica_obj, inst, component_scores)
+                self.result_queue.put(result)
+                self.finished.emit(result)
+            except Exception as e:
+                print(f"Error in ICA selection: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                self.result_queue.put([])
+                self.finished.emit([])
+
+    # Create helper in main thread
+    helper = ICAHelper()
+
+    # Run selection in main thread
+    helper.run_selection(ica_obj, inst, component_scores)
+
+    # Get results
     try:
-        emit_ica_status("Starting ICA component selection...")
-
-        # Set up Qt for GUI
-        if threading.current_thread() is not threading.main_thread():
-            os.environ['QT_QPA_PLATFORM'] = 'offscreen'  # Use offscreen rendering for non-main thread
-
-        # Create and configure the selector
-        selector = CLIICASelector()
-
-        # Run the selection
-        selected_components = selector.select_components(ica_obj, inst, component_scores)
-
-        if selected_components:
-            emit_ica_status(f"Selected components: {selected_components}")
-        else:
-            emit_ica_status("No components were selected", 'warning')
-
-        return selected_components
-
-    except Exception as e:
-        error_msg = f"Error in ICA selection handler: {str(e)}"
-        emit_ica_status(error_msg, 'error')
-        server_logger.error(error_msg)
-        import traceback
-        server_logger.error(traceback.format_exc())
+        return helper.result_queue.get(timeout=1.0)
+    except queue.Empty:
+        print("No components were selected (timeout)")
         return []
 
 
@@ -400,9 +392,18 @@ def init_app(user_data_dir):
 
     # Initialize QApplication in the main thread
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
     if QApplication.instance() is None:
         qt_app = QApplication(sys.argv)
+        # Ensure Qt is properly configured for the platform
+        if sys.platform == "darwin":  # macOS
+            qt_app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
+            import os
+            os.environ["QT_MAC_WANTS_LAYER"] = "1"
         print("Created QApplication instance in main thread")
+
+    import matplotlib
+    matplotlib.use('Qt5Agg')
 
     app = Flask(__name__)
     CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -427,7 +428,10 @@ def init_app(user_data_dir):
                         cors_allowed_origins="*",
                         async_mode='gevent',
                         logger=True,  # Enable socketio logging
-                        engineio_logger=True)
+                        engineio_logger=True,
+                        ping_timeout=60,
+                        ping_interval=25
+                        )
     server_logger = ServerLogger(socketio)
     output_capturer = OutputCapturer(socketio)  # Create the output_capturer instance
     current_progress = initialize_state()
@@ -601,7 +605,6 @@ def start_processing():
         # Fix the data directory path - remove any duplicate TMSEEG
         data_dir = Path(params.get('dataDir', ''))
         if 'TMSEEG/TMSEEG' in str(data_dir):
-            # Remove the duplicate TMSEEG
             data_dir = Path(str(data_dir).replace('TMSEEG/TMSEEG', 'TMSEEG'))
             params['dataDir'] = str(data_dir)
 
@@ -611,11 +614,21 @@ def start_processing():
         if not data_dir.exists():
             return jsonify({'error': f'Data directory does not exist: {data_dir}'}), 400
 
+        # Ensure QApplication exists in main thread
+        from PyQt6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            print("Creating QApplication instance before starting processing")
+            QApplication([])
+
+        # Import here to ensure Qt is initialized first
+        from tmseegpy.react_ica_selector import get_cli_ica_callback
+
         # Add ICA callback to params
         params['ica_callback'] = get_cli_ica_callback()
 
         # Start processing in a separate thread
-        threading.Thread(target=process_task, args=(params,), daemon=True).start()
+        processing_thread = threading.Thread(target=process_task, args=(params,), daemon=True)
+        processing_thread.start()
 
         return jsonify({
             'message': 'Processing started',
@@ -892,25 +905,16 @@ def process_task(params):
     except Exception as e:  # Improved error handling
 
         error_details = traceback.format_exc()
-
         server_logger.error(f"Error in processing task: {str(e)}\n{error_details}")
-
         current_progress.update({  # Access the global instance of current_progress
 
             'status': 'error',
-
             'error': str(e),
-
             'logs': current_progress['logs'] + [
-
                 f"Error occurred: {str(e)}",
-
                 "Full traceback:",
-
                 error_details
-
             ]
-
         })
 
         socketio.emit('status_update', current_progress)
@@ -930,6 +934,8 @@ def run_server(port=5001, debug=False):
     import multiprocessing
     import signal
     global app, socketio, server_logger, output_capturer, current_progress, UPLOAD_FOLDER, TMSEEG_DATA_DIR, api_bp
+    if QApplication.instance() is None:
+        QApplication(sys.argv)
 
 
 
@@ -1023,6 +1029,7 @@ def run_server(port=5001, debug=False):
 # Register shutdown handler
 import atexit
 
+@atexit.register
 def shutdown_server():
     if socketio is not None:
         server_logger.info("Shutting down server...")
@@ -1030,7 +1037,6 @@ def shutdown_server():
     sys.exit(0)
 
 
-atexit.register(shutdown_server)
 
 
 

@@ -46,7 +46,6 @@ function TmseegpyGUI() {
     const [updateProgress, setUpdateProgress] = useState(0);
     const [updateError, setUpdateError] = useState(null);
     const [currentVersion, setCurrentVersion] = useState(null);
-    const [logs, setLogs] = useState([]);
     const [isConnected, setIsConnected] = useState(false);
     const consoleRef = useRef(null);
     const [isReady, setIsReady] = useState(false);
@@ -199,59 +198,107 @@ useEffect(() => {
 }, []);
 
 // Combine all WebSocket related effects into one
-    useEffect(() => {
-        let observer;
+// In your useEffect:
+useEffect(() => {
+  let observer;
 
-        if (serverReady && consoleRef.current) {
-            connectWebSocket();
-            setIsConnected(socket.connected);
+  if (serverReady && consoleRef.current) {
+    // 1) Connect the socket
+    connectWebSocket();
+    setIsConnected(socket.connected);
 
-            const addLog = (message, type = 'info') => { // Default type to 'info'
-                setLogs(prev => [...prev, { message, type, timestamp: new Date() }]);
-            };
-
-            socket.on('connect', () => addLog('Connected to server', 'status'));
-            socket.on('disconnect', () => addLog('Disconnected from server', 'status'));
-            socket.on('status_update', (data) => {
-                if (data.status) addLog(`Status: ${data.status}`, 'status');
-                if (data.error) addLog(`Error: ${data.error}`, 'error');
-                if (data.logs && Array.isArray(data.logs)) {
-                    data.logs.forEach(log => addLog(log, 'status'));
-                }
-            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
-            socket.on('processing_output', (data) => {
-                const message = typeof data === 'string' ? data : data.output || JSON.stringify(data);
-                addLog(message); // Use the default 'info' type
-            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
-            socket.on('processing_error', (data) => {
-                addLog(data?.error || 'An unknown error occurred', 'error');
-            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
-             socket.on('processing_complete', (data) => {
-                addLog('Processing complete!', 'status');
-            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
-            socket.on('ica_status', (data) => {
-                addLog(data?.message || JSON.stringify(data), 'ica');
-            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
-
-            observer = new MutationObserver(() => {
-                consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-            });
-            observer.observe(consoleRef.current, { childList: true });
+    // 2) Single helper to add logs with a Date
+    const addLog = (message, type = 'info', time = new Date()) => {
+      setProcessingLogs(prev => [
+        ...prev,
+        {
+          message: String(message),   // ensure it's a string
+          type,
+          timestamp: time            // always a Date object
         }
+      ]);
+    };
 
-        return () => {
-            socket.off('connect');
-            socket.off('disconnect');
-            socket.off('status_update');
-            socket.off('processing_output');
-            socket.off('processing_error');
-            socket.off('processing_complete'); // added
-            socket.off('ica_status');
-            if (observer) observer.disconnect();
-            disconnectWebSocket();
-        };
+    // 3) Handle connect/disconnect
+    socket.on('connect', () => {
+      addLog('Connected to server', 'status');
+      setIsConnected(true);
+    });
+    socket.on('disconnect', () => {
+      addLog('Disconnected from server', 'status');
+      setIsConnected(false);
+    });
 
-    }, [serverReady, consoleRef.current]);
+    // 4) status_update includes data.progress, data.logs, etc.
+    socket.on('status_update', (data) => {
+      setProgress(data.progress || 0);       // or handleStatusUpdate(data)
+      setProcessingStatus(data.status || '');
+
+      // log a "Status: ... "
+      if (data.status) addLog(`Status: ${data.status}`, 'status');
+
+      // log a "Error: ... "
+      if (data.error) addLog(`Error: ${data.error}`, 'error');
+
+      // if we get an array of logs from server, add each
+      if (data.logs && Array.isArray(data.logs)) {
+        data.logs.forEach(serverLog => {
+          // Some logs might be strings, or objects. Convert everything to a string.
+          if (typeof serverLog === 'string') {
+            addLog(serverLog, 'status');
+          } else {
+            // If it's an object, you might decide how to handle it
+            // e.g. just JSON-stringify:
+            addLog(JSON.stringify(serverLog), 'status');
+          }
+        });
+      }
+    });
+
+    // 5) processing_output is usually a single line of text
+    socket.on('processing_output', (data) => {
+      // data might be a string or object with .output
+      const message = (typeof data === 'string')
+        ? data
+        : data.output || JSON.stringify(data);
+
+      addLog(message, 'info');
+    });
+
+    socket.on('processing_error', (data) => {
+      addLog(data?.error || 'An unknown error occurred', 'error');
+    });
+
+    socket.on('processing_complete', (data) => {
+      addLog('Processing complete!', 'status');
+    });
+
+    socket.on('ica_status', (data) => {
+      addLog(data?.message || JSON.stringify(data), 'ica');
+    });
+
+    // auto-scroll each time new logs appear
+    observer = new MutationObserver(() => {
+      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+    });
+    observer.observe(consoleRef.current, { childList: true });
+  }
+
+  // Cleanup
+  return () => {
+    socket.off('connect');
+    socket.off('disconnect');
+    socket.off('status_update');
+    socket.off('processing_output');
+    socket.off('processing_error');
+    socket.off('processing_complete');
+    socket.off('ica_status');
+
+    if (observer) observer.disconnect();
+    disconnectWebSocket();
+  };
+}, [serverReady, consoleRef.current]);
+
 
     const handleServerReady = () => {
         setServerReady(true);
@@ -378,8 +425,8 @@ const handleStartProcessing = async () => {
         setResultsSummary([]);
 
         // Verify server connection
-        if (!socket.connected) {
-            throw new Error('Not connected to TMSeegpy server. Please ensure TMSeegpy is running.');
+        if (!isConnected) {
+          throw new Error('Not connected to TMSeegpy server...');
         }
 
         // Prepare options
@@ -1944,14 +1991,28 @@ const renderConsole = () => (
                                                 className="console-output"
                                                 id="console-output"
                                             >
-                                                {processingLogs.map((log, index) => (
-                                                    <div
-                                                        key={index}
-                                                        className="console-line"
-                                                    >
-                                                        {log}
+                                                {processingLogs.map((log, i) => {
+                                                  let timeString;
+                                                  // If log.timestamp is a Date, use it
+                                                  if (log.timestamp instanceof Date) {
+                                                    timeString = log.timestamp.toLocaleTimeString();
+                                                  }
+                                                  // If it's a string or number, parse it
+                                                  else if (typeof log.timestamp === 'string' || typeof log.timestamp === 'number') {
+                                                    timeString = new Date(log.timestamp).toLocaleTimeString();
+                                                  }
+                                                  // If it's missing, just show "??:??" or use the current time
+                                                  else {
+                                                    timeString = new Date().toLocaleTimeString();
+                                                  }
+
+                                                  return (
+                                                    <div key={i} className={`console-line ${log.type}`}>
+                                                      [{timeString}] {log.message}
                                                     </div>
-                                                ))}
+                                                  );
+                                                })}
+
                                             </div>
                                         </div>
                                         <div className="absolute top-2 right-2 space-x-2">
@@ -1959,7 +2020,7 @@ const renderConsole = () => (
                                                 onClick={handleClearLog}
                                                 className="px-2 py-1 text-xs text-gray-200 hover:text-white bg-gray-700 hover:bg-gray-600 rounded"
                                             >
-                                                Clear Log
+                                                Clear Log (refresh)
                                             </button>
                                         </div>
                                     </div>
