@@ -44,7 +44,7 @@ from tmseegpy.preproc import TMSEEGPreprocessor  # absolute import
 from tmseegpy.dataloader import TMSEEGLoader
 from tmseegpy.cli_ica_selector import get_cli_ica_callback
 from tmseegpy.pcist import PCIst
-from tmseegpy.preproc_vis import plot_raw_segments, plot_epochs_grid
+from tmseegpy.preproc_vis import save_raw_data, save_epochs_data
 from tmseegpy.validate_tep import (
     analyze_gmfa,
     analyze_roi,
@@ -293,8 +293,7 @@ def generate_research_stats(pcist_values, pcist_objects, details_list, session_n
     return output_file
 
 
-
-def process_subjects(args):
+def process_subjects(args, status_callback=None):
     import builtins
     setattr(builtins, 'STOP_PROCESSING', False)
     def check_stop():
@@ -302,6 +301,11 @@ def process_subjects(args):
             print("\nProcessing stopped by user")
             return True
         return False
+
+    def combined_callback(msg, progress=None):
+        print(msg)  # This will go through the output capturer
+        if status_callback:
+            status_callback(msg, progress)
 
     data_dir = Path(args.data_dir)
 
@@ -349,8 +353,12 @@ def process_subjects(args):
     for n, raw in enumerate(raw_list):
         if check_stop():
             return []
+
         
         session_name = session_info[n]['name']
+
+        if combined_callback:
+            combined_callback(f"Starting epoched processing of Session {n}: {session_name}...", progress=0)
         print(f"\nProcessing Session {n}: {session_name}")
 
         if check_stop(): return []
@@ -393,6 +401,9 @@ def process_subjects(args):
                     raise ValueError("No events found in annotations")
                     
                 print(f"Found {len(events)} events from annotations")
+
+                if combined_callback:
+                    combined_callback(f"found {len(events)} events from annotations", progress=5)
                 
             except Exception as e:
                 # If both methods fail, try common stim channels
@@ -416,9 +427,6 @@ def process_subjects(args):
                     if not found:
                         raise ValueError(f"Could not find events in data. Available channels: {raw.ch_names}")
 
-        print(f"Found {len(events)} events")
-
-        print(f"Found {len(events)} events")
         annotations = mne.annotations_from_events(
             events=events, 
             sfreq=raw.info['sfreq'],
@@ -434,21 +442,25 @@ def process_subjects(args):
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
         if args.plot_raw:
-           plot_raw_segments(raw, args.output_dir, step_name='raw', session_name=session_name)
+           save_raw_data(raw, args.output_dir, step_name='raw', session_name=session_name)
 
         # Preprocessing
         processor = TMSEEGPreprocessor(raw, initial_sfreq=args.initial_sfreq, final_sfreq=args.final_sfreq)
         print("\nRemoving TMS artifact...")
+        if combined_callback:
+            combined_callback("Removing TMS artifact", progress=10)
         if check_stop(): return []
         processor.remove_tms_artifact(cut_times_tms=(-2, 10))  # Step 8
 
         print("\nInterpolating TMS artifact...")
+        if combined_callback:
+            combined_callback("Interpolating artifact", progress=20)
         processor.interpolate_tms_artifact(method='cubic', 
                                         interp_window=1.0,  # 1ms window for initial interpolation
                                         cut_times_tms=(-2, 10))  # Step 9
 
-        #if args.plot_preproc:
-           # plot_raw_segments(raw, args.output_dir, step_name='raw_i')
+        if args.save_preproc:
+            save_raw_data(raw, args.output_dir, step_name='raw_i')
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
         if args.filter_raw:
             print("\nFiltering raw eeg data...")
@@ -458,31 +470,41 @@ def process_subjects(args):
         #print("\nPerforming initial downsampling...")
        # processor.initial_downsample()
 
-        #if args.plot_preproc:
-          #  plot_raw_segments(raw, args.output_dir, step_name='raw_f',)
+        #if args.save_preproc:
+          #  save_raw_data(raw, args.output_dir, step_name='raw_f',)
 
         print("\nCreating epochs...")
         processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None, amplitude_threshold=args.amplitude_threshold)
         epochs = processor.epochs
 
         print("\nRemoving bad channels...")
+        if combined_callback:
+            combined_callback("Removing bad channels", progress=30)
         processor.remove_bad_channels(threshold=args.bad_channels_threshold)
 
         print("\nRemoving bad epochs...")
+        if combined_callback:
+            combined_callback("Removing bad epochs", progress=40)
         processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
-        if args.plot_preproc:
-            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='epochs')
+        if args.save_preproc:
+            save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='epochs')
 
         print("\nSetting average reference...")
         processor.set_average_reference()
 
         print("\nRunning first ICA...")
+        if combined_callback:
+            combined_callback("Running first ICA", progress=50)
         if check_stop(): return []
 
         #plot_components = False
 
+        if args.first_ica_manual:
+            from tmseegpy.cli_ica_selector import get_cli_ica_callback
+            first_ica_callback = get_cli_ica_callback()
+
         # Modified first ICA call
-        if args.first_ica_manual and hasattr(args, 'ica_callback'):
+        if args.first_ica_manual:
             processor.run_ica(
                 output_dir=args.output_dir,
                 session_name=session_name,
@@ -493,7 +515,7 @@ def process_subjects(args):
                 muscle_thresh=args.muscle_thresh,  # Add these
                 noise_thresh=args.noise_thresh,  # Add these
                 manual_mode=True,
-                ica_callback=args.ica_callback
+                ica_callback=first_ica_callback
             )
         else:
             processor.run_ica(
@@ -504,11 +526,13 @@ def process_subjects(args):
                 manual_mode=False
             )
 
-        if args.plot_preproc:
-            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='ica1')
+        if args.save_preproc:
+            save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='ica1')
 
         if args.parafac_muscle_artifacts:
             print("\nCleaning muscle artifacts with PARAFAC decomposition...")
+            if combined_callback:
+                combined_callback("Cleaning muscle artifacts with PARAFAC decomposition...", progress=55)
             if check_stop(): return []
             processor.clean_muscle_artifacts(
                 muscle_window=(args.muscle_window_start, args.muscle_window_end),
@@ -519,16 +543,22 @@ def process_subjects(args):
 
         if not args.skip_second_artifact_removal:
             print("\nExtending TMS artifact removal window...")
+            if combined_callback:
+                combined_callback("Extending TMS artifact removal window...", progress=60)
             if check_stop(): return []
             processor.remove_tms_artifact(cut_times_tms=(-2, 15))
 
             print("\nInterpolating extended TMS artifact...")
+            if combined_callback:
+                combined_callback("Interpolating extended TMS artifact...", progress=65)
             processor.interpolate_tms_artifact(method='cubic',
                                                interp_window=5.0,
                                                cut_times_tms=(-2, 15))
 
         if not args.filter_raw:
             print("\nFiltering epoched data...")
+            if combined_callback:
+                combined_callback("Filtering epoched data...", progress=75)
             if check_stop(): return []
             if args.mne_filter_epochs:
                 processor.mne_filter_epochs(
@@ -545,13 +575,16 @@ def process_subjects(args):
                     notch_width=args.notch_width,
                 )
 
-            if args.plot_preproc:
-                plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='filtered')
+            if args.save_preproc:
+                save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='filtered')
 
 
         print("\nRunning second ICA...")
+        if combined_callback:
+            combined_callback("Running second ICA...", progress=85)
         if check_stop(): return []
-        if args.second_ica_manual and hasattr(args, 'ica_callback'):
+        if args.second_ica_manual:
+            second_ica_callback = get_cli_ica_callback()
             processor.run_second_ica(
                 method=args.second_ica_method,
                 blink_thresh=args.blink_thresh,  # Add these
@@ -559,7 +592,7 @@ def process_subjects(args):
                 muscle_thresh=args.muscle_thresh,  # Add these
                 noise_thresh=args.noise_thresh,  # Add these
                 manual_mode=True,
-                ica_callback=args.ica_callback
+                ica_callback=second_ica_callback
             )
         else:
             processor.run_second_ica(
@@ -573,17 +606,19 @@ def process_subjects(args):
 
         print("\nApplying baseline correction...")
         processor.apply_baseline_correction(baseline=(baseline_start_sec, baseline_end_sec))
-        if args.plot_preproc:
-            plot_epochs_grid(processor.epochs, args.output_dir, session_name=session_name, step_name='ica2')
+        if args.save_preproc:
+            save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='ica2')
         if args.apply_csd:
             print("\nApplying CSD transformation...")
             processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
 
         print("\nPerforming final downsampling...")
+        if combined_callback:
+            combined_callback("Performing final downsampling...", progress=95)
         processor.final_downsample()
 
-        if args.plot_preproc:
-            plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='final')
+        if args.save_preproc:
+            save_epochs_data(processor.epochs, args.output_dir, session_name, step_name='final')
 
         if not args.no_preproc_output:
 
@@ -593,6 +628,8 @@ def process_subjects(args):
         if args.validate_teps:
             try:
                 print("\nAnalyzing TEPs...")
+                if combined_callback:
+                    combined_callback("Performing final downsampling...", progress=99)
                 if check_stop(): return []
 
                 # Define our standard TEP components exactly as in TESA
@@ -719,11 +756,12 @@ def process_subjects(args):
             args.output_dir
         )
         print(f"Research statistics saved to: {output_file}")
- 
+    if combined_callback:
+        combined_callback("Processing complete! (wow it works)", progress=100)
     return subject_pcist_values
 
 
-def process_continuous_data(args):
+def process_continuous_data(args, status_callback=None):
     """
     Process TMS-EEG data maintaining continuous signal.
     Focuses on raw data processing with visualization.
@@ -740,7 +778,7 @@ def process_continuous_data(args):
     """
     import builtins
     setattr(builtins, 'STOP_PROCESSING', False)
-    from .preproc_vis import plot_raw_segments, create_step_directory
+    from .preproc_vis import save_raw_data, create_step_directory
 
     processed_raws = []
     subject_pcist_values = []  # Initialize as an empty list
@@ -797,7 +835,7 @@ def process_continuous_data(args):
             # Plot initial raw data
             if args.plot_raw:
                 print("\nPlotting initial raw data...")
-                plot_raw_segments(raw, args.output_dir, session_name, "01_initial")
+                save_raw_data(raw, args.output_dir, session_name, "01_initial")
 
             # Get events (needed for TMS artifact removal)
             try:
@@ -870,8 +908,8 @@ def process_continuous_data(args):
                 return processed_raws
 
             processor.remove_tms_artifact(cut_times_tms=(-2, 10))
-            if args.plot_preproc:
-                plot_raw_segments(processor.raw, args.output_dir, session_name, "02_post_tms_removal")
+            if args.save_preproc:
+                save_raw_data(processor.raw, args.output_dir, session_name, "02_post_tms_removal")
 
             print("\nInterpolating TMS artifact...")
             processor.interpolate_tms_artifact(
@@ -879,13 +917,13 @@ def process_continuous_data(args):
                 interp_window=1.0,
                 cut_times_tms=(-2, 10)
             )
-            if args.plot_preproc:
-                plot_raw_segments(processor.raw, args.output_dir, session_name, "03_post_interpolation")
+            if args.save_preproc:
+                save_raw_data(processor.raw, args.output_dir, session_name, "03_post_interpolation")
 
            # print("\nPerforming initial downsampling...")
             #processor.initial_downsample()
-           # if args.plot_preproc:
-            #    plot_raw_segments(processor.raw, args.output_dir, session_name, "04_post_downsample")
+           # if args.save_preproc:
+            #    save_raw_data(processor.raw, args.output_dir, session_name, "04_post_downsample")
 
             print("\nRunning ICA...")
             if check_stop():
@@ -914,8 +952,8 @@ def process_continuous_data(args):
                     manual_mode=False
                 )
 
-            if args.plot_preproc:
-                plot_raw_segments(processor.raw, args.output_dir, session_name, "05_post_ica")
+            if args.save_preproc:
+                save_raw_data(processor.raw, args.output_dir, session_name, "05_post_ica")
 
 
             print("\nFiltering raw data...")
@@ -949,15 +987,15 @@ def process_continuous_data(args):
                         manual_mode=False
                     )
 
-                if args.plot_preproc:
-                    plot_raw_segments(processor.raw, args.output_dir, session_name, "06_post_filter")
+                if args.save_preproc:
+                    save_raw_data(processor.raw, args.output_dir, session_name, "06_post_filter")
 
             # Final resampling if needed
             if processor.raw.info['sfreq'] > args.final_sfreq:
                 print("\nPerforming final resampling...")
                 processor.raw.resample(args.final_sfreq)
-                if args.plot_preproc:
-                    plot_raw_segments(processor.raw, args.output_dir, session_name, "07_final")
+                if args.save_preproc:
+                    save_raw_data(processor.raw, args.output_dir, session_name, "07_final")
 
             # Save processed raw data
             output_path = Path(args.output_dir) / f"{session_name}_processed_continuous_raw.fif"
@@ -983,8 +1021,8 @@ def process_continuous_data(args):
             print("\nRemoving bad epochs...")
             processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
 
-            if args.plot_preproc:
-                plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='post_continuous')
+            if args.save_preproc:
+                save_epochs_data(processor.epochs, args.output_dir, session_name, step_name='post_continuous')
 
             if args.apply_csd:
                 print("\nApplying CSD transformation...")
@@ -993,8 +1031,8 @@ def process_continuous_data(args):
             print("\nPerforming final downsampling...")
             processor.final_downsample()
 
-            if args.plot_preproc:
-                plot_epochs_grid(processor.epochs, args.output_dir, session_name, step_name='final')
+            if args.save_preproc:
+                save_epochs_data(processor.epochs, args.output_dir, session_name, step_name='final')
 
             epochs = processor.epochs
             epochs.save(Path(args.output_dir) / f"{session_name}_preproc-epo.fif", verbose=True, overwrite=True)
@@ -1139,7 +1177,7 @@ if __name__ == "__main__":
                    help='Units for EEGLAB channel positions (default: auto)')
     parser.add_argument('--stim_channel', type=str, default='STI 014',
                     help='Name of the stimulus channel (default: STI 014)')
-    parser.add_argument('--plot_preproc', action='store_true', default=False,
+    parser.add_argument('--save_preproc', action='store_true', default=False,
                     help='Save plots between preprocessing steps (default: False)')
     parser.add_argument('--random_seed', type=int, default=42,
                         help='Random seed for reproducibility (default: 42)')
@@ -1280,14 +1318,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Add CLI ICA callback if manual mode is enabled
-    if args.first_ica_manual or args.second_ica_manual:
-        from tmseegpy.cli_ica_selector import get_cli_ica_callback
-        args.ica_callback = get_cli_ica_callback()
-
     if args.processing_mode == 'epoched':
         pcists, subject_pcist_values, pcist_objects, pcist_details, session_names = process_subjects(args)
         print(f"PCIst values: {pcists}")
     else:
-        processed_raws, subject_pcist_values, pcist_objects, pcist_details, session_names = process_continuous_data(args)
+        processed_raws, subject_pcist_values, pcist_objects, pcist_details, session_names = process_continuous_data(
+            args)
         print(f"PCIst values: {subject_pcist_values}")

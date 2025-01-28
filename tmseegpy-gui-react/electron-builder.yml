@@ -1,59 +1,92 @@
-appId: com.tmseegpy.app
+appId: com.lazycyborg.tmseegpy-gui
 productName: TMSeegpy GUI
-copyright: Copyright © 2024
+copyright: Copyright © 2024 LazyCyborg
 
 directories:
-  buildResources: build
-  output: dist
+  buildResources: assets
+  output: release
 
 files:
   - "build/**/*"
-  - "node_modules/**/*"
-  - "electron/**/*"
-  - "package.json"
+  - "public/**/*"
   - "!**/*.map"
   - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "package.json"
 
-extraResources:
-  # Include the tmseegpy package
-  - from: "../tmseegpy"
-    to: "app/tmseegpy"
-    filter: ["**/*"]
-  # Include the backend
-  - from: "../backend"
-    to: "app/backend"
-    filter: ["**/*"]
-  # If you have any Python dependencies or requirements
-  - from: "../requirements.txt"
-    to: "app/requirements.txt"
+extraMetadata:
+  main: build/electron.js
+
+asar: true
+
+publish:
+  provider: github
+  owner: LazyCyborg
+  repo: tmseegpy
+  private: false
+  releaseType: release
+  publishAutoUpdate: true
 
 win:
   target:
     - target: nsis
       arch:
         - x64
+  icon: assets/icon.ico
   artifactName: ${productName}-Setup-${version}.${ext}
+  signAndEditExecutable: true
+  signDlls: true
 
 mac:
   target:
     - target: dmg
-      arch:
-        - x64
-        - arm64
-  artifactName: ${productName}-${version}.${ext}
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  icon: assets/icon.icns
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
 
 linux:
   target:
     - target: AppImage
       arch:
         - x64
+  icon: assets/icon.png
+  category: Science
   artifactName: ${productName}-${version}.${ext}
+  executableName: tmseegpy-gui
+  desktop:
+    Name: TMSeegpy GUI
+    Comment: TMSeegpy GUI Application
+    Categories: Science;Development
+    MimeType: application/x-tmseegpy
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
+  shortcutName: TMSeegpy GUI
+  uninstallDisplayName: TMSeegpy GUI
+  artifactName: ${productName}-Setup-${version}.${ext}
+  deleteAppDataOnUninstall: false
+  menuCategory: true
+  displayLanguageSelector: true
+  include: build/installer.nsh
+
+forceCodeSigning: false
+compression: maximum
+removePackageScripts: true
+electronVersion: 29.4.6
+
+buildDependenciesFromSource: true
+nodeGypRebuild: false
+npmRebuild: true
+
+afterSign: "./build-scripts/notarize.js"

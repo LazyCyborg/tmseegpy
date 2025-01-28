@@ -42,21 +42,25 @@ To use the GUI version:
 Download the latest GUI release for your platform from:
 https://github.com/LazyCyborg/tmseegpy/releases (look for GUI releases tagged with `gui-v*`)
 
-### Or Build from Source
-```bash
-# Navigate to the GUI directory
-cd tmseegpy-gui-react
+#### Installation
 
-# Install dependencies
-npm install
+1. Install the TMSeegpy package:
+   - Copy the `tmseegpy` directory to your preferred location
+   - Add this location to your system's PATH
 
-# Run in development mode
-npm run electron:dev
+2. Install the GUI:
+   - Copy the TMSeegpy GUI application to your Applications folder (Mac) or Program Files (Windows)
 
-# Build the application
-npm run electron:build
+#### Usage
 
-```
+1. Start the TMSeegpy server:
+   ```bash
+   tmseegpy server
+   ```
+
+2. Launch the TMSeegpy GUI application.
+
+The GUI will automatically connect to the running server. If the connection fails, ensure the server is running and retry the connection using the GUI's retry button.
 
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
@@ -72,19 +76,19 @@ cd tmseegpy
 ```
 
 ```bash
-python run.py --data_dir ./TMSEEG
+python run.py --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --first_ica_manual --second_ica_manual
 ```
 
-To enable muscle artifact cleaning and apply CSD transformation:
+To enable PARAFAC muscle artifact removal :
 
 ```bash
-python run.py --data_dir ./TMSEEG --clean_muscle_artifacts --apply_csd
+python run.py --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --parafac_muscle_artifacts
 ```
 
-To enable plotting during preprocessing for quality checks:
+To enable plotting of eeg data during preprocessing for quality checks (plots will be saved in a steps directory):
 
 ```bash
-python run.py --data_dir ./TMSEEG --plot_preproc
+python run.py --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --plot_preproc
 ```
 
 ## Data Preparation

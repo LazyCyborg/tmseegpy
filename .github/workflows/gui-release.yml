@@ -1,59 +1,111 @@
-name: GUI Release
+name: GUI Test Build
 on:
+  # Allow manual trigger
+  workflow_dispatch:
+  # Also trigger on push to main branch
   push:
-    tags:
-      - 'gui-v*'
+    branches:
+      - main
+      - master
+    paths:
+      - 'tmseegpy-gui-react/**'
+      - 'backend/**'
 
 jobs:
-  release:
+  test-build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false  # Continue with other OS builds even if one fails
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest]  # Start with just Windows for testing
+        include:
+          - os: windows-latest
+            python-platform: windows
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: 'recursive'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: tmseegpy-gui-react/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Create Python distribution
+        run: |
+          cd tmseegpy-gui-react
+          mkdir -p python-embedded/${{ matrix.python-platform }}
+          python -m PyInstaller --distpath python-embedded/${{ matrix.python-platform }} --workpath build/python --clean --noconfirm --hidden-import=numpy --hidden-import=scipy --hidden-import=mne --hidden-import=tensorly ../backend/server.py
+
+      # Create minimal electron files for testing
+      - name: Create test electron files
+        run: |
+          cd tmseegpy-gui-react
+          mkdir -p electron
+          echo "const { app, BrowserWindow } = require('electron'); function createWindow() { const win = new BrowserWindow({ width: 800, height: 600 }); win.loadFile('index.html'); } app.whenReady().then(createWindow);" > electron/main.js
+          echo "window.electron = { selectDirectory: () => {} };" > electron/preload.js
 
       - name: Create .env file
         run: |
           cd tmseegpy-gui-react
           echo "ESLINT_NO_DEV_ERRORS=true" > .env
           echo "CI=false" >> .env
+          echo "PYTHON_PLATFORM=${{ matrix.python-platform }}" >> .env
+
+      - name: Setup build scripts
+        run: |
+          cd tmseegpy-gui-react
+          mkdir -p build-scripts
+          echo "const preparePythonImpl = async () => { console.log('Mock prepare-python implementation'); }; exports.default = preparePythonImpl;" > build-scripts/prepare-python.js
 
       - name: Install Dependencies
         run: |
           cd tmseegpy-gui-react
           npm ci
 
-      # Add this new step
-      - name: Prepare electron files
+      - name: Build React app
         run: |
           cd tmseegpy-gui-react
-          mkdir -p public
-          cp electron/main.js public/electron.js
-          cp electron/preload.js public/
-          cp -r electron build/ || mkdir -p build/electron && cp -r electron/* build/electron/
+          npm run build
 
-      - name: Build/release Electron app
-        uses: samuelmeuli/action-electron-builder@v1
+      - name: Copy electron files to build
+        run: |
+          cd tmseegpy-gui-react
+          mkdir -p build/electron
+          cp electron/main.js build/electron/
+          cp electron/preload.js build/electron/
+
+      - name: Build Electron app
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ESLINT_NO_DEV_ERRORS: true
           CI: false
+        run: |
+          cd tmseegpy-gui-react
+          npm run build:electron:win
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v3
         with:
-          github_token: ${{ secrets.GH_RELEASE_TOKEN }}
-          release: ${{ startsWith(github.ref, 'refs/tags/gui-v') }}
-          package_root: tmseegpy-gui-react
-          build_script_name: build
-          args: "--publish always"
+          name: ${{ matrix.os }}-test-build
+          path: |
+            tmseegpy-gui-react/release/*.exe
+            tmseegpy-gui-react/release/*.zip
+          if-no-files-found: warn

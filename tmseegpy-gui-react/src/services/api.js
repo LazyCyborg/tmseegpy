@@ -1,4 +1,3 @@
-// api.js
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:5001';
@@ -15,13 +14,19 @@ axiosInstance.interceptors.response.use(
         return response;
     },
     (error) => {
-        console.error('API Error:', {
-            url: error.config?.url,
-            method: error.config?.method,
-            status: error.response?.status,
-            data: error.response?.data,
-            message: error.message
-        });
+        // Special handling for connection refused (server not running)
+        if (error.code === 'ECONNREFUSED') {
+            console.error('Server connection refused - TMSeegpy server might not be running');
+            error.message = 'TMSeegpy server is not running';
+        } else {
+            console.error('API Error:', {
+                url: error.config?.url,
+                method: error.config?.method,
+                status: error.response?.status,
+                data: error.response?.data,
+                message: error.message
+            });
+        }
         return Promise.reject(error);
     }
 );
@@ -39,6 +44,17 @@ axiosInstance.interceptors.request.use(
 );
 
 export const api = {
+    // Server check endpoint
+    test: async () => {
+        try {
+            const response = await axiosInstance.get('/api/test');
+            return response;
+        } catch (error) {
+            console.error('Server test error:', error);
+            throw error;
+        }
+    },
+
     upload: async (formData) => {
         try {
             const response = await axiosInstance.post('/api/upload', formData, {
@@ -109,3 +125,6 @@ export const api = {
         }
     }
 };
+
+// Expose both the api object and the axios instance
+export { axiosInstance };

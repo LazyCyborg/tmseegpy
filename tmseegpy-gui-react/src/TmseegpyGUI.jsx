@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Tab } from '@headlessui/react';
 import { api } from './services/api';
 import './styles/Console.css';
-import { socket } from './services/websocket';
+import { socket, registerCallbacks, connectWebSocket, disconnectWebSocket } from './services/websocket';
+import  ServerCheck  from './ServerCheck';
 import {
     Settings,
     Check,
@@ -17,13 +18,12 @@ import {
     Download
 } from 'lucide-react';
 
-
 function classNames(...classes) {
     return classes.filter(Boolean).join(' ');
 }
 
 function TmseegpyGUI() {
-
+    const [serverReady, setServerReady] = useState(false);
     const logOutputRef = useRef(null);
 
     // File and Processing State
@@ -46,16 +46,17 @@ function TmseegpyGUI() {
     const [updateProgress, setUpdateProgress] = useState(0);
     const [updateError, setUpdateError] = useState(null);
     const [currentVersion, setCurrentVersion] = useState(null);
-    const [pythonPaths, setPythonPaths] = useState({
-    tmseegpyPath: '',
-    backendPath: ''
-});
+    const [logs, setLogs] = useState([]);
+    const [isConnected, setIsConnected] = useState(false);
+    const consoleRef = useRef(null);
+    const [isReady, setIsReady] = useState(false);
+
 
     const [icaSelectionStatus, setIcaSelectionStatus] = useState({
-    isSelecting: false,
-    selectedComponents: [],
-    totalComponents: 0
-});
+        isSelecting: false,
+        selectedComponents: [],
+        totalComponents: 0
+    });
 
     // Basic Options State
     const [basicOptions, setBasicOptions] = useState({
@@ -160,57 +161,14 @@ function TmseegpyGUI() {
         research: false
     });
 
-// First useEffect for WebSocket handling
+// Keep the update checking effect separate
 useEffect(() => {
-    const handleConnect = () => {
-        console.log('WebSocket connected');
-        setProcessingLogs(prev => [...prev, 'WebSocket connected']);
-    };
-
-    const handleDisconnect = () => {
-        console.log('WebSocket disconnected');
-        setProcessingLogs(prev => [...prev, 'WebSocket disconnected']);
-    };
-
-    // Set up event listeners
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('status_update', handleStatusUpdate);
-    socket.on('processing_output', handleProcessingOutput);
-    socket.on('processing_error', handleProcessingError);
-    socket.on('ica_selection_made', handleIcaSelection);
-
-    // Verify initial connection state
-    if (socket.connected) {
-        console.log('Connected to preprocessor');
-        setProcessingLogs(prev => [...prev, 'WebSocket already connected']);
-    } else {
-        console.log('Not connected to preprocessor, attempting to connect...');
-        setProcessingLogs(prev => [...prev, 'Attempting to connect to WebSocket...']);
-        socket.connect();
-    }
-
-    // Cleanup function
-    return () => {
-        socket.off('connect', handleConnect);
-        socket.off('disconnect', handleDisconnect);
-        socket.off('status_update', handleStatusUpdate);
-        socket.off('processing_output', handleProcessingOutput);
-        socket.off('processing_error', handleProcessingError);
-        socket.off('ica_selection_made', handleIcaSelection);
-    };
-}, []); // Empty dependency array since we want this to run once on mount
-
-// Second useEffect for update checking
-useEffect(() => {
-    // Check current version
     if (window.electron?.getAppVersion) {
         window.electron.getAppVersion().then(version => {
             setCurrentVersion(version);
         });
     }
 
-    // Set up update listeners
     if (window.electron?.onUpdateStatus) {
         const removeUpdateStatus = window.electron.onUpdateStatus((status) => {
             console.log('Update status:', status);
@@ -228,7 +186,6 @@ useEffect(() => {
             console.error('Update error:', error);
         });
 
-        // Check for updates
         if (window.electron.checkForUpdates) {
             window.electron.checkForUpdates();
         }
@@ -241,43 +198,87 @@ useEffect(() => {
     }
 }, []);
 
-// Third useEffect for Python paths
-useEffect(() => {
-    const getPythonPaths = async () => {
-        if (window.electron?.getPythonPaths) {
-            try {
-                const paths = await window.electron.getPythonPaths();
-                setPythonPaths(paths);
-                console.log('Python paths:', paths);
-            } catch (error) {
-                console.error('Failed to get Python paths:', error);
-                setError('Failed to get Python paths');
+// Combine all WebSocket related effects into one
+    useEffect(() => {
+        let observer;
+
+        if (serverReady && consoleRef.current) {
+            connectWebSocket();
+            setIsConnected(socket.connected);
+
+            const addLog = (message, type = 'info') => { // Default type to 'info'
+                setLogs(prev => [...prev, { message, type, timestamp: new Date() }]);
+            };
+
+            socket.on('connect', () => addLog('Connected to server', 'status'));
+            socket.on('disconnect', () => addLog('Disconnected from server', 'status'));
+            socket.on('status_update', (data) => {
+                if (data.status) addLog(`Status: ${data.status}`, 'status');
+                if (data.error) addLog(`Error: ${data.error}`, 'error');
+                if (data.logs && Array.isArray(data.logs)) {
+                    data.logs.forEach(log => addLog(log, 'status'));
+                }
+            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
+            socket.on('processing_output', (data) => {
+                const message = typeof data === 'string' ? data : data.output || JSON.stringify(data);
+                addLog(message); // Use the default 'info' type
+            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
+            socket.on('processing_error', (data) => {
+                addLog(data?.error || 'An unknown error occurred', 'error');
+            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
+             socket.on('processing_complete', (data) => {
+                addLog('Processing complete!', 'status');
+            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
+            socket.on('ica_status', (data) => {
+                addLog(data?.message || JSON.stringify(data), 'ica');
+            }, namespace='/'); // IMPORTANT: Explicitly define the namespace here
+
+            observer = new MutationObserver(() => {
+                consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+            });
+            observer.observe(consoleRef.current, { childList: true });
+        }
+
+        return () => {
+            socket.off('connect');
+            socket.off('disconnect');
+            socket.off('status_update');
+            socket.off('processing_output');
+            socket.off('processing_error');
+            socket.off('processing_complete'); // added
+            socket.off('ica_status');
+            if (observer) observer.disconnect();
+            disconnectWebSocket();
+        };
+
+    }, [serverReady, consoleRef.current]);
+
+    const handleServerReady = () => {
+        setServerReady(true);
+    };
+
+
+    const handleProcessingOutput = (data) => {
+        if (data.output) {
+            setProcessingLogs(prev => [...prev, data.output]);
+            if (logOutputRef.current) {
+                logOutputRef.current.scrollTop = logOutputRef.current.scrollHeight;
             }
         }
     };
 
-    getPythonPaths();
-}, []);
-
     const handleStatusUpdate = (statusUpdate) => {
-        console.log('Received status update:', statusUpdate);
-        setProcessingLogs(prev => [...prev, `Status: ${statusUpdate.message}`]);
-
         setProcessingStatus(statusUpdate.status);
         setProgress(statusUpdate.progress);
-        setProcessingStep(statusUpdate.step);
-        setStatusMessage(statusUpdate.message);
-        setIsProcessing(statusUpdate.status === 'processing');
-    };
 
-    const handleProcessingOutput = (data) => {
-        if (data.output) {
-            console.log('Received processing output:', data.output);
-            setProcessingLogs(prev => [...prev, data.output]);
-            // Auto-scroll to bottom
-            if (logOutputRef.current) {
-                logOutputRef.current.scrollTop = logOutputRef.current.scrollHeight;
-            }
+        if (statusUpdate.logs && statusUpdate.logs.length > 0) {
+            const newLogs = statusUpdate.logs[statusUpdate.logs.length - 1];
+            setProcessingLogs(prev => [...prev, newLogs]);
+        }
+
+        if (statusUpdate.status === 'complete' && statusUpdate.results) {
+            setProcessingComplete(true);
+            setResultsSummary(statusUpdate.results);
         }
     };
 
@@ -295,7 +296,6 @@ useEffect(() => {
             totalComponents: data.total_components
         });
 
-        // Add to processing logs
         setProcessingLogs(prev => [
             ...prev,
             `ICA Components selected: ${data.components.join(', ')}`
@@ -307,10 +307,7 @@ const handleDirectorySelect = async () => {
         setIsProcessing(true);
         setError(null);
 
-        console.log('Checking electron availability:', window.electron);
-
         if (!window?.electron) {
-            console.error('Electron API not found in window object:', window);
             throw new Error('Electron API not available');
         }
 
@@ -319,154 +316,50 @@ const handleDirectorySelect = async () => {
 
         if (result) {
             const parentDir = result.path;
-            const tmseegPath = result.tmseegPath;
-
-            // Set up default output directory in the parent directory
+            // Set up default output directory
             const defaultOutputDir = `${parentDir}/output`;
 
-            console.log('Selected paths:', {
-                parentDir,
-                tmseegPath,
-                outputDir: defaultOutputDir,
-                contents: result.tmseegContents
-            });
-
             setSelectedDirectory(parentDir);
-
-            // Set the default output directory
             setBasicOptions(prev => ({
                 ...prev,
+                dataDir: parentDir,
                 outputDir: defaultOutputDir
             }));
 
-            if (!result.tmseegExists) {
-                setError('TMSEEG directory not found in the selected folder');
-                return;
-            }
-
-            // Find NeurOne .ses files with improved logging
-            const neurOneSesFiles = result.tmseegContents.filter(file => {
-                const isValidFile = !file.isDirectory &&
-                    typeof file.name === 'string' &&
-                    file.name.startsWith('NeurOne-') &&
-                    file.name.endsWith('.ses');
-
-                console.log('Checking file:', {
-                    name: file.name,
-                    isDirectory: file.isDirectory,
-                    isValid: isValidFile
-                });
-
-                return isValidFile;
-            });
-
-            console.log('Found NeurOne .ses files:', neurOneSesFiles);
-
-            if (neurOneSesFiles.length === 0) {
-                setError('No NeurOne .ses files found in the selected directory');
-                return;
-            }
-
-            // Verify directory structure for NeurOne files
-            const validStructure = neurOneSesFiles.every(sesFile => {
-                const sessionName = sesFile.name
-                    .replace('NeurOne-', '')
-                    .slice(0, -4); // Remove '.ses' extension
-
-                const hasMatchingDirectory = result.tmseegContents.some(
-                    item => item.isDirectory && item.name === sessionName
-                );
-
-                console.log('Checking session structure:', {
-                    sesFile: sesFile.name,
-                    sessionName,
-                    hasMatchingDirectory
-                });
-
-                return hasMatchingDirectory;
-            });
-
-            if (!validStructure) {
-                setError('Invalid directory structure. Each NeurOne .ses file must have a corresponding directory.');
-                return;
-            }
-
-            // Store the full file list
-            setSelectedFiles(result.tmseegContents.map(file =>
-                typeof file === 'string' ? file : file.name
-            ));
-
-            // Create FormData with full paths
+            // Create FormData with the directory information
             const formData = new FormData();
             formData.append('parentDirectory', parentDir);
-            formData.append('tmseegDirectory', tmseegPath);
+            formData.append('tmseegDirectory', result.tmseegPath);
 
-            // Use the first NeurOne .ses file
-            const firstSesFile = neurOneSesFiles[0];
-
-            if (firstSesFile) {
-                const pathInfo = new Blob([tmseegPath], { type: 'text/plain' });
-                formData.append('file', pathInfo, firstSesFile.name);
-
-                try {
-                    const response = await api.upload(formData);
-                    console.log('Upload response:', response);
-
-                    if (response.data?.tmseeg_dir) {
-                        const fullPath = response.data.tmseeg_dir;
-                        console.log('Setting data directory to:', fullPath);
-
-                        setBasicOptions(prev => ({
-                            ...prev,
-                            dataDir: fullPath
-                        }));
-
-                        // Display session information
-                        const sessionName = firstSesFile.name
-                            .replace('NeurOne-', '')
-                            .slice(0, -4);
-
-                        setStatusMessage(
-                            `Directory structure verified and uploaded successfully. Selected session: ${sessionName}`
-                        );
-
-                        if (response.data.sessions) {
-                            console.log('Available sessions:', response.data.sessions);
-                        }
-                    } else {
-                        console.error('Missing tmseeg_dir in response:', response);
-                        throw new Error('Invalid server response: missing directory information');
-                    }
-                } catch (uploadError) {
-                    console.error('Upload failed:', uploadError);
-                    throw new Error(`Failed to upload directory information: ${uploadError.message}`);
-                }
+            // Notify server about the selected directory
+            const response = await api.upload(formData);
+            if (response.data?.message) {
+                setStatusMessage(response.data.message);
+                setSelectedFiles(response.data.sessions || []);
             }
         }
     } catch (error) {
         console.error('Directory selection failed:', error);
-        setError(error.response?.data?.error || error.message || 'Failed to select directory');
+        setError(error.message || 'Failed to select directory');
     } finally {
         setIsProcessing(false);
     }
 };
 
-    const handleClearOutputDirectory = () => {
-        setBasicOptions(prev => ({
-            ...prev,
-            outputDir: './output'  // Reset to default
-        }));
-    };
+const handleClearOutputDirectory = () => {
+    setBasicOptions(prev => ({
+        ...prev,
+        outputDir: './output'
+    }));
+};
 
+const handleClearSelection = () => {
+    setSelectedDirectory(null);
+    setSelectedFiles([]);
+    setStatusMessage('');
+    setError(null);
+};
 
-    const handleClearSelection = () => {
-        setSelectedDirectory(null);
-        setSelectedFiles([]);
-        setStatusMessage('');
-        setError(null);
-    };
-
-    // Update handleStartProcessing with better error handling and state management
 const handleStartProcessing = async () => {
     if (!selectedDirectory) {
         setError('Please select a directory first');
@@ -484,112 +377,40 @@ const handleStartProcessing = async () => {
         setFilesProcessed(0);
         setResultsSummary([]);
 
-        // Get Python paths if not already set
-        let pythonPaths = {};
-        if (window.electron?.getPythonPaths) {
-            try {
-                pythonPaths = await window.electron.getPythonPaths();
-                console.log('Retrieved Python paths:', pythonPaths);
-            } catch (error) {
-                console.error('Failed to get Python paths:', error);
-                throw new Error('Failed to get Python paths: ' + error.message);
-            }
+        // Verify server connection
+        if (!socket.connected) {
+            throw new Error('Not connected to TMSeegpy server. Please ensure TMSeegpy is running.');
         }
 
-        // Verify paths exist
-        if (!pythonPaths.tmseegpyPath || !pythonPaths.backendPath) {
-            throw new Error('Required Python paths are missing');
-        }
-
-        // Prepare options with Python paths
+        // Prepare options
         const options = {
             ...basicOptions,
             ...advancedOptions,
-            dataDir: basicOptions.dataDir || selectedDirectory,
+            dataDir: selectedDirectory,
             processingMode: basicOptions.processingMode || 'epoched',
-            dataFormat: basicOptions.dataFormat || 'neurone',
-            outputDir: basicOptions.outputDir || './output',
-            tmseegpyPath: pythonPaths.tmseegpyPath,
-            backendPath: pythonPaths.backendPath,
-            // Add environment check
-            isDev: process.env.NODE_ENV === 'development'
+            dataFormat: basicOptions.dataFormat || 'neurone'
         };
 
         console.log('Starting processing with options:', options);
-
-        // Verify WebSocket connection before proceeding
-        if (!socket.connected) {
-            console.warn('WebSocket not connected. Attempting to reconnect...');
-            try {
-                await new Promise((resolve, reject) => {
-                    socket.connect();
-                    socket.once('connect', resolve);
-                    socket.once('connect_error', reject);
-                    setTimeout(() => reject(new Error('WebSocket connection timeout')), 5000);
-                });
-            } catch (error) {
-                throw new Error('Failed to establish WebSocket connection: ' + error.message);
-            }
-        }
-
-        // Verify output directory exists and is writable
-        try {
-            if (window.electron?.validateOutputDirectory) {
-                const outputValidation = await window.electron.validateOutputDirectory(options.outputDir);
-                if (!outputValidation.isWriteable) {
-                    throw new Error('Output directory is not writable');
-                }
-            }
-        } catch (error) {
-            throw new Error('Output directory validation failed: ' + error.message);
-        }
-
-        // Add initial processing logs
         setProcessingLogs(prev => [
             ...prev,
             'Starting processing...',
-            `Using TMSeegpy path: ${pythonPaths.tmseegpyPath}`,
-            `Using Backend path: ${pythonPaths.backendPath}`,
             `Input directory: ${options.dataDir}`,
             `Output directory: ${options.outputDir}`
         ]);
 
         // Make the API call
         const response = await api.process(options);
-        console.log('Processing initiated successfully:', response);
+        console.log('Processing initiated:', response);
 
         if (response.data?.message) {
             setStatusMessage(response.data.message);
             setProcessingLogs(prev => [...prev, response.data.message]);
         }
 
-        // Set up processing status monitoring
-        if (response.data?.processId) {
-            socket.emit('monitor_process', { processId: response.data.processId });
-        }
-
-        setProcessingLogs(prev => [...prev, 'Waiting for processing updates...']);
-
     } catch (error) {
         console.error('Processing failed:', error);
-
-        // Enhanced error handling
-        let errorMessage = 'Processing failed';
-        if (error.response?.data?.error) {
-            errorMessage = error.response.data.error;
-        } else if (error.message) {
-            errorMessage = error.message;
-        }
-
-        // Additional error details for development
-        if (process.env.NODE_ENV === 'development') {
-            console.error('Detailed error:', {
-                message: error.message,
-                stack: error.stack,
-                response: error.response,
-                code: error.code
-            });
-        }
+        const errorMessage = error.response?.data?.error || error.message || 'Processing failed';
 
         setProcessingStatus('error');
         setError(errorMessage);
@@ -600,55 +421,84 @@ const handleStartProcessing = async () => {
             'Processing stopped due to error'
         ]);
 
-        // Attempt to clean up any hanging processes
+        // Try to stop processing
         try {
             await api.stop();
         } catch (cleanupError) {
-            console.error('Failed to clean up after error:', cleanupError);
+            console.error('Failed to stop processing:', cleanupError);
         }
     }
 };
 
-    const handleStopProcessing = async () => {
-        try {
-            await api.stop(); // Using the api.stop() method from your api service
-            setProcessingStatus('stopped');
-            setProcessingLogs(prev => [...prev, 'Processing stopped by user']);
-        } catch (error) {
-            console.error('Failed to stop processing:', error);
-            setError(error.message);
-        }
-    };
+const handleStopProcessing = async () => {
+    try {
+        await api.stop();
+        setProcessingStatus('stopped');
+        setProcessingLogs(prev => [...prev, 'Processing stopped by user']);
+    } catch (error) {
+        console.error('Failed to stop processing:', error);
+        setError(error.message);
+    }
+};
 
-    const handleClearLog = () => {
-        setProcessingLogs([]);
-    };
+const handleClearLog = () => {
+    setProcessingLogs([]);
+};
 
-    const handleDownloadResults = async () => {
-        try {
-            const response = await api.getResults();
-            const results = response.data;
+const handleDownloadResults = async () => {
+    try {
+        const response = await api.getResults();
+        const results = response.data;
 
-            const element = document.createElement('a');
-            const file = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
-            element.href = URL.createObjectURL(file);
-            element.download = 'processing_results.json';
-            document.body.appendChild(element);
-            element.click();
-            document.body.removeChild(element);
-        } catch (error) {
-            console.error('Failed to download results:', error);
-            setError(error.message);
-        }
-    };
+        const element = document.createElement('a');
+        const file = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+        element.href = URL.createObjectURL(file);
+        element.download = 'processing_results.json';
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
+    } catch (error) {
+        console.error('Failed to download results:', error);
+        setError(error.message);
+    }
+};
+
+const renderConsole = () => (
+    <div className="console-container">
+        <div className="console-header">
+            <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+                {isConnected ? 'Connected' : 'Disconnected'}
+            </span>
+        </div>
+        <div
+                ref={el => {
+        consoleRef.current = el; // Set the ref when the element mounts
+                     }}
+            className="console-output"
+            id="console-output"
+        >
+            {logs.map((log, index) => (
+                <div
+                    key={index}
+                    className={`console-line ${log.type}`}
+                >
+                    {log.message}
+                </div>
+            ))}
+        </div>
+    </div>
+);
     return (
-                        <div className="min-h-screen bg-gray-50">
-                            {/* Header */}
-                            <header className="bg-white shadow">
-                                <div className="max-w-7xl mx-auto py-4 px-4">
-                                    <h1 className="text-2xl font-semibold text-gray-900">TMSeegpy GUI</h1>
-                                </div>
-                            </header>
+    <>
+        <ServerCheck onServerReady={handleServerReady} />
+        {serverReady && (
+            <div className="min-h-screen bg-gray-50">
+                {/* Header */}
+                <header className="bg-white shadow">
+                    <div className="max-w-7xl mx-auto py-4 px-4">
+                        <h1 className="text-2xl font-semibold text-gray-900">TMSeegpy GUI</h1>
+                    </div>
+                </header>
 
                             {/* Main Content */}
                             <main className="max-w-7xl mx-auto py-6 px-4">
@@ -2083,14 +1933,26 @@ const handleStartProcessing = async () => {
                                 <div className="mt-6">
                                     <h3 className="text-md font-medium text-gray-700 mb-2">Processing Log</h3>
                                     <div className="relative">
-                                        <div
-                                            id="console-output"
-                                            ref={logOutputRef}
-                                            className="w-full h-96 p-4 font-mono text-sm bg-black text-green-400 border border-gray-300 rounded-md overflow-y-auto whitespace-pre-wrap"
-                                        >
-                                            {processingLogs.map((log, index) => (
-                                                <div key={index}>{log}</div>
-                                            ))}
+                                        <div className="console-container">
+                                            <div className="console-header">
+                                                <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>
+                                                    {isConnected ? 'Connected' : 'Disconnected'}
+                                                </span>
+                                            </div>
+                                            <div
+                                                ref={consoleRef}
+                                                className="console-output"
+                                                id="console-output"
+                                            >
+                                                {processingLogs.map((log, index) => (
+                                                    <div
+                                                        key={index}
+                                                        className="console-line"
+                                                    >
+                                                        {log}
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                         <div className="absolute top-2 right-2 space-x-2">
                                             <button
@@ -2181,6 +2043,8 @@ const handleStartProcessing = async () => {
             </main>
             {/* Changed from div to close the main element */}
         </div>
+        )}
+    </>
     );
 }
 

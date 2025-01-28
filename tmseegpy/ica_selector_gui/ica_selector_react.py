@@ -1,10 +1,10 @@
-# tmseegpy/ica_selector_gui/ica_selector.py
+# tmseegpy/ica_selector_gui/widgets/ica_selector.py
 """ICA component selector widget for the TMSEEG GUI with PyQt6"""
 
 import numpy as np
 from typing import List, Optional, Callable, Dict
 import matplotlib
-#matplotlib.use('QtAgg')
+matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT  # Changed from qt5agg
 from matplotlib.gridspec import GridSpec
@@ -13,11 +13,10 @@ from PyQt6.QtWidgets import (QWidget, QMainWindow, QVBoxLayout, QHBoxLayout,
                           QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 import mne
-mne.viz.set_browser_backend('qt')
 import threading
 import queue
 
-class ICAComponentSelector:
+class ICAComponentSelector_React:
     """Base class for ICA component selection"""
 
     def __init__(self, parent):
@@ -232,9 +231,8 @@ class ICAComponentSelector:
         """Toggle components plot visibility with enhanced visualization"""
         if not self.showing_components:
             # Set matplotlib backend before creating plot
-           # import matplotlib
-            #matplotlib.use('QtAgg')
-            mne.viz.set_browser_backend('qt')
+            import matplotlib
+            matplotlib.use('QtAgg')
 
             # Use welch method instead of multitaper for component plots
             psd_args = {
@@ -350,61 +348,74 @@ class ICAComponentSelector:
         """Toggle sources plot visibility with enhanced visualization"""
         if not self.showing_sources:
             try:
+                data = self._raw if self._raw is not None else self._epochs
+
                 # Set matplotlib backend before creating plot
                 import matplotlib
+                import matplotlib.pyplot as plt
                 matplotlib.use('QtAgg')
 
                 with plt.style.context('default'):
+                    # Different parameters for Raw vs Epochs data
                     if self._raw is not None:
-                        # For Raw data
+                        # Parameters for Raw data
                         fig = self._ica_instance.plot_sources(
-                            self._raw,
+                            data,
                             picks=None,
                             start=0,
                             stop=10,
-                            show=True,
-                            block=False
+                            title="ICA Sources",
+                            show=False,
+                            block=False,
+                            show_first_samp=True,
+                            show_scrollbars=True,
+                            time_format='float'
                         )
                     else:
-                        # For Epochs data
+                        # Parameters for Epochs data
                         fig = self._ica_instance.plot_sources(
-                            self._epochs,
+                            data,
                             picks=None,
-                            show=True,
-                            block=False
+                            title="ICA Sources",
+                            show=False,
+                            block=False,
+                            show_scrollbars=True
                         )
 
-                    # Store the figure reference
-                    if hasattr(fig, 'canvas') and hasattr(fig.canvas, 'manager'):
-                        self.sources_window = fig.canvas.manager.window
-                    else:
-                        self.sources_window = fig
+                    # Store the figure
+                    self.sources_window = fig
+                    # Use plt.show() instead of fig.show()
+                    plt.show(block=False)
                     self.showing_sources = True
 
             except Exception as e:
-                print(f"Error showing plot: {str(e)}")
+                print(f"Error showing sources plot: {str(e)}")
+                self.showing_sources = False
                 if hasattr(self, 'sources_window') and self.sources_window:
                     try:
-                        if isinstance(self.sources_window, plt.Figure):
-                            plt.close(self.sources_window)
-                        else:
-                            self.sources_window.close()
-                    except:
-                        pass
+                        plt.close(self.sources_window)
+                    except Exception as close_error:
+                        print(f"Error closing sources window: {str(close_error)}")
+                    finally:
+                        self.sources_window = None
                 plt.close('all')
 
         else:
-            if self.sources_window:
-                try:
-                    if isinstance(self.sources_window, plt.Figure):
-                        plt.close(self.sources_window)
-                    else:
-                        self.sources_window.close()
-                except:
-                    pass
-                plt.close('all')
-            self.sources_window = None
-            self.showing_sources = False
+            try:
+                import matplotlib.pyplot as plt
+                if self.sources_window:
+                    plt.close('all')
+                self.sources_window = None
+                self.showing_sources = False
+            except Exception as e:
+                print(f"Error closing sources window: {str(e)}")
+
+        # Force garbage collection after closing figures
+        try:
+            import gc
+            gc.collect()
+        except Exception as e:
+            print(f"Error during garbage collection: {str(e)}")
 
     def _toggle_scores_plot(self):
         """Toggle scores plot visibility"""
@@ -553,36 +564,43 @@ class ICAComponentSelector:
             self.completion_callback(components)
 
         # Close all child windows safely
-        for window in [self.sources_window, self.components_window, self.scores_window]:
-            if window:
-                try:
-                    # Check if the window is a Qt dialog
-                    if isinstance(window, QDialog):
-                        window.close()
-                    # Handle MNE browser windows
-                    elif hasattr(window, 'close'):
-                        try:
-                            window.close()
-                        except (RuntimeError, AttributeError):
-                            # Ignore if window was already closed
-                            pass
-                    # For matplotlib figures
-                    elif isinstance(window, plt.Figure):
-                        plt.close(window)
-                except Exception as e:
-                    print(f"Warning: Error closing window: {str(e)}")
+        try:
+            # Handle MNE figure windows
+            if hasattr(self, 'sources_window') and self.sources_window:
+                if hasattr(self.sources_window, 'close'):
+                    self.sources_window.close()
+                elif isinstance(self.sources_window, (plt.Figure, list)):
+                    if isinstance(self.sources_window, list):
+                        for fig in self.sources_window:
+                            plt.close(fig)
+                    else:
+                        plt.close(self.sources_window)
 
-        # Close main window if it exists
-        if self._window:
-            try:
+            # Close Qt windows
+            for window in [self.components_window, self.scores_window]:
+                if window and hasattr(window, 'close'):
+                    window.close()
+
+            # Close main window
+            if self._window:
                 self._window.close()
+
+        except Exception as e:
+            print(f"Warning during cleanup: {str(e)}")
+        finally:
+            # Always try to close all matplotlib figures
+            try:
+                plt.close('all')
             except Exception as e:
-                print(f"Warning: Error closing main window: {str(e)}")
+                print(f"Warning closing matplotlib figures: {str(e)}")
 
-        # Make sure all matplotlib figures are closed
-        plt.close('all')
+            # Reset window references
+            self.sources_window = None
+            self.components_window = None
+            self.scores_window = None
+            self._window = None
 
-class ICAComponentSelectorContinuous(ICAComponentSelector):
+class ICAComponentSelectorContinuous_React(ICAComponentSelector_React):
     """Adapted ICA Component Selector for continuous data"""
 
     def select_components(self,

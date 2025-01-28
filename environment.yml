@@ -27,7 +27,5 @@ dependencies:
   - pip
   - pip:
     - mne-faster
-    # Handle Python version specific dependencies
-    - "importlib-metadata; python_version<'3.8'"
-    - "importlib-resources; python_version<'3.9'"
+
 

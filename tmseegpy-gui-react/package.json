@@ -6,150 +6,89 @@
   "author": "LazyCyborg <hjarneko@gmail.com>",
   "description": "GUI for the tmseegpy Toolbox",
   "main": "public/electron.js",
+  "files": [
+    "build/**/*",
+    "public/**/*"
+  ],
   "dependencies": {
-    "@headlessui/react": "^2.2.0",
-    "@heroicons/react": "^2.2.0",
-    "@tailwindcss/forms": "^0.5.10",
-    "@tanstack/react-table": "^8.20.6",
-    "axios": "^1.7.9",
+    "@headlessui/react": "^1.7.17",
+    "@heroicons/react": "^2.1.1",
+    "@tailwindcss/forms": "^0.5.7",
+    "@tanstack/react-table": "^8.11.3",
+    "axios": "^1.6.5",
     "electron-is-dev": "^2.0.0",
     "electron-log": "^5.2.4",
-    "electron-updater": "^6.3.9",
-    "framer-motion": "^11.18.1",
-    "lucide-react": "^0.473.0",
-    "python-shell": "^5.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "electron-updater": "^6.1.7",
+    "framer-motion": "^10.17.9",
+    "lucide-react": "^0.303.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
-    "socket.io-client": "^4.8.1",
-    "tailwindcss": "^3.4.17"
+    "socket.io-client": "^4.7.2",
+    "node-fetch": "^2.7.0",
+    "tailwindcss": "^3.4.1",
+    "fs-extra": "^11.2.0"
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "@electron/notarize": "^2.2.0",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
-    "electron": "^29.4.6",
-    "electron-builder": "^24.13.3",
+    "electron": "^28.1.1",
+    "electron-builder": "^24.9.1",
+    "rimraf": "^5.0.5",
     "wait-on": "^7.2.0"
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build && npm run copy-electron",
+    "build": "react-scripts build && cp public/electron.js build/ && cp public/preload.js build/",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "copy-electron": "cp -r electron/* public/ && mkdir -p build/electron && cp -r electron/* build/electron/",
     "electron:dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "npm run build && electron-builder",
-    "electron:start": "electron .",
-    "dist": "electron-builder",
-    "pack": "electron-builder --dir",
-    "release": "electron-builder --publish always",
-    "postinstall": "electron-builder install-app-deps"
+    "electron:build:mac": "npm run build && electron-builder --mac",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:linux": "npm run build && electron-builder --linux"
   },
   "build": {
     "appId": "com.lazycyborg.tmseegpy-gui",
     "productName": "TMSeegpy GUI",
     "copyright": "Copyright © 2024 LazyCyborg",
-    "files": [
-      "build/**/*",
-      "public/**/*",
-      "electron/**/*",
-      "node_modules/**/*",
-      "package.json"
-    ],
     "directories": {
       "buildResources": "assets",
-      "output": "dist"
+      "output": "release"
     },
-    "extraResources": [
-      {
-        "from": "../tmseegpy",
-        "to": "tmseegpy",
-        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
-      },
-      {
-        "from": "../backend",
-        "to": "backend",
-        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
-      }
+    "files": [
+      "build/**/*",
+      "public/**/*"
     ],
-    "extraMetadata": {
-      "main": "build/electron/main.js"
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.icns"
     },
-    "asar": true,
-    "asarUnpack": [
-      "node_modules/python-shell/**/*"
-    ],
-    "beforeBuild": ["npm run build"],
-    "afterSign": "electron-builder-notarize",
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Science",
+      "icon": "assets/icon.png"
+    },
     "publish": {
       "provider": "github",
       "owner": "LazyCyborg",
       "repo": "tmseegpy",
-      "private": false,
-      "releaseType": "release"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "assets/icon.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": ["x64", "arm64"]
-        }
-      ],
-      "icon": "assets/icon.icns",
-      "category": "public.app-category.developer-tools",
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
-    },
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "assets/icon.png",
-      "category": "Science",
-      "artifactName": "${productName}-${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "TMSeegpy GUI",
-      "uninstallDisplayName": "TMSeegpy GUI"
-    },
-    "dmg": {
-      "contents": [
-        {
-          "x": 130,
-          "y": 220
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ]
+      "private": false
     }
-  },
-  "eslintConfig": {
-    "extends": "react-app"
   },
   "browserslist": {
     "production": [
@@ -162,9 +101,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/LazyCyborg/tmseegpy.git"
   }
 }
