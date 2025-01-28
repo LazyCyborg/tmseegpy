@@ -1,6 +1,6 @@
 # tmseegpy
 
-This repository contains my attempt at building some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data using python. I ahve attempted to implement some of the functionality found in TESA (https://github.com/nigelrogasch/TESA) which has been my guide and benchmark for the development. 
+This repository contains my attempt at building some sort of pipeline for preprocessing and analyzing Transcranial Magnetic Stimulation (TMS)-EEG data using python. I have attempted to implement some of the functionality found in TESA (https://github.com/nigelrogasch/TESA) which has been my guide and benchmark for the development. 
 
 The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019). The analysis of PCIst is just a copy paste from https://github.com/renzocom/PCIst/blob/master/PCIst/pci_st.py which is written by Renzo Comolatti. The code is mostly adapted from a very long jupyter notebook which used mostly native MNE-Python methods which I expanded to a toolbox that I have been using in my analyses. So the code base might not be very efficient. 
 
