@@ -65,35 +65,37 @@ The GUI will automatically connect to the running server. If the connection fail
 The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
 
 ### Command-Line Arguments
-Se run.py (bottom of the file) for full list of configurable command line arguments
+Run tmseegpy --help for full list of command line arguments and default values
 
 ### Example Usage
 
 To run the pipeline with default settings:
 
 ```bash
-cd tmseegpy
+tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir
 ```
 
+Manual ICA component selection using MNEs QT viewer and PyQt6
+
 ```bash
-python run.py --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --first_ica_manual --second_ica_manual
+tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --first_ica_manual --second_ica_manual
 ```
 
 To enable PARAFAC muscle artifact removal :
 
 ```bash
-python run.py --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --parafac_muscle_artifacts
+tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --parafac_muscle_artifacts
 ```
 
 To enable plotting of eeg data during preprocessing for quality checks (plots will be saved in a steps directory):
 
 ```bash
-python run.py --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --plot_preproc
+tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --plot_preproc
 ```
 
 ## Data Preparation
 
-Ensure that your data is organized in the following structure (currently the toolbox only supports .ses files from Bittium NeurOne):
+Your data should be organized in the following structure (currently the toolbox is only tested on .ses files from Bittium NeurOne):
 
 ```
 data/
