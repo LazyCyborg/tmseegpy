@@ -3,13 +3,19 @@
 import sys
 import threading
 from tmseegpy.run import process_subjects, process_continuous_data, setup_qt_plugin_path
-from tmseegpy.server import run_server
+from tmseegpy.server import init_app, socketio
 import argparse
 from pathlib import Path
+from PyQt6.QtWidgets import QApplication
 
 
 def start_server():
     """Start the Flask server in a separate thread"""
+    app, socketio, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR = init_app(args.data_dir)
+
+    def run_server():
+        socketio.run(app, debug=False, use_reloader=False)
+
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
     return thread
@@ -19,15 +25,23 @@ def main():
     """Main entry point for tmseegpy"""
     # Setup Qt plugin path first
     setup_qt_plugin_path()
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='TMSeegpy: TMS-EEG Processing Pipeline')
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
+
+
     # Server command
     server_parser = subparsers.add_parser('server', help='Run the TMSeegpy server')
     server_parser.add_argument('--port', type=int, default=5001, help='Port to run server on')
     server_parser.add_argument('--debug', action='store_true', help='Run in debug mode')
+    server_parser.add_argument('--data_dir', type=str, default=str(Path.cwd() / 'data'),
+                               help='Path to the data directory for the server.')
 
     process_parser = subparsers.add_parser('process', help='Process TMS-EEG data')
 
@@ -192,11 +206,12 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'server':
-        # Run the server
-        run_server(port=args.port, debug=args.debug)
+        # Run the server in the main thread
+        app, socketio, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR = init_app(args.data_dir)
+        socketio.run(app, port=args.port, debug=args.debug)
     elif args.command == 'process':
         # Start server in background
-        server_thread = start_server()
+        #server_thread = start_server()
 
         # Run processing
         if args.processing_mode == 'epoched':

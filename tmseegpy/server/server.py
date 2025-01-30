@@ -5,6 +5,7 @@ import sys
 import os
 import json
 import time
+from queue import Queue, Empty
 import threading
 import tempfile
 import traceback
@@ -33,7 +34,6 @@ from PyQt6.QtWidgets import QApplication
 from tmseegpy.run import process_subjects, process_continuous_data, setup_qt_plugin_path
 from tmseegpy.preproc import TMSEEGPreprocessor
 from tmseegpy.dataloader import TMSEEGLoader
-from tmseegpy.react_ica_selector import CLIICASelector, get_cli_ica_callback  # Correct import
 from .server_logger import ServerLogger
 
 
@@ -45,6 +45,9 @@ if sys.platform == "darwin":
 # Constants
 ALLOWED_EXTENSIONS = {'ses', 'set', 'eeg', 'vhdr', 'edf', 'cnt', 'fif', 'vmrk', 'fdt'}
 MAX_CONTENT_LENGTH = 5 * 1024 * 1024 * 1024  # 5GB
+
+ica_selection_queue = Queue()
+ica_result_queue = Queue()
 
 # --- Global State and Logging ---
 current_progress = {  # Initialize global state
@@ -121,6 +124,7 @@ def map_frontend_to_backend_params(frontend_params):
         'processing_mode': frontend_params.get('processingMode', 'epoched'),
         'data_dir': str(data_dir),
         'output_dir': frontend_params.get('outputDir', str(Path.cwd() / 'output')),
+        'gui_mode': True,
         'data_format': frontend_params.get('dataFormat', 'neurone'),
         'no_preproc_output': frontend_params.get('noPreprocessOutput', False),
         'no_pcist': frontend_params.get('noPcist', False),
@@ -223,6 +227,49 @@ def map_frontend_to_backend_params(frontend_params):
     return backend_params
 
 
+def get_ica_callback(gui_mode=False):
+    """Get appropriate ICA callback based on mode"""
+    if gui_mode:
+        from ..ica_selector_gui.websocket_ica_selector import WebSocketICASelector
+        def callback(ica_instance, inst, component_scores=None):
+            try:
+                print("Starting ICA component selection...")
+                selector = WebSocketICASelector(ica_selection_queue, ica_result_queue)
+
+                # Format component data first
+                component_data = selector._get_component_data(ica_instance, inst)
+                print(f"Generated data for {len(component_data)} components")
+
+                # Put data in queue before emitting event
+                ica_selection_queue.put({
+                    "data": component_data,
+                    "scores": component_scores
+                })
+
+                # Emit event to notify frontend
+                print("Emitting ica_required event...")
+                socketio.emit('ica_required', {
+                    'componentCount': len(component_data)
+                })
+
+                # Wait for selection
+                print("Waiting for component selection...")
+                selected = selector.select_components(ica_instance, inst)
+                print(f"Received selected components: {selected}")
+                return selected
+
+            except Exception as e:
+                print(f"Error in ICA GUI callback: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return []
+
+        return callback
+    else:
+        # Use existing CLI callback for command line usage
+        from tmseegpy.cli_ica_selector import get_cli_ica_callback
+        return get_cli_ica_callback()
+
 def create_args_from_params(params):
     """Convert mapped parameters to argparse.Namespace"""
     parser = argparse.ArgumentParser()
@@ -268,43 +315,6 @@ def validate_file(file):
     return True
 
 
-def handle_ica_selection(ica_obj, inst, component_scores=None):
-    """Handle ICA component selection ensuring main thread execution"""
-    import queue
-    from PyQt6.QtCore import QThread, QObject, pyqtSignal
-
-    class ICAHelper(QObject):
-        finished = pyqtSignal(list)
-
-        def __init__(self):
-            super().__init__()
-            self.result_queue = queue.Queue()
-
-        def run_selection(self, ica_obj, inst, component_scores):
-            try:
-                selector = CLIICASelector()
-                result = selector.select_components(ica_obj, inst, component_scores)
-                self.result_queue.put(result)
-                self.finished.emit(result)
-            except Exception as e:
-                print(f"Error in ICA selection: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                self.result_queue.put([])
-                self.finished.emit([])
-
-    # Create helper in main thread
-    helper = ICAHelper()
-
-    # Run selection in main thread
-    helper.run_selection(ica_obj, inst, component_scores)
-
-    # Get results
-    try:
-        return helper.result_queue.get(timeout=1.0)
-    except queue.Empty:
-        print("No components were selected (timeout)")
-        return []
 
 
 def ensure_directories(output_dir):
@@ -388,35 +398,42 @@ window_manager = None
 # Create the Flask application
 
 def init_app(user_data_dir):
+    user_data_dir = Path(user_data_dir)
     global app, socketio, current_progress, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR
 
     # Initialize QApplication in the main thread
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import Qt
+
     if QApplication.instance() is None:
+        import sys
         qt_app = QApplication(sys.argv)
-        # Ensure Qt is properly configured for the platform
-        if sys.platform == "darwin":  # macOS
+        # Configure Qt for macOS
+        if sys.platform == "darwin":
             qt_app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
             import os
             os.environ["QT_MAC_WANTS_LAYER"] = "1"
+            os.environ["QT_QPA_PLATFORM"] = "cocoa"
         print("Created QApplication instance in main thread")
 
+    # Use Qt5Agg backend for matplotlib
+    import os
     import matplotlib
     matplotlib.use('Qt5Agg')
 
+    # Initialize Flask app
     app = Flask(__name__)
     CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-
-    # Configure app
+    # Configure app directories
     UPLOAD_FOLDER = user_data_dir / 'uploads'
     TMSEEG_DATA_DIR = UPLOAD_FOLDER / 'TMSEEG'
 
-
-    UPLOAD_FOLDER.mkdir(exist_ok=True, parents=True) # Create directories
+    # Create directories
+    UPLOAD_FOLDER.mkdir(exist_ok=True, parents=True)
     TMSEEG_DATA_DIR.mkdir(exist_ok=True)
 
+    # Update app configuration
     app.config.update(
         UPLOAD_FOLDER=str(UPLOAD_FOLDER),
         MAX_CONTENT_LENGTH=MAX_CONTENT_LENGTH,
@@ -424,21 +441,24 @@ def init_app(user_data_dir):
         ALLOWED_EXTENSIONS=ALLOWED_EXTENSIONS
     )
 
+    # Initialize SocketIO
     socketio = SocketIO(app,
                         cors_allowed_origins="*",
                         async_mode='gevent',
-                        logger=True,  # Enable socketio logging
+                        logger=True,
                         engineio_logger=True,
                         ping_timeout=60,
-                        ping_interval=25
-                        )
-    server_logger = ServerLogger(socketio)
-    output_capturer = OutputCapturer(socketio)  # Create the output_capturer instance
-    current_progress = initialize_state()
-    # Register blueprint here after initializing all components
-    app.register_blueprint(api_bp)
-    return app, socketio, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR
+                        ping_interval=25)
 
+    # Initialize other components
+    server_logger = ServerLogger(socketio)
+    output_capturer = OutputCapturer(socketio)
+    current_progress = initialize_state()
+
+    # Register blueprint
+    app.register_blueprint(api_bp)
+
+    return app, socketio, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR
 
 
 @api_bp.route('/results', methods=['GET']) # Added route for results
@@ -453,7 +473,6 @@ def get_results(): # Fixed function definition
         return jsonify({'error': str(e)}), 500
 
 
-
 @api_bp.route('/upload', methods=['POST'])
 def handle_upload():
     """Unified upload handler for both files and directory structures"""
@@ -463,14 +482,18 @@ def handle_upload():
 
         # Get directory information
         parent_dir = request.form.get('parentDirectory')
-        tmseeg_dir_path = request.form.get('tmseegDirectory')
+        tmseeg_dir = request.form.get('tmseegDirectory')
 
-        if not parent_dir or not tmseeg_dir_path:
+        if not parent_dir or not tmseeg_dir:
             return jsonify({'error': 'Missing directory information'}), 400
 
-        # Convert to Path objects
+        # Convert to Path objects and resolve any duplicate TMSEEG directories
         parent_path = Path(parent_dir)
-        tmseeg_path = Path(tmseeg_dir_path)
+        tmseeg_path = Path(tmseeg_dir)
+
+        # Remove duplicate TMSEEG from path if it exists
+        if 'TMSEEG/TMSEEG' in str(tmseeg_path):
+            tmseeg_path = Path(str(tmseeg_path).replace('TMSEEG/TMSEEG', 'TMSEEG'))
 
         if not parent_path.exists():
             return jsonify({'error': 'Parent directory does not exist'}), 400
@@ -481,45 +504,41 @@ def handle_upload():
         # Verify the structure and collect sessions
         session_files = []
 
-        # First, find all .ses files
-        ses_files = list(parent_path.glob('*.ses'))  # Look only in the parent directory
+        # First, find all .ses files in the parent directory
+        ses_files = list(parent_path.glob('*.ses'))
+
+        if not ses_files:
+            return jsonify({'error': 'No .ses files found in the parent directory'}), 400
 
         for ses_file in ses_files:
             if ses_file.name.startswith('NeurOne-'):
                 session_name = ses_file.stem[8:]  # Remove 'NeurOne-' prefix
                 session_dir = tmseeg_path / session_name
 
-                # Create session directory if it doesn't exist
+                # Create session directory
                 session_dir.mkdir(exist_ok=True)
 
-                # Copy the .ses file to TMSEEG directory if not already there
+                # Copy the .ses file to TMSEEG directory
                 dest_ses = tmseeg_path / ses_file.name
-                if not dest_ses.exists() and not dest_ses.samefile(ses_file):
+                if not dest_ses.exists():
                     shutil.copy2(ses_file, dest_ses)
 
-                # Copy the session directory contents
+                # Copy session data directory if it exists
                 source_session_dir = parent_path / session_name
                 if source_session_dir.exists() and source_session_dir.is_dir():
-                    # Copy directory contents recursively
                     for item in source_session_dir.rglob('*'):
-                        if item.is_file():  # Only copy files, not directories
-                            # Create relative path to maintain directory structure
+                        if item.is_file():
                             rel_path = item.relative_to(source_session_dir)
                             dest_item = session_dir / rel_path
-
-                            # Create parent directories if they don't exist
                             dest_item.parent.mkdir(parents=True, exist_ok=True)
-
-                            # Only copy if destination doesn't exist or is different
-                            if not dest_item.exists() or not dest_item.samefile(item):
+                            if not dest_item.exists():
                                 shutil.copy2(item, dest_item)
 
                 session_files.append(session_name)
 
         if not session_files:
-            return jsonify({'error': 'No valid NeurOne session files found'}), 400
+            return jsonify({'error': 'No valid NeurOne session files processed'}), 400
 
-        # Return success response with detailed information
         return jsonify({
             'message': 'Upload successful',
             'tmseeg_dir': str(tmseeg_path),
@@ -621,10 +640,9 @@ def start_processing():
             QApplication([])
 
         # Import here to ensure Qt is initialized first
-        from tmseegpy.react_ica_selector import get_cli_ica_callback
 
         # Add ICA callback to params
-        params['ica_callback'] = get_cli_ica_callback()
+        params['ica_callback'] = get_ica_callback(gui_mode=True)
 
         # Start processing in a separate thread
         processing_thread = threading.Thread(target=process_task, args=(params,), daemon=True)
@@ -641,6 +659,58 @@ def start_processing():
         print(error_msg)
         traceback.print_exc()
         return jsonify({'error': error_msg}), 500
+
+
+@api_bp.route('/ica_components', methods=['POST'])
+def get_ica_components():
+    """Get ICA component data for visualization"""
+    try:
+        ica_instance = request.json.get('ica_instance')
+        raw_data = request.json.get('raw_data')
+        epochs_data = request.json.get('epochs_data')
+
+        # Convert data to format suitable for frontend
+        component_data = []
+
+        if epochs_data is not None:
+            data = ica_instance.get_sources(epochs_data).get_data()
+            mean_data = data.mean(axis=0)
+            var_data = data.std(axis=0)
+            times = epochs_data.times
+
+            for idx in range(len(mean_data)):
+                component = []
+                for t_idx, t in enumerate(times):
+                    component.append({
+                        'time': float(t),
+                        'value': float(mean_data[idx][t_idx]),
+                        'variance': float(var_data[idx][t_idx])
+                    })
+                component_data.append(component)
+
+        elif raw_data is not None:
+            data = ica_instance.get_sources(raw_data).get_data()
+            times = np.arange(len(data[0])) / raw_data.info['sfreq']
+
+            for idx in range(len(data)):
+                component = []
+                for t_idx, t in enumerate(times):
+                    component.append({
+                        'time': float(t),
+                        'value': float(data[idx][t_idx])
+                    })
+                component_data.append(component)
+
+        return jsonify({
+            'status': 'success',
+            'data': component_data
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
 
 @api_bp.route('/stop', methods=['POST'])
 def stop_processing():
@@ -799,6 +869,7 @@ def process_task(params):
         # Map frontend parameters to backend parameters
         server_logger.info("Mapping frontend parameters...")
         backend_params = map_frontend_to_backend_params(params)
+        backend_params['gui_mode'] = True
 
         # Get and fix the data directory path
         data_dir = Path(params.get('dataDir', ''))
@@ -868,7 +939,8 @@ def process_task(params):
 
         # Set up ICA callback if manual mode is enabled
         if args.first_ica_manual or args.second_ica_manual:
-            args.ica_callback = handle_ica_selection
+            ica_callback = get_ica_callback(gui_mode=args.gui_mode)
+            args.ica_callback = ica_callback
 
         # Process based on mode
         if args.processing_mode == 'epoched':
@@ -934,10 +1006,20 @@ def run_server(port=5001, debug=False):
     import multiprocessing
     import signal
     global app, socketio, server_logger, output_capturer, current_progress, UPLOAD_FOLDER, TMSEEG_DATA_DIR, api_bp
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt, QCoreApplication
+    import sys
+
+    # Initialize Qt in main thread
     if QApplication.instance() is None:
-        QApplication(sys.argv)
+        qt_app = QApplication(sys.argv)
+        # Configure Qt for macOS
 
-
+        if sys.platform == "darwin":
+            qt_app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
+            import os
+            os.environ["QT_MAC_WANTS_LAYER"] = "1"
+            os.environ["QT_QPA_PLATFORM"] = "cocoa"
 
     try:
         # Ensure multiprocessing start method is set before initializing Flask and SocketIO
@@ -959,7 +1041,74 @@ def run_server(port=5001, debug=False):
 
         @socketio.on('disconnect')
         def handle_disconnect():
-            print("Client disconnected")
+            # Clear any pending ICA selections
+            while not ica_selection_queue.empty():
+                ica_selection_queue.get()
+            while not ica_result_queue.empty():
+                ica_result_queue.get()
+
+        @socketio.on('request_ica_data')
+        def handle_ica_data_request():
+            from queue import Empty
+            """Handle ICA data requests with better synchronization"""
+            try:
+                print("Received ICA data request, queue size:", ica_selection_queue.qsize())
+
+                # Increased timeout to handle potential delays
+                ica_payload = ica_selection_queue.get(timeout=10)
+
+                print(f"Sending ICA data with {len(ica_payload['data'])} components")
+                emit('ica_data', ica_payload)
+
+                # Immediately put back for multiple requests
+                ica_selection_queue.put(ica_payload)
+
+            except Empty:
+                msg = "No ICA data available (queue empty)"
+                print(msg)
+                emit('ica_error', {'message': msg})
+            except Exception as e:
+                print(f"Error handling ICA request: {str(e)}")
+                emit('ica_error', {'message': str(e)})
+
+        @socketio.on('ica_selection_complete')
+        def handle_ica_selection_complete(data):
+            """Handle completed ICA component selection"""
+            try:
+                print("Received ICA selection complete")
+                selected_components = data.get('selectedComponents', [])
+                print(f"Selected components: {selected_components}")
+
+                # Put the components in the result queue and clear any existing items
+                while not ica_result_queue.empty():
+                    try:
+                        ica_result_queue.get_nowait()
+                    except Empty:
+                        break
+
+                ica_result_queue.put(selected_components)
+
+                # Explicitly emit the success event
+                socketio.emit('ica_selection_success', {'status': 'success'})
+                print("Emitted ica_selection_success")
+
+                return {'status': 'success', 'selected': selected_components}
+
+            except Exception as e:
+                error_msg = f"Error in ICA selection complete: {str(e)}"
+                print(error_msg)
+                traceback.print_exc()
+                socketio.emit('ica_error', {'message': error_msg})
+                return {'status': 'error', 'message': error_msg}
+
+        @socketio.on('ica_selection_cancel')
+        def handle_ica_selection_cancel():
+            """Handle cancelled ICA selection"""
+            try:
+                ica_result_queue.put([])
+                emit('ica_selection_cancelled')
+            except Exception as e:
+                emit('ica_error', {'message': str(e)})
 
         def signal_handler(sig, frame):
             print('Keyboard interrupt received. Shutting down server...')
@@ -1017,7 +1166,7 @@ def run_server(port=5001, debug=False):
                 port=port,
                 debug=debug,
                 use_reloader=False,
-                allow_unsafe_werkzeug=False
+                allow_unsafe_werkzeug=True  # Changed to True for development
             )
 
     except Exception as e:

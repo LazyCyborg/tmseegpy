@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Tab } from '@headlessui/react';
 import { api } from './services/api';
+import  ICAComponentVisualizer  from './ICAComponentVisualizer'
 import './styles/Console.css';
 import { socket, registerCallbacks, connectWebSocket, disconnectWebSocket } from './services/websocket';
 import  ServerCheck  from './ServerCheck';
+import useWebSocketHandler from './useWebSocketHandler';
 import {
     Settings,
     Check,
@@ -18,13 +20,52 @@ import {
     Download
 } from 'lucide-react';
 
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('Component Error:', error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 bg-red-50 text-red-700">
+          <AlertTriangle className="inline-block mr-2" />
+          Component failed to load
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function classNames(...classes) {
     return classes.filter(Boolean).join(' ');
 }
 
+
+
 function TmseegpyGUI() {
+
+    const addLog = (message, type = 'info') => {
+        setProcessingLogs((prev) => [
+            ...prev,
+            { message, type, timestamp: new Date() }
+        ]);
+    };
+
     const [serverReady, setServerReady] = useState(false);
     const logOutputRef = useRef(null);
+    const [timeoutId, setTimeoutId] = useState(null);
 
     // File and Processing State
     const [selectedFile, setSelectedFile] = useState(null);
@@ -48,7 +89,39 @@ function TmseegpyGUI() {
     const [currentVersion, setCurrentVersion] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
     const consoleRef = useRef(null);
+    const [logs, setLogs] = useState([]);
     const [isReady, setIsReady] = useState(false);
+    const [showICAModal, setShowICAModal] = useState(false);
+    const [icaComponentData, setIcaComponentData] = useState([]);
+    const [icaComponentScores, setIcaComponentScores] = useState({});
+    const [selectedICAComponents, setSelectedICAComponents] = useState([]);
+    const [icaDataReceived, setIcaDataReceived] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+
+
+
+
+         useWebSocketHandler({
+    socket,
+    serverReady,
+    consoleRef,
+    setIsConnected,
+    setProgress,
+    setProcessingStatus,
+    setProcessingLogs,
+    setShowICAModal,
+    setIcaDataReceived,
+    setLoading,
+    setIcaComponentData,
+    setIcaComponentScores,
+    setSelectedICAComponents,
+    connectWebSocket,
+    disconnectWebSocket,
+    timeoutId,
+    setTimeoutId,
+    addLog,
+  });
 
 
     const [icaSelectionStatus, setIcaSelectionStatus] = useState({
@@ -160,6 +233,9 @@ function TmseegpyGUI() {
         research: false
     });
 
+
+
+
 // Keep the update checking effect separate
 useEffect(() => {
     if (window.electron?.getAppVersion) {
@@ -197,157 +273,13 @@ useEffect(() => {
     }
 }, []);
 
-// Combine all WebSocket related effects into one
-// In your useEffect:
-useEffect(() => {
-  let observer;
-
-  if (serverReady && consoleRef.current) {
-    // 1) Connect the socket
-    connectWebSocket();
-    setIsConnected(socket.connected);
-
-    // 2) Single helper to add logs with a Date
-    const addLog = (message, type = 'info', time = new Date()) => {
-      setProcessingLogs(prev => [
-        ...prev,
-        {
-          message: String(message),   // ensure it's a string
-          type,
-          timestamp: time            // always a Date object
-        }
-      ]);
-    };
-
-    // 3) Handle connect/disconnect
-    socket.on('connect', () => {
-      addLog('Connected to server', 'status');
-      setIsConnected(true);
-    });
-    socket.on('disconnect', () => {
-      addLog('Disconnected from server', 'status');
-      setIsConnected(false);
-    });
-
-    // 4) status_update includes data.progress, data.logs, etc.
-    socket.on('status_update', (data) => {
-      setProgress(data.progress || 0);       // or handleStatusUpdate(data)
-      setProcessingStatus(data.status || '');
-
-      // log a "Status: ... "
-      if (data.status) addLog(`Status: ${data.status}`, 'status');
-
-      // log a "Error: ... "
-      if (data.error) addLog(`Error: ${data.error}`, 'error');
-
-      // if we get an array of logs from server, add each
-      if (data.logs && Array.isArray(data.logs)) {
-        data.logs.forEach(serverLog => {
-          // Some logs might be strings, or objects. Convert everything to a string.
-          if (typeof serverLog === 'string') {
-            addLog(serverLog, 'status');
-          } else {
-            // If it's an object, you might decide how to handle it
-            // e.g. just JSON-stringify:
-            addLog(JSON.stringify(serverLog), 'status');
-          }
-        });
-      }
-    });
-
-    // 5) processing_output is usually a single line of text
-    socket.on('processing_output', (data) => {
-      // data might be a string or object with .output
-      const message = (typeof data === 'string')
-        ? data
-        : data.output || JSON.stringify(data);
-
-      addLog(message, 'info');
-    });
-
-    socket.on('processing_error', (data) => {
-      addLog(data?.error || 'An unknown error occurred', 'error');
-    });
-
-    socket.on('processing_complete', (data) => {
-      addLog('Processing complete!', 'status');
-    });
-
-    socket.on('ica_status', (data) => {
-      addLog(data?.message || JSON.stringify(data), 'ica');
-    });
-
-    // auto-scroll each time new logs appear
-    observer = new MutationObserver(() => {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-    });
-    observer.observe(consoleRef.current, { childList: true });
-  }
-
-  // Cleanup
-  return () => {
-    socket.off('connect');
-    socket.off('disconnect');
-    socket.off('status_update');
-    socket.off('processing_output');
-    socket.off('processing_error');
-    socket.off('processing_complete');
-    socket.off('ica_status');
-
-    if (observer) observer.disconnect();
-    disconnectWebSocket();
-  };
-}, [serverReady, consoleRef.current]);
-
 
     const handleServerReady = () => {
         setServerReady(true);
     };
 
 
-    const handleProcessingOutput = (data) => {
-        if (data.output) {
-            setProcessingLogs(prev => [...prev, data.output]);
-            if (logOutputRef.current) {
-                logOutputRef.current.scrollTop = logOutputRef.current.scrollHeight;
-            }
-        }
-    };
 
-    const handleStatusUpdate = (statusUpdate) => {
-        setProcessingStatus(statusUpdate.status);
-        setProgress(statusUpdate.progress);
-
-        if (statusUpdate.logs && statusUpdate.logs.length > 0) {
-            const newLogs = statusUpdate.logs[statusUpdate.logs.length - 1];
-            setProcessingLogs(prev => [...prev, newLogs]);
-        }
-
-        if (statusUpdate.status === 'complete' && statusUpdate.results) {
-            setProcessingComplete(true);
-            setResultsSummary(statusUpdate.results);
-        }
-    };
-
-    const handleProcessingError = (error) => {
-        console.error('Processing error:', error);
-        setProcessingLogs(prev => [...prev, `ERROR: ${error.error || 'Unknown error occurred'}`]);
-        setError(error.error || 'Unknown error occurred');
-        setIsProcessing(false);
-    };
-
-    const handleIcaSelection = (data) => {
-        setIcaSelectionStatus({
-            isSelecting: false,
-            selectedComponents: data.components,
-            totalComponents: data.total_components
-        });
-
-        setProcessingLogs(prev => [
-            ...prev,
-            `ICA Components selected: ${data.components.join(', ')}`
-        ]);
-    };
 
 const handleDirectorySelect = async () => {
     try {
@@ -406,6 +338,7 @@ const handleClearSelection = () => {
     setStatusMessage('');
     setError(null);
 };
+
 
 const handleStartProcessing = async () => {
     if (!selectedDirectory) {
@@ -518,9 +451,7 @@ const renderConsole = () => (
             </span>
         </div>
         <div
-                ref={el => {
-        consoleRef.current = el; // Set the ref when the element mounts
-                     }}
+            ref={consoleRef}
             className="console-output"
             id="console-output"
         >
@@ -535,6 +466,7 @@ const renderConsole = () => (
         </div>
     </div>
 );
+
     return (
     <>
         <ServerCheck onServerReady={handleServerReady} />
@@ -684,7 +616,7 @@ const renderConsole = () => (
                                                 <div className="text-center mb-4">
                                                     <h3 className="text-lg font-medium text-gray-900">Select Data Directory</h3>
                                                     <p className="text-sm text-gray-500">
-                                                        Choose a directory containing a folder named TMSEEG containing .ses files and related data folders
+                                                        Choose a directory named TMSEEG containing .ses files and related data folders (folder must be named TMSEEG lol)
                                                     </p>
                                                 </div>
 
@@ -1106,19 +1038,8 @@ const renderConsole = () => (
 
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Initial Sampling Rate (Hz)</label>
-                                            <input
-                                                type="number"
-                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                                value={advancedOptions.initialSfreq}
-                                                onChange={(e) => setAdvancedOptions({
-                                                    ...advancedOptions,
-                                                    initialSfreq: parseFloat(e.target.value)
-                                                })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">Final Sampling Rate (Hz)</label>
+                                            <label className="block text-sm font-medium text-gray-700">Final Sampling
+                                                Rate (Hz)</label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -1128,6 +1049,10 @@ const renderConsole = () => (
                                                     finalSfreq: parseFloat(e.target.value)
                                                 })}
                                             />
+
+                                        </div>
+                                        <div>
+
                                         </div>
                                     </div>
 
@@ -1146,16 +1071,7 @@ const renderConsole = () => (
 
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Zero Events Substitution</label>
-                                            <input
-                                                type="number"
-                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                                value={advancedOptions.substituteZeroEventsWith}
-                                                onChange={(e) => setAdvancedOptions({
-                                                    ...advancedOptions,
-                                                    substituteZeroEventsWith: parseInt(e.target.value)
-                                                })}
-                                            />
+
                                         </div>
 
                                     </div>
@@ -1991,27 +1907,24 @@ const renderConsole = () => (
                                                 className="console-output"
                                                 id="console-output"
                                             >
-                                                {processingLogs.map((log, i) => {
-                                                  let timeString;
-                                                  // If log.timestamp is a Date, use it
-                                                  if (log.timestamp instanceof Date) {
-                                                    timeString = log.timestamp.toLocaleTimeString();
-                                                  }
-                                                  // If it's a string or number, parse it
-                                                  else if (typeof log.timestamp === 'string' || typeof log.timestamp === 'number') {
-                                                    timeString = new Date(log.timestamp).toLocaleTimeString();
-                                                  }
-                                                  // If it's missing, just show "??:??" or use the current time
-                                                  else {
-                                                    timeString = new Date().toLocaleTimeString();
-                                                  }
+                                                          {processingLogs.map((log, i) => {
+                                            let timeString;
+                                            if (log.timestamp instanceof Date) {
+                                                timeString = log.timestamp.toLocaleTimeString();
+                                            }
+                                            else if (typeof log.timestamp === 'string' || typeof log.timestamp === 'number') {
+                                                timeString = new Date(log.timestamp).toLocaleTimeString();
+                                            }
+                                            else {
+                                                timeString = new Date().toLocaleTimeString();
+                                            }
 
-                                                  return (
-                                                    <div key={i} className={`console-line ${log.type}`}>
-                                                      [{timeString}] {log.message}
-                                                    </div>
-                                                  );
-                                                })}
+                                            return (
+                                                <div key={i} className={`console-line ${log.type}`}>
+                                                    [{timeString}] {log.message}
+                                                </div>
+                                            );
+                                        })}
 
                                             </div>
                                         </div>
@@ -2102,10 +2015,28 @@ const renderConsole = () => (
                     </Tab.Panels>
                 </Tab.Group>
             </main>
-            {/* Changed from div to close the main element */}
+            {/* Add ICA Modal here */}
+            {showICAModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                <ErrorBoundary>
+                  <ICAComponentVisualizer
+                    socket={socket}
+                    onClose={() => {
+                      setShowICAModal(false);
+                      setIcaComponentData([]);
+                      setSelectedICAComponents([]);
+                    }}
+                    onSelectionComplete={(selected) => {
+                      setSelectedICAComponents(selected);
+                      setShowICAModal(false);
+                    }}
+                  />
+                </ErrorBoundary>
+              </div>
+            )}
         </div>
         )}
-    </>
+        </>
     );
 }
 

@@ -1,15 +1,15 @@
+import sys
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer
-import sys
 import threading
 import queue
 import matplotlib.pyplot as plt
 import mne
 from tmseegpy.ica_selector_gui.ica_selector import ICAComponentSelector, ICAComponentSelectorContinuous
 
-
 class CLIICASelector:
-    def __init__(self):
+    def __init__(self, is_gui_mode=False):
+        self.is_gui_mode = is_gui_mode
         self.qt_app = None
         self.reset_state()
 
@@ -31,7 +31,7 @@ class CLIICASelector:
             self.qt_app = QApplication.instance()
             print("CLIICASelector: Starting component selection")
             print(f"Qt application instance: {self.qt_app}")
-            if self.qt_app is None:
+            if self.qt_app is None and not self.is_gui_mode:
                 self.qt_app = QApplication(sys.argv)
 
             # Create appropriate selector based on data type
@@ -42,18 +42,12 @@ class CLIICASelector:
                 selector = ICAComponentSelector(None)
             print("Selector created")
 
-            # Create event loop
-            self.event_loop = self.qt_app.exec
-
             # Callback for when selection is complete
             def selection_callback(components):
                 self.result_queue.put(components)
                 self.selection_complete.set()
-                if self.qt_app and self.qt_app.activeWindow():
-                   try:
-                       self.qt_app.quit()
-                   except Exception as e:
-                        print(f"Error during quit: {e}")
+                if not self.is_gui_mode and self.qt_app and self.qt_app.activeWindow():
+                    self.qt_app.quit()
 
             # Show selector window
             print("Calling selector.select_components...")
@@ -67,19 +61,20 @@ class CLIICASelector:
             )
             print("select_components called")
 
-            # Create a timer to check if window is shown
-            def check_window():
-                if selector._window and selector._window.isVisible():
-                    timer.stop()
-                else:
-                    print("Waiting for window to appear...")
+            if not self.is_gui_mode:
+                # Create a timer to check if window is shown
+                def check_window():
+                    if selector._window and selector._window.isVisible():
+                        timer.stop()
+                    else:
+                        print("Waiting for window to appear...")
 
-            timer = QTimer()
-            timer.timeout.connect(check_window)
-            timer.start(100)
+                timer = QTimer()
+                timer.timeout.connect(check_window)
+                timer.start(100)
 
-            # Start event loop
-            self.event_loop()
+                # Start event loop
+                self.qt_app.exec()
 
             # Wait for selection to complete with timeout
             if not self.selection_complete.wait(timeout=300):  # 5 minute timeout
@@ -97,28 +92,23 @@ class CLIICASelector:
 
         except Exception as e:
             print(f"Error in select_components: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
 
         finally:
             # Ensure cleanup
-            try:
-                plt.close('all')
-                if selector and hasattr(selector, '_window') and selector._window:
-                    try:
-                         selector._window.close()
-                    except Exception as e:
-                        print(f"Error during close window: {e}")
-                if self.qt_app and self.qt_app.activeWindow():
-                    try:
+            if not self.is_gui_mode:
+                try:
+                    plt.close('all')
+                    if selector and hasattr(selector, '_window') and selector._window:
+                        selector._window.close()
+                    if self.qt_app and self.qt_app.activeWindow():
                         self.qt_app.quit()
-                    except Exception as e:
-                       print(f"Error during app quit: {e}")
+                except Exception as e:
+                    print(f"Error during cleanup: {str(e)}")
 
-            except Exception as e:
-                print(f"Error during cleanup: {str(e)}")
-
-
-def get_cli_ica_callback():
-    """Create a callback function for CLI ICA selection"""
-    selector = CLIICASelector()
+def get_cli_ica_callback(is_gui_mode=False):
+    """Create a callback function for ICA selection"""
+    selector = CLIICASelector(is_gui_mode)
     return selector.select_components

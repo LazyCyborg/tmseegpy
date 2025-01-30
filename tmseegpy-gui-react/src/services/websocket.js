@@ -3,10 +3,11 @@ import { io } from 'socket.io-client';
 // Configuration object
 const CONFIG = {
     SOCKET_URL: process.env.REACT_APP_SOCKET_URL || 'http://localhost:5001',
-    RECONNECTION_ATTEMPTS: 5,
-    RECONNECTION_DELAY: 1000,
+    RECONNECTION_ATTEMPTS: 3,  // Reduced from 5
+    RECONNECTION_DELAY: 2000,  // Increased from 1000
     RECONNECTION_DELAY_MAX: 5000,
-    TIMEOUT: 20000
+    TIMEOUT: 20000,
+    MAX_QUEUE_SIZE: 100  // Add this to manage message queue
 };
 
 // Callback handlers
@@ -26,8 +27,13 @@ export const socket = io(CONFIG.SOCKET_URL, {
     reconnectionDelay: CONFIG.RECONNECTION_DELAY,
     reconnectionDelayMax: CONFIG.RECONNECTION_DELAY_MAX,
     timeout: CONFIG.TIMEOUT,
-    transports: ['websocket', 'polling']
+    transports: ['websocket'], // Remove polling to prevent transport switching
+    forceNew: true,           // Add this
+    multiplex: false         // Add this
 });
+
+let connectionAttempts = 0;
+let isReconnecting = false;
 
 // Event logging wrapper
 const logEvent = (eventName, data, isError = false) => {
@@ -69,8 +75,26 @@ const updateConsoleOutput = (() => {
     };
 })();
 
+
+const handleReconnect = () => {
+    if (connectionAttempts >= CONFIG.RECONNECTION_ATTEMPTS || isReconnecting) {
+        return;
+    }
+
+    isReconnecting = true;
+    setTimeout(() => {
+        if (!socket.connected) {
+            connectionAttempts++;
+            socket.connect();
+        }
+        isReconnecting = false;
+    }, CONFIG.RECONNECTION_DELAY);
+};
+
 // Connection event handlers
 socket.on('connect', () => {
+    connectionAttempts = 0;
+    isReconnecting = false;
     logEvent('WebSocket', 'Connected');
     callbacks.connection(true);
     updateConsoleOutput('WebSocket Connected', 'status');
@@ -86,6 +110,11 @@ socket.on('disconnect', (reason) => {
     logEvent('WebSocket Disconnected', reason);
     callbacks.connection(false);
     updateConsoleOutput(`Disconnected: ${reason}`, 'status');
+
+    // Only attempt reconnect if not client initiated
+    if (reason !== 'io client disconnect' && !isReconnecting) {
+        handleReconnect();
+    }
 });
 
 socket.on('reconnect', (attemptNumber) => {
@@ -147,6 +176,21 @@ socket.on('ica_status', (data) => {
     updateConsoleOutput(data?.message || JSON.stringify(data), 'ica');
 });
 
+// Add to your existing socket event handlers
+socket.on('ica_data', (data) => {
+    logEvent('ICA Data Received', data);
+    if (!data?.data) {
+        updateConsoleOutput('Received invalid ICA data format', 'error');
+        return;
+    }
+    callbacks.ica(data);
+});
+
+socket.on('ica_error', (error) => {
+    logEvent('ICA Error', error, true);
+    updateConsoleOutput(error.message || 'Error receiving ICA data', 'error');
+});
+
 // Register callbacks for different event types
 export const registerCallbacks = ({
     onStatus,
@@ -166,14 +210,14 @@ export const registerCallbacks = ({
 let reconnectTimer = null;
 
 export const connectWebSocket = () => {
-    if (!socket.connected) {
+    if (!socket.connected && !isReconnecting) {
         clearTimeout(reconnectTimer);
+        connectionAttempts = 0;
         socket.connect();
 
         reconnectTimer = setTimeout(() => {
             if (!socket.connected) {
-                logEvent('WebSocket', 'Connection timeout - forcing reconnect');
-                socket.disconnect().connect();
+                handleReconnect();
             }
         }, CONFIG.TIMEOUT);
     }

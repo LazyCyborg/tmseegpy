@@ -115,6 +115,16 @@ export const api = {
         }
     },
 
+    getICAComponents: async (params) => {
+        try {
+            const response = await axiosInstance.post('/api/ica_components', params);
+            return response.data;
+        } catch (error) {
+            console.error('Error getting ICA components:', error);
+            throw error;
+        }
+    },
+
     getResults: async () => {
         try {
             const response = await axiosInstance.get('/api/results');

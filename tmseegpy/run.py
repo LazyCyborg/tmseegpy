@@ -42,7 +42,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tmseegpy.preproc import TMSEEGPreprocessor  # absolute import
 from tmseegpy.dataloader import TMSEEGLoader
-from tmseegpy.cli_ica_selector import get_cli_ica_callback
+from tmseegpy.ica_selector_gui.websocket_ica_selector import WebSocketICASelector
+
 from tmseegpy.pcist import PCIst
 from tmseegpy.preproc_vis import save_raw_data, save_epochs_data
 from tmseegpy.validate_tep import (
@@ -61,6 +62,52 @@ import queue
 mne.viz.use_browser_backend("matplotlib")
 plt.rcParams['figure.figsize'] = [8, 6]
 
+
+def get_ica_callback(gui_mode=False):
+    """Get appropriate ICA callback based on mode"""
+    if gui_mode:
+        from .ica_selector_gui.websocket_ica_selector import WebSocketICASelector
+        def callback(ica_instance, inst, component_scores=None):
+            try:
+                print("Starting ICA component selection...")
+
+                # Create queues for ICA component selection
+                from queue import Queue
+                selection_queue = Queue()
+                result_queue = Queue()
+
+                # Create selector instance
+                selector = WebSocketICASelector(selection_queue, result_queue)
+
+                # Format and send component data
+                component_data = selector._get_component_data(ica_instance, inst)
+                selection_queue.put(component_data)
+
+                # Emit event to notify frontend
+                from .server.server import socketio
+                print("Emitting ica_required event...")
+                socketio.emit('ica_required', {
+                    'componentCount': len(component_data)
+                })
+
+                # Wait for result
+                print("Waiting for component selection...")
+                selected_components = selector.select_components(ica_instance, inst)
+                print(f"Received selected components: {selected_components}")
+
+                return selected_components
+
+            except Exception as e:
+                print(f"Error in ICA GUI callback: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return []
+
+        return callback
+    else:
+        # Use existing CLI callback for command line usage
+        from .cli_ica_selector import get_cli_ica_callback
+        return get_cli_ica_callback(is_gui_mode=False)
 
 def generate_preproc_stats(processor, session_name, output_dir):
     """
@@ -500,8 +547,9 @@ def process_subjects(args, status_callback=None):
         #plot_components = False
 
         if args.first_ica_manual:
-            from tmseegpy.cli_ica_selector import get_cli_ica_callback
-            first_ica_callback = get_cli_ica_callback()
+            # Check if we're running in GUI mode
+            gui_mode = hasattr(args, 'gui_mode') and args.gui_mode
+            first_ica_callback = get_ica_callback(gui_mode=gui_mode)
 
         # Modified first ICA call
         if args.first_ica_manual:
@@ -584,7 +632,9 @@ def process_subjects(args, status_callback=None):
             combined_callback("Running second ICA...", progress=85)
         if check_stop(): return []
         if args.second_ica_manual:
-            second_ica_callback = get_cli_ica_callback()
+            # Check if we're running in GUI mode
+            gui_mode = hasattr(args, 'gui_mode') and args.gui_mode
+            second_ica_callback = get_ica_callback(gui_mode=gui_mode)
             processor.run_second_ica(
                 method=args.second_ica_method,
                 blink_thresh=args.blink_thresh,  # Add these
@@ -738,14 +788,7 @@ def process_subjects(args, status_callback=None):
         pcist_details.append(details)
         session_names.append(session_name)
 
-    
-    #if args.preproc_qc:
-       # preproc_stats_file = generate_preproc_stats(
-           # processor,
-           # session_name,
-           # args.output_dir
-       #)
-       # print(f"Preprocessing statistics saved to: {preproc_stats_file}")
+
 
     if args.research:
         output_file = generate_research_stats(

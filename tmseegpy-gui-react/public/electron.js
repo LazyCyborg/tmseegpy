@@ -110,41 +110,48 @@ const backendPath = getResourcePath('server');
 // Modified createWindow function
 async function createWindow() {
     try {
-        const serverRunning = await checkServerRunning();
-
-        if (!serverRunning) {
-            // Log the error and show a dialog instead of throwing
-            log.error('TMSeegpy server not running. Please start TMSeegpy first.');
-            dialog.showErrorBox(
-                'Server Error',
-                'TMSeegpy server is not running. Please start the server and try again.'
-            );
-            app.quit();
-            return;
-        }
-
+        // Create the window first
         mainWindow = new BrowserWindow({
-            width: 1200, height: 800,
+            width: 1200,
+            height: 800,
             webPreferences: {
-                nodeIntegration: false, contextIsolation: true,
+                nodeIntegration: false,
+                contextIsolation: true,
                 enableRemoteModule: false,
                 preload: path.join(__dirname, 'preload.js')
             }
         });
 
+        // Load the app
         if (isDev) {
-            mainWindow.loadURL('http://localhost:3000');
+            await mainWindow.loadURL('http://localhost:3000');
             mainWindow.webContents.openDevTools();
         } else {
-            mainWindow.loadFile(path.join(__dirname, 'index.html')); // Just load from the current directory
+            await mainWindow.loadFile(path.join(__dirname, 'index.html'));
             autoUpdater.checkForUpdatesAndNotify();
+        }
+
+        // Check server after window is loaded
+        const serverRunning = await checkServerRunning();
+        if (!serverRunning) {
+            log.warn('TMSeegpy server not running. Please start TMSeegpy first.');
+            // Send message to renderer instead of showing dialog
+            mainWindow.webContents.send('server-status', {
+                running: false,
+                message: 'TMSeegpy server is not running. Please start the server and try again.'
+            });
+        } else {
+            mainWindow.webContents.send('server-status', {
+                running: true,
+                message: 'TMSeegpy server is running.'
+            });
         }
 
         // Add environment variables for Python paths
         process.env.TMSEEGPY_PATH = tmseegpyPath;
         process.env.BACKEND_PATH = backendPath;
 
-        mainWindow.on('closed', async () => {
+        mainWindow.on('closed', () => {
             mainWindow = null;
         });
 
@@ -154,7 +161,9 @@ async function createWindow() {
             'Startup Error',
             `Failed to start the application: ${error.message}`
         );
-        app.quit();
+        if (mainWindow) {
+            mainWindow.close();
+        }
     }
 }
 

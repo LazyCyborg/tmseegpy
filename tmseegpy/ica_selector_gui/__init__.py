@@ -1,8 +1,8 @@
 # tmseegpy/ica_selector_gui/__init__.py
 
-from.ica_selector_react import (
-    ICAComponentSelector_React,
-    ICAComponentSelectorContinuous_React
+from.websocket_ica_selector import (
+    WebSocketICASelector,
+
 )
 from .ica_selector import (
     ICAComponentSelector,
@@ -12,7 +12,6 @@ from .ica_selector import (
 __all__ = [
     'ICAComponentSelector',
     'ICAComponentSelectorContinuous',
-    'ICAComponentSelector_React',
-    'ICAComponentSelectorContinuous_React'
+    'WebSocketICASelector',
 
 ]

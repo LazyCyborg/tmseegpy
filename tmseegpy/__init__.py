@@ -6,7 +6,7 @@ from .ica_selector_gui.ica_selector import (
     ICAComponentSelector,
     ICAComponentSelectorContinuous
 )
-from .ica_selector_gui.ica_selector_react import (ICAComponentSelector_React, ICAComponentSelectorContinuous_React)
+from .ica_selector_gui.websocket_ica_selector import WebSocketICASelector
 from .analyze import *
 from .clean import *
 from .pcist import *
@@ -28,8 +28,7 @@ __all__ = [
     'ICAComponentSelectorContinuous',
     'CLIICASelector',
     'get_cli_ica_callback',
-    'ICAComponentSelector_React',
-    'ICAComponentSelectorContinuous_React'
+    'WebSocketICASelector',
 ]
 
 # Define entry points for command line tools
