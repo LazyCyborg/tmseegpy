@@ -3,10 +3,10 @@
 clear; close all; eeglab;
 
 filename = '2024-12-17T144344'
-output_dir = '/Users/alexe/Kaggle/TMSEEGNeo/TMSEEG'
+output_dir = '/'
 
 % Define paths and parameters
-dataPath = '/Users/alexe/Kaggle/TMSEEGNeo/TMSEEG/2024-12-17T144344';
+dataPath = '/';
 sessionPhaseNumber = 1, 2, 3, 4;
 chans = '';
 
