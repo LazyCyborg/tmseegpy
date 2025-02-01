@@ -507,7 +507,7 @@ def process_subjects(args, status_callback=None):
                                         cut_times_tms=(-2, 10))  # Step 9
 
         if args.save_preproc:
-            save_raw_data(raw, args.output_dir, step_name='raw_i')
+            save_raw_data(raw, args.output_dir, step_name='raw_i', session_name=session_name)
         #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
         if args.filter_raw:
             print("\nFiltering raw eeg data...")

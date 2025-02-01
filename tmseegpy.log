@@ -2803,3 +2803,39 @@ AttributeError: 'OutputCapturer' object has no attribute 'flush'
 2025-01-30 04:06:44,971 - INFO - Starting epoched processing mode...
 2025-01-30 04:10:31,296 - INFO - Processing completed successfully
 2025-01-30 04:22:19,047 - INFO - Shutting down server...
+2025-01-30 14:41:05,118 - INFO - Starting processing task...
+2025-01-30 14:41:05,120 - INFO - Mapping frontend parameters...
+2025-01-30 14:41:05,120 - INFO - Checking directory structure in: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG
+2025-01-30 14:41:05,120 - INFO - Directory exists: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG
+2025-01-30 14:41:05,120 - INFO - Directory is absolute path: True
+2025-01-30 14:41:05,121 - INFO - Scanning directory contents...
+2025-01-30 14:41:05,121 - INFO - Found item: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/.DS_Store (is_file: True, is_dir: False)
+2025-01-30 14:41:05,121 - INFO - Found item: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/2024-12-04T163850_wake (is_file: False, is_dir: True)
+2025-01-30 14:41:05,121 - INFO - Found item: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/output (is_file: False, is_dir: True)
+2025-01-30 14:41:05,121 - INFO - Found item: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/NeurOne-2024-12-04T163850_wake.ses (is_file: True, is_dir: False)
+2025-01-30 14:41:05,121 - INFO - Found item: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/2024-12-04T170714_sleep (is_file: False, is_dir: True)
+2025-01-30 14:41:05,121 - INFO - Found item: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/NeurOne-2024-12-04T170714_sleep.ses (is_file: True, is_dir: False)
+2025-01-30 14:41:05,121 - INFO - Searching for .ses files...
+2025-01-30 14:41:05,121 - INFO - Scanning directory: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG
+2025-01-30 14:41:05,121 - INFO - Found directories: ['2024-12-04T163850_wake', 'output', '2024-12-04T170714_sleep']
+2025-01-30 14:41:05,121 - INFO - Found files: ['.DS_Store', 'NeurOne-2024-12-04T163850_wake.ses', 'NeurOne-2024-12-04T170714_sleep.ses']
+2025-01-30 14:41:05,122 - INFO - Found .ses file: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/NeurOne-2024-12-04T163850_wake.ses
+2025-01-30 14:41:05,122 - INFO - Found .ses file: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/NeurOne-2024-12-04T170714_sleep.ses
+2025-01-30 14:41:05,122 - INFO - Scanning directory: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/2024-12-04T163850_wake
+2025-01-30 14:41:05,122 - INFO - Found directories: ['1']
+2025-01-30 14:41:05,122 - INFO - Found files: ['Protocol.xml', 'ImpedanceData-2024-12-04T160751.txt', 'Session.xml', 'SystemInfo.xml', 'DataSetProtocol.xml', 'Session.log', 'DataSetSession.xml', 'CalibrationFiles.zip', 'HeadBoxVoltages.txt']
+2025-01-30 14:41:05,122 - INFO - Scanning directory: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/2024-12-04T163850_wake/1
+2025-01-30 14:41:05,122 - INFO - Found directories: []
+2025-01-30 14:41:05,122 - INFO - Found files: ['events.bin', 'eventData.bin', 'eventDescriptions.bin', '1.bin']
+2025-01-30 14:41:05,122 - INFO - Scanning directory: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/output
+2025-01-30 14:41:05,122 - INFO - Found directories: []
+2025-01-30 14:41:05,123 - INFO - Found files: []
+2025-01-30 14:41:05,123 - INFO - Scanning directory: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/2024-12-04T170714_sleep
+2025-01-30 14:41:05,123 - INFO - Found directories: ['1']
+2025-01-30 14:41:05,123 - INFO - Found files: ['Protocol.xml', 'Session.xml', 'SystemInfo.xml', 'DataSetProtocol.xml', 'Session.log', 'DataSetSession.xml', 'CalibrationFiles.zip', 'HeadBoxVoltages.txt']
+2025-01-30 14:41:05,123 - INFO - Scanning directory: /Users/alexe/Kaggle/get_done/Magnus_test/TMSEEG/2024-12-04T170714_sleep/1
+2025-01-30 14:41:05,123 - INFO - Found directories: []
+2025-01-30 14:41:05,123 - INFO - Found files: ['events.bin', 'eventData.bin', 'eventDescriptions.bin', '1.bin']
+2025-01-30 14:41:05,124 - INFO - Starting epoched processing mode...
+2025-01-30 14:58:56,530 - INFO - Processing completed successfully
+2025-01-31 17:25:10,374 - INFO - Shutting down server...

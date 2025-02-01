@@ -377,10 +377,22 @@ def plot_tep_analysis(epochs: mne.Epochs,
     gs = plt.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.3)
     gs_main = gs[0].subgridspec(2, 1, height_ratios=[1.5, 1], hspace=0.3)
 
-    # Butterfly plot with GMFA/GFP
+    # Butterfly plot - different for GMFA and ROI
     ax_butterfly = fig.add_subplot(gs_main[0])
-    evoked.plot(gfp=True, xlim=(-0.1, 0.4), axes=ax_butterfly, show=False)
-    ax_butterfly.set_title(f'TEP Butterfly Plot with {analysis_type.upper()}')
+    if analysis_type.lower() == 'gmfa':
+        evoked.plot(gfp=True, xlim=(-0.1, 0.4), axes=ax_butterfly, show=False)
+        ax_butterfly.set_title('TEP Butterfly Plot with GMFA')
+    else:  # ROI analysis
+        if channels[0].lower() == 'all':
+            ch_picks = slice(None)
+        else:
+            ch_picks = [i for i, ch in enumerate(evoked.ch_names) if ch in channels]
+
+        # Plot only ROI channels
+        evoked_roi = evoked.copy()
+        evoked_roi.pick(ch_picks)
+        evoked_roi.plot(xlim=(-0.1, 0.4), axes=ax_butterfly, show=False)
+        ax_butterfly.set_title(f'TEP Plot - ROI Channels ({", ".join(channels)})')
 
     # Analysis plot
     ax_analysis = fig.add_subplot(gs_main[1])
