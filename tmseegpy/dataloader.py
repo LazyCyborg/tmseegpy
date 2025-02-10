@@ -2,6 +2,7 @@ from pathlib import Path
 import mne
 from typing import Optional, Union, Dict, List, Any
 from .neurone_loader import Recording
+from .neurone_loader.neurone import read_neurone_protocol, read_neurone_events, read_neurone_data
 
 
 class TMSEEGLoader:
@@ -161,34 +162,100 @@ class TMSEEGLoader:
 
     def _load_neurone(self) -> List[mne.io.Raw]:
         """
-        Load NeurOne .ses files.
-
-        Returns
-        -------
-        List[mne.io.Raw]
-            List of loaded Raw objects
+        Load NeurOne .ses file with all its phases.
         """
-        rec = Recording(str(self.data_path))
-        self.sessions = rec.sessions
-        self.raw_list = [
-            session.to_mne(substitute_zero_events_with=self.substitute_zero_events_with)
-            for session in rec.sessions
-        ]
+        import numpy as np
+        try:
+            if self.verbose:
+                print(f"Loading NeurOne file: {self.data_path}")
 
-        # Modified session info creation
-        self.session_info = []
-        for session in rec.sessions:
-            # Get session path as Path object and extract name
-            session_path = Path(session.path)
-            session_name = session_path.name if isinstance(session_path, Path) else Path(session.path).name
+            # Find .ses files in the directory
+            ses_files = list(Path(self.data_path).glob("*.ses"))
+            if not ses_files:
+                raise ValueError(f"No .ses files found in {self.data_path}")
 
-            self.session_info.append({
-                'name': session_name,
-                'format': 'neurone',
-                'path': str(session.path)
-            })
+            self.raw_list = []
+            self.session_info = []
 
-        return self.raw_list
+            for ses_file in ses_files:
+                # Get the corresponding data directory (without NeurOne- prefix)
+                session_dir = ses_file.parent / ses_file.stem.replace('NeurOne-', '')
+
+                try:
+                    # Read protocol to get phases information
+                    protocol = read_neurone_protocol(str(session_dir))
+                    phases = protocol.get('phases', [])
+
+                    if not phases:
+                        print(f"No phases found in protocol for {session_dir}")
+                        continue
+
+                    # Process each phase
+                    for phase in phases:
+                        try:
+                            phase_number = phase['number']
+                            # Read data and events for this phase
+                            data = read_neurone_data(str(session_dir), session_phase=phase_number, protocol=protocol)
+                            print(f"Raw NeurOne data range: [{np.min(data)}, {np.max(data)}]")
+                            data = data * 1e-3
+                            print(f"Scaled data range (µV): [{np.min(data)}, {np.max(data)}]")
+                            events_dict = read_neurone_events(str(session_dir), session_phase=phase_number)
+
+                            # Create stim channel from events
+                            n_samples = data.shape[0]
+                            stim_channel = np.zeros(n_samples)
+
+                            # Add events to stim channel
+                            if len(events_dict['events']) > 0:
+                                for event in events_dict['events']:
+                                    stim_channel[event['StartSampleIndex']] = self.substitute_zero_events_with
+
+                            # Add stim channel to data
+                            data_with_stim = np.vstack([data.T, stim_channel])
+                            ch_names = protocol['channels'] + ['STI 014']
+                            ch_types = ['eeg'] * len(protocol['channels']) + ['stim']
+
+                            # Create raw object with stim channel
+                            raw = mne.io.RawArray(
+                                data_with_stim,
+                                info=mne.create_info(
+                                    ch_names=ch_names,
+                                    sfreq=protocol['meta']['sampling_rate'],
+                                    ch_types=ch_types
+                                )
+                            )
+
+                            phase_name = f"{session_dir.name}_phase_{phase_number}"
+                            self.session_info.append({
+                                'name': phase_name,
+                                'format': 'neurone',
+                                'path': str(session_dir),
+                                'phase': phase_number,
+                                'phase_start': phase['time_start'],
+                                'phase_stop': phase['time_stop']
+                            })
+
+                            self.raw_list.append(raw)
+
+                            if self.verbose:
+                                print(f"Loaded {phase_name}")
+
+                        except Exception as e:
+                            print(f"Error loading phase {phase_number}: {str(e)}")
+                            continue
+
+                except Exception as e:
+                    print(f"Error loading session file {ses_file}: {str(e)}")
+                    continue
+
+            if not self.raw_list:
+                print(f"No data loaded from {self.data_path}")
+
+            return self.raw_list
+
+        except Exception as e:
+            print(f"Error loading {self.data_path}: {str(e)}")
+            return []
 
     def get_session_names(self) -> List[str]:
         """Get list of session names"""

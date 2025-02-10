@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Tab } from '@headlessui/react';
 import { api } from './services/api';
 import  ICAComponentVisualizer  from './ICAComponentVisualizer'
+import  {mapOptionsToBackendParams}  from './services/parameterMapping'
 import './styles/Console.css';
 import { socket, registerCallbacks, connectWebSocket, disconnectWebSocket } from './services/websocket';
 import  ServerCheck  from './ServerCheck';
@@ -131,107 +132,122 @@ function TmseegpyGUI() {
     });
 
     // Basic Options State
-    const [basicOptions, setBasicOptions] = useState({
-        // Core Processing
-        processingMode: 'epoched',
-        dataFormat: 'neurone',
-        dataDir: './data',
-        outputDir: './output',
+    // Basic Options State
+const [basicOptions, setBasicOptions] = useState({
+    // Core Processing
+    processingMode: 'epoched',
+    dataFormat: 'neurone',
+    dataDir: './data',
+    outputDir: './output',
+    noPreprocessOutput: false,
+    noPcist: false,  // Inverted from performPCIst
+    eeglabMontageUnits: 'auto',
+    stimChannel: 'STI 014',
+    savePreproc: false,
+    randomSeed: 42,
+    substituteZeroEventsWith: 10,
 
-        // Epoch Settings
-        epochsTmin: -0.41,
-        epochsTmax: 0.41,
+    // Epoch Settings
+    epochsTmin: -0.41,
+    epochsTmax: 0.41,
 
-        // Basic Filtering
-        lFreq: 0.1,
-        hFreq: 45,
-        notchFreq: 50,
+    // Basic Filtering
+    lFreq: 0.1,
+    hFreq: 45,
+    rawHFreq: 250,
+    notchFreq: 50,
 
-        // Basic Thresholds
-        amplitudeThreshold: 300.0,
-        badChannelsThreshold: 2,
-        badEpochsThreshold: 2,
+    // Basic Thresholds
+    amplitudeThreshold: 300.0,
+    badChannelsThreshold: 3,
+    badEpochsThreshold: 3,
 
-        // Basic Processing Flags
-        validateTEPs: true,
-        performPCIst: true,  // maps to !no_pcist in backend
-        plot_preproc: false,
-        no_preproc_output: false,
-        parafac_muscle_artifacts: false  // moved from advanced
-    });
+    // Basic Processing Flags
+    analyzeTeps: true,
+    parafacMuscleArtifacts: false,
+    plotPreproc: false
+});
 
-    // Advanced Options State
-    const [advancedOptions, setAdvancedOptions] = useState({
-        // Preprocessing Parameters
-        initialSfreq: 1000,
-        finalSfreq: 725,
-        stimChannel: 'STI 014',
-        substituteZeroEventsWith: 10,
-        randomSeed: 42,
-        eegLabMontageUnits: 'auto',
+// Advanced Options State
+const [advancedOptions, setAdvancedOptions] = useState({
+    // Preprocessing Parameters
+    initialSfreq: 1000,
+    finalSfreq: 725,
 
-        // Artifact Removal
-        initialWindowStart: -2,
-        initialWindowEnd: 10,
-        extendedWindowStart: -2,
-        extendedWindowEnd: 15,
-        initialInterpWindow: 1.0,
-        extendedInterpWindow: 5.0,
-        interpolationMethod: 'cubic',
-        skipSecondArtifactRemoval: false,
+    // Window Parameters
+    initialWindowStart: -2,
+    initialWindowEnd: 10,
+    extendedWindowStart: -2,
+    extendedWindowEnd: 15,
+    initialInterpWindow: 1.0,
+    extendedInterpWindow: 5.0,
+    interpolationMethod: 'cubic',
 
-        // ICA Settings
-        firstIcaManual: true,
-        secondIcaManual: true,
-        no_second_ICA: false,
-        icaMethod: 'fastica',
-        secondIcaMethod: 'fastica',
-        blinkThresh: 2.5,
-        latEyeThresh: 2.0,
-        noiseThresh: 4.0,
-        tmsMuscleThresh: 2.0,
-        muscleThresh: 0.6,
+    // Processing Options
+    skipSecondArtifactRemoval: false,
+    mneFilterEpochs: false,
+    plotRaw: false,
+    filterRaw: false,
 
-        // PARAFAC Muscle Artifact Settings
-        muscleWindowStart: 0.005,
-        muscleWindowEnd: 0.030,
-        thresholdFactor: 1.0,
-        nComponents: 5,
+    // Filtering Parameters
+    notchWidth: 2,
 
-        // Filter Settings
-        notchWidth: 2,
-        mneFilterEpochs: false,
-        filterRaw: false,    // moved from advanced
+    // ICA Parameters
+    icaMethod: 'fastica',
+    firstIcaManual: true,
+    secondIcaManual: true,
+    noFirstIca: false,
+    noSecondIca: false,
+    secondIcaMethod: 'fastica',
 
-        // Additional Processing
-        applySsp: false,
-        sspNEeg: 2,
-        applyCsd: false,
-        lambda2: 1e-3,
-        stiffness: 4,
+    // Artifact Thresholds
+    blinkThresh: 2.5,
+    latEyeThresh: 2.0,
+    noiseThresh: 4.0,
+    tmsMuscleThresh: 2.0,
+    muscleThresh: 0.6,
 
-        // TEP Analysis
-        tep_analysis_type: 'gmfa',
-        tep_roi_channels: ['C3', 'C4'],
-        tep_method: 'largest',
-        tep_samples: 5,
-        save_validation: false,
-        save_evoked: false,
+    // Muscle Artifact Parameters
+    muscleWindowStart: 0.005,
+    muscleWindowEnd: 0.030,
+    thresholdFactor: 1.0,
+    nComponents: 5,
 
-        // PCIst Parameters
-        k: 1.2,
-        max_var: 99.0,
-        embed: false,
-        n_steps: 100,
-        pre_window_start: -400,
-        pre_window_end: -50,
-        post_window_start: 0,
-        post_window_end: 300,
+    // SSP and CSD Parameters
+    applySsp: false,
+    sspNEeg: 2,
+    applyCsd: false,
+    lambda2: 1e-3,
+    stiffness: 4,
 
-        // Output Options
-        plotRaw: false,
-        research: false
-    });
+    // TEP Analysis Parameters
+    saveEvoked: false,
+    tepAnalysisType: 'gmfa',  // Changed from tep_analysis_type
+    tepRoiChannels: ['C3', 'C4'],  // Changed from tep_roi_channels
+    tepMethod: 'largest',  // Changed from tep_method
+    tepSamples: 5,  // Changed from tep_samples
+    saveValidation: false,
+
+    // Window Parameters for Analysis
+    baselineStart: -400,
+    baselineEnd: -50,
+    responseStart: 0,
+    responseEnd: 299,
+
+    // PCIst Parameters
+    k: 1.2,
+    minSnr: 1.1,
+    maxVar: 99.0,
+    embed: false,
+    nSteps: 100,
+    preWindowStart: -400,
+    preWindowEnd: -50,
+    postWindowStart: 0,
+    postWindowEnd: 300,
+
+    // Research Mode
+    research: false
+});
 
 
 
@@ -295,9 +311,12 @@ const handleDirectorySelect = async () => {
 
         if (result) {
             const parentDir = result.path;
+            console.log('Selected directory:', parentDir); // Debug log
+
             // Set up default output directory
             const defaultOutputDir = `${parentDir}/output`;
 
+            // Update states
             setSelectedDirectory(parentDir);
             setBasicOptions(prev => ({
                 ...prev,
@@ -305,12 +324,11 @@ const handleDirectorySelect = async () => {
                 outputDir: defaultOutputDir
             }));
 
-            // Create FormData with the directory information
+            // Notify server
             const formData = new FormData();
             formData.append('parentDirectory', parentDir);
             formData.append('tmseegDirectory', result.tmseegPath);
 
-            // Notify server about the selected directory
             const response = await api.upload(formData);
             if (response.data?.message) {
                 setStatusMessage(response.data.message);
@@ -340,6 +358,8 @@ const handleClearSelection = () => {
 };
 
 
+
+
 const handleStartProcessing = async () => {
     if (!selectedDirectory) {
         setError('Please select a directory first');
@@ -357,31 +377,24 @@ const handleStartProcessing = async () => {
         setFilesProcessed(0);
         setResultsSummary([]);
 
-        // Verify server connection
-        if (!isConnected) {
-          throw new Error('Not connected to TMSeegpy server...');
-        }
+        // Map the parameters
+        const mappedParams = mapParametersToBackend(basicOptions, advancedOptions, selectedDirectory);
 
-        // Prepare options
-        const options = {
-            ...basicOptions,
-            ...advancedOptions,
-            dataDir: selectedDirectory,
-            processingMode: basicOptions.processingMode || 'epoched',
-            dataFormat: basicOptions.dataFormat || 'neurone'
-        };
+        // Validate the mapped parameters
+        validateParameters(mappedParams);
 
-        console.log('Starting processing with options:', options);
+        // Log what we're sending (for debugging)
+        console.log('Starting processing with options:', mappedParams);
+
         setProcessingLogs(prev => [
             ...prev,
             'Starting processing...',
-            `Input directory: ${options.dataDir}`,
-            `Output directory: ${options.outputDir}`
+            `Input directory: ${selectedDirectory}`,
+            `Output directory: ${mappedParams.output_dir}`
         ]);
 
-        // Make the API call
-        const response = await api.process(options);
-        console.log('Processing initiated:', response);
+        // Make the API call with the mapped parameters
+        const response = await api.process(mappedParams);
 
         if (response.data?.message) {
             setStatusMessage(response.data.message);
@@ -401,7 +414,6 @@ const handleStartProcessing = async () => {
             'Processing stopped due to error'
         ]);
 
-        // Try to stop processing
         try {
             await api.stop();
         } catch (cleanupError) {
@@ -762,64 +774,125 @@ const renderConsole = () => (
                                 <div className="space-y-4">
                                     <h3 className="text-md font-medium text-gray-700">Core Processing</h3>
 
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700">Processing Mode</label>
-                                        <select
-                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                            value={basicOptions.processingMode}
-                                            onChange={(e) => setBasicOptions({
-                                                ...basicOptions,
-                                                processingMode: e.target.value
-                                            })}
-                                        >
-                                            <option value="epoched">Epoched</option>
-                                            <option value="continuous">Continuous</option>
-                                        </select>
+                                    <div className="grid grid-cols-2 gap-4">
+
+                                        {/* Data Format */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700">Data Format</label>
+                                            <select
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                                value={basicOptions.dataFormat}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    dataFormat: e.target.value
+                                                }))}
+                                            >
+                                                <option value="neurone">Neurone</option>
+                                                <option value="brainvision">BrainVision</option>
+                                                <option value="edf">EDF</option>
+                                                <option value="cnt">CNT</option>
+                                                <option value="eeglab">EEGLAB</option>
+                                                <option value="auto">Auto</option>
+                                            </select>
+                                        </div>
                                     </div>
 
+                                    {/* EEGLAB Montage Units */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700">Data Format</label>
+                                        <label className="block text-sm font-medium text-gray-700">EEGLAB Montage Units</label>
                                         <select
                                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                            value={basicOptions.dataFormat}
-                                            onChange={(e) => setBasicOptions({
-                                                ...basicOptions,
-                                                dataFormat: e.target.value
-                                            })}
+                                            value={basicOptions.eeglabMontageUnits}
+                                            onChange={(e) => setBasicOptions(prev => ({
+                                                ...prev,
+                                                eeglabMontageUnits: e.target.value
+                                            }))}
                                         >
-                                            <option value="neurone">Neurone</option>
-                                            <option value="brainvision">BrainVision</option>
-                                            <option value="edf">EDF</option>
-                                            <option value="cnt">CNT</option>
-                                            <option value="eeglab">EEGLAB</option>
                                             <option value="auto">Auto</option>
+                                            <option value="mm">Millimeters</option>
+                                            <option value="cm">Centimeters</option>
+                                            <option value="m">Meters</option>
                                         </select>
                                     </div>
 
+                                    {/* Stim Channel */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700">Data Directory</label>
+                                        <label className="block text-sm font-medium text-gray-700">Stim Channel</label>
                                         <input
                                             type="text"
                                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                            value={basicOptions.dataDir}
-                                            onChange={(e) => setBasicOptions({
-                                                ...basicOptions,
-                                                dataDir: e.target.value
-                                            })}
+                                            value={basicOptions.stimChannel}
+                                            onChange={(e) => setBasicOptions(prev => ({
+                                                ...prev,
+                                                stimChannel: e.target.value
+                                            }))}
+                                            placeholder="STI 014"
                                         />
                                     </div>
 
+                                    {/* Substitute Zero Events With */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700">Output Directory</label>
+                                        <label className="block text-sm font-medium text-gray-700">Substitute Zero Events With</label>
                                         <input
-                                            type="text"
+                                            type="number"
                                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                            value={basicOptions.outputDir}
-                                            onChange={(e) => setBasicOptions({
-                                                ...basicOptions,
-                                                outputDir: e.target.value
-                                            })}
+                                            value={basicOptions.substituteZeroEventsWith}
+                                            onChange={(e) => setBasicOptions(prev => ({
+                                                ...prev,
+                                                substituteZeroEventsWith: parseInt(e.target.value)
+                                            }))}
                                         />
+                                    </div>
+
+                                    {/* Checkboxes for boolean options */}
+                                    <div className="space-y-3">
+                                        <div className="flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                id="noPreprocessOutput"
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                checked={basicOptions.noPreprocessOutput}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    noPreprocessOutput: e.target.checked
+                                                }))}
+                                            />
+                                            <label htmlFor="noPreprocessOutput" className="ml-2 text-sm font-medium text-gray-700">
+                                                Skip Preprocess Output
+                                            </label>
+                                        </div>
+
+                                        <div className="flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                id="noPcist"
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                checked={basicOptions.noPcist}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    noPcist: e.target.checked
+                                                }))}
+                                            />
+                                            <label htmlFor="noPcist" className="ml-2 text-sm font-medium text-gray-700">
+                                                Skip PCIst Calculation
+                                            </label>
+                                        </div>
+
+                                        <div className="flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                id="savePreproc"
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                checked={basicOptions.savePreproc}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    savePreproc: e.target.checked
+                                                }))}
+                                            />
+                                            <label htmlFor="savePreproc" className="ml-2 text-sm font-medium text-gray-700">
+                                                Save Preprocessing Results
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -828,78 +901,221 @@ const renderConsole = () => (
                                     <h3 className="text-md font-medium text-gray-700">Epoch Settings</h3>
 
                                     <div className="grid grid-cols-2 gap-4">
+                                        {/* Epoch Start Time */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Epoch Start (s)</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Epoch Start (s)
+                                                <span className="text-gray-500 text-xs ml-1">Default: -0.41</span>
+                                            </label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                                 value={basicOptions.epochsTmin}
-                                                onChange={(e) => setBasicOptions({
-                                                    ...basicOptions,
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
                                                     epochsTmin: parseFloat(e.target.value)
-                                                })}
+                                                }))}
                                                 step="0.01"
                                             />
+                                            <p className="mt-1 text-xs text-gray-500">Recommended range: -2 to 0</p>
                                         </div>
+
+                                        {/* Epoch End Time */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Epoch End (s)</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Epoch End (s)
+                                                <span className="text-gray-500 text-xs ml-1">Default: 0.41</span>
+                                            </label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                                 value={basicOptions.epochsTmax}
-                                                onChange={(e) => setBasicOptions({
-                                                    ...basicOptions,
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
                                                     epochsTmax: parseFloat(e.target.value)
-                                                })}
+                                                }))}
                                                 step="0.01"
+                                            />
+                                            <p className="mt-1 text-xs text-gray-500">Recommended range: 0 to 2</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Window Parameters */}
+                                    <div className="grid grid-cols-2 gap-4 mt-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Baseline Start (ms)
+                                                <span className="text-gray-500 text-xs ml-1">Default: -400</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                                value={basicOptions.baselineStart}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    baselineStart: parseInt(e.target.value)
+                                                }))}
+                                                step="10"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Baseline End (ms)
+                                                <span className="text-gray-500 text-xs ml-1">Default: -50</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                                value={basicOptions.baselineEnd}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    baselineEnd: parseInt(e.target.value)
+                                                }))}
+                                                step="10"
                                             />
                                         </div>
                                     </div>
                                 </div>
 
                                 {/* Basic Filtering Section */}
-                                <div className="space-y-4">
+                                <div className="space-y-4 mt-6">
                                     <h3 className="text-md font-medium text-gray-700">Basic Filtering</h3>
 
-                                    <div className="grid grid-cols-3 gap-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {/* Low Frequency Filter */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Low-pass Filter (Hz)</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Low-pass Filter (Hz)
+                                                <span className="text-gray-500 text-xs ml-1">Default: 0.1</span>
+                                            </label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                                 value={basicOptions.lFreq}
-                                                onChange={(e) => setBasicOptions({
-                                                    ...basicOptions,
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
                                                     lFreq: parseFloat(e.target.value)
-                                                })}
+                                                }))}
                                                 step="0.1"
+                                                min="0"
                                             />
+                                            <p className="mt-1 text-xs text-gray-500">Recommended range: 0.1 to 1 Hz</p>
                                         </div>
+
+                                        {/* High Frequency Filter */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">High-pass Filter (Hz)</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                High-pass Filter (Hz)
+                                                <span className="text-gray-500 text-xs ml-1">Default: 45</span>
+                                            </label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                                 value={basicOptions.hFreq}
-                                                onChange={(e) => setBasicOptions({
-                                                    ...basicOptions,
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
                                                     hFreq: parseFloat(e.target.value)
-                                                })}
-                                                step="0.1"
+                                                }))}
+                                                step="1"
+                                                min="0"
+                                            />
+                                            <p className="mt-1 text-xs text-gray-500">Recommended range: 30 to 100 Hz</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {/* Raw High Frequency Filter */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Raw High-pass Filter (Hz)
+                                                <span className="text-gray-500 text-xs ml-1">Default: 250</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                                value={basicOptions.rawHFreq}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    rawHFreq: parseFloat(e.target.value)
+                                                }))}
+                                                step="1"
+                                                min="0"
                                             />
                                         </div>
+
+                                        {/* Notch Filter */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Notch Filter (Hz)</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Notch Filter (Hz)
+                                                <span className="text-gray-500 text-xs ml-1">Default: 50</span>
+                                            </label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                                 value={basicOptions.notchFreq}
-                                                onChange={(e) => setBasicOptions({
-                                                    ...basicOptions,
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
                                                     notchFreq: parseFloat(e.target.value)
-                                                })}
+                                                }))}
                                                 step="1"
+                                                min="0"
                                             />
+                                            <p className="mt-1 text-xs text-gray-500">Usually 50 Hz (Europe) or 60 Hz (USA)</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Notch Width */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700">
+                                            Notch Width (Hz)
+                                            <span className="text-gray-500 text-xs ml-1">Default: 2</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                            value={basicOptions.notchWidth}
+                                            onChange={(e) => setBasicOptions(prev => ({
+                                                ...prev,
+                                                notchWidth: parseFloat(e.target.value)
+                                            }))}
+                                            step="0.1"
+                                            min="0"
+                                        />
+                                    </div>
+
+                                    {/* Filter Options */}
+                                    <div className="space-y-3 mt-4">
+                                        <div className="flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                id="filterRaw"
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                checked={basicOptions.filterRaw}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    filterRaw: e.target.checked
+                                                }))}
+                                            />
+                                            <label htmlFor="filterRaw" className="ml-2 text-sm font-medium text-gray-700">
+                                                Apply Raw Data Filtering
+                                            </label>
+                                        </div>
+
+                                        <div className="flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                id="mneFilterEpochs"
+                                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                checked={basicOptions.mneFilterEpochs}
+                                                onChange={(e) => setBasicOptions(prev => ({
+                                                    ...prev,
+                                                    mneFilterEpochs: e.target.checked
+                                                }))}
+                                            />
+                                            <label htmlFor="mneFilterEpochs" className="ml-2 text-sm font-medium text-gray-700">
+                                                Use MNE Filter for Epochs
+                                            </label>
                                         </div>
                                     </div>
                                 </div>
@@ -1182,22 +1398,6 @@ const renderConsole = () => (
                                                 step="0.1"
                                             />
                                         </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700">Interpolation Method</label>
-                                        <select
-                                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                            value={advancedOptions.interpolationMethod}
-                                            onChange={(e) => setAdvancedOptions({
-                                                ...advancedOptions,
-                                                interpolationMethod: e.target.value
-                                            })}
-                                        >
-                                            <option value="cubic">Cubic</option>
-                                            <option value="linear">Linear</option>
-                                            <option value="nearest">Nearest</option>
-                                        </select>
                                     </div>
 
                                     <div className="flex items-center space-x-3">
@@ -1489,7 +1689,7 @@ const renderConsole = () => (
                                                 })}
                                             />
                                             <label htmlFor="filter-raw" className="text-sm font-medium text-gray-700">
-                                                Filter Raw Data (Filter will be applied only on the raw sigal before the first ICA)
+                                                Filter Raw Data (Lowpass filter at 250 Hz)
                                             </label>
                                         </div>
                                     </div>
@@ -1586,10 +1786,10 @@ const renderConsole = () => (
                                         <label className="block text-sm font-medium text-gray-700">Analysis Type</label>
                                         <select
                                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                            value={advancedOptions.tep_analysis_type}
+                                            value={advancedOptions.tepAnalysisType}  // Changed from tep_analysis_type
                                             onChange={(e) => setAdvancedOptions({
                                                 ...advancedOptions,
-                                                tep_analysis_type: e.target.value
+                                                tepAnalysisType: e.target.value  // Changed from tep_analysis_type
                                             })}
                                         >
                                             <option value="gmfa">Global Mean Field Amplitude (GMFA)</option>
@@ -1597,35 +1797,80 @@ const renderConsole = () => (
                                         </select>
                                     </div>
 
-                                    {advancedOptions.tep_analysis_type === 'roi' && (
+                                    {advancedOptions.tepAnalysisType === 'roi' && (
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">ROI Channels</label>
-                                            <div className="mt-1 flex flex-wrap gap-2">
-                                                {advancedOptions.tep_roi_channels.map((channel, index) => (
-                                                    <div key={index} className="flex items-center bg-gray-100 rounded-md px-3 py-1">
-                                                        <span className="text-sm">{channel}</span>
-                                                        <button
-                                                            className="ml-2 text-gray-500 hover:text-red-500"
-                                                            onClick={() => {
-                                                                const newChannels = [...advancedOptions.tep_roi_channels];
-                                                                newChannels.splice(index, 1);
-                                                                setAdvancedOptions({
-                                                                    ...advancedOptions,
-                                                                    tep_roi_channels: newChannels
-                                                                });
-                                                            }}
-                                                        >
-                                                            ×
-                                                        </button>
+                                            <label className="block text-sm font-medium text-gray-700">ROI
+                                                Channels</label>
+                                            <div className="mt-2 space-y-4">
+                                                {/* Channel Selection */}
+                                                <div className="grid grid-cols-4 gap-2">
+                                                    {['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
+                                                        'T3', 'C3', 'Cz', 'C4', 'T4', 'T5', 'P3',
+                                                        'Pz', 'P4', 'T6', 'O1', 'O2'].map((channel) => {
+                                                        // Check if the channel is in the selected channels array
+                                                        const isSelected = advancedOptions.tepRoiChannels?.includes(channel) || false;
+
+                                                        return (
+                                                            <button
+                                                                key={channel}
+                                                                onClick={() => {
+                                                                    const currentChannels = [...(advancedOptions.tepRoiChannels || [])];
+                                                                    const newChannels = isSelected
+                                                                        ? currentChannels.filter(ch => ch !== channel)
+                                                                        : [...currentChannels, channel];
+
+                                                                    setAdvancedOptions(prev => ({
+                                                                        ...prev,
+                                                                        tepRoiChannels: newChannels
+                                                                    }));
+                                                                }}
+                                                                className={`px-3 py-2 text-sm rounded-md transition-colors ${
+                                                                    isSelected
+                                                                        ? 'bg-blue-600 text-white'
+                                                                        : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                                                                }`}
+                                                            >
+                                                                {channel}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+
+                                                {/* Selected Channels Display */}
+                                                <div className="bg-gray-50 p-3 rounded-md">
+                                                    <div className="text-sm font-medium text-gray-700 mb-2">Selected
+                                                        Channels:
                                                     </div>
-                                                ))}
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(advancedOptions.tepRoiChannels || []).map((channel) => (
+                                                            <div
+                                                                key={channel}
+                                                                className="flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded-md"
+                                                            >
+                                                                <span className="text-sm">{channel}</span>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setAdvancedOptions(prev => ({
+                                                                            ...prev,
+                                                                            tepRoiChannels: prev.tepRoiChannels.filter(ch => ch !== channel)
+                                                                        }));
+                                                                    }}
+                                                                    className="ml-2 text-blue-600 hover:text-blue-800"
+                                                                >
+                                                                    ×
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     )}
 
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">TEP Method</label>
+                                            <label className="block text-sm font-medium text-gray-700">TEP
+                                                Method</label>
                                             <select
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                                 value={advancedOptions.tep_method}
@@ -1640,7 +1885,8 @@ const renderConsole = () => (
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">TEP Samples</label>
+                                            <label className="block text-sm font-medium text-gray-700">TEP
+                                                Samples</label>
                                             <input
                                                 type="number"
                                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -1665,7 +1911,8 @@ const renderConsole = () => (
                                                     save_validation: e.target.checked
                                                 })}
                                             />
-                                            <label htmlFor="save-validation" className="text-sm font-medium text-gray-700">
+                                            <label htmlFor="save-validation"
+                                                   className="text-sm font-medium text-gray-700">
                                                 Save Validation Results
                                             </label>
                                         </div>

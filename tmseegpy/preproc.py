@@ -90,9 +90,12 @@ class TMSEEGPreprocessor:
         The EEG montage
     """
 
+    ### currently using easycap-M10 as the standard montage
+    ### used standard_1020 before and not sure if it makes a huge difference
+
     def __init__(self,
                  raw: mne.io.Raw,
-                 montage: Union[str, mne.channels.montage.DigMontage] = 'standard_1020',
+                 montage: Union[str, mne.channels.montage.DigMontage] = 'easycap-M1',
                  initial_sfreq: float = 1000,
                  final_sfreq: float = 725):
 
@@ -164,9 +167,10 @@ class TMSEEGPreprocessor:
         if isinstance(montage, str):
             try:
                 self.montage = mne.channels.make_standard_montage(montage)
+                print(f"Using montage: {montage} which seemed to work?")
             except ValueError as e:
                 print(f"Warning: Could not create montage '{montage}': {str(e)}")
-                print("Falling back to standard_1020 montage")
+                print("Falling back to easycap-M10 montage")
                 self.montage = mne.channels.make_standard_montage('standard_1020')
         else:
             self.montage = montage
@@ -363,7 +367,7 @@ class TMSEEGPreprocessor:
                 
                 try:
                     # Try setting montage again with default positions
-                    temp_montage = mne.channels.make_standard_montage('standard_1020')
+                    temp_montage = mne.channels.make_standard_montage('easycap-M10') ## standard_1020 was tried before not sure if it makes u huge difference
                     self.epochs.set_montage(temp_montage, match_case=False, on_missing='warn')
                     
                     # Try interpolation again
@@ -560,7 +564,7 @@ class TMSEEGPreprocessor:
                             y_full[-interp_samples:]
                         ])
                         
-                        # Use polynomial fit (like TESA) instead of spline
+                        # Using polynomial fit (like TESA) instead of spline which I used before and got worse results I think
                         p = np.polyfit(x_fit, y_fit, 3)
                         data[ch, start:end+1] = np.polyval(p, x_interp)
                     
@@ -592,8 +596,12 @@ class TMSEEGPreprocessor:
                 lat_eye_thresh: float = 2.0,
                 muscle_thresh: float = 0.6,
                 noise_thresh: float = 4.0,
-                #plot_components: bool = False,
                 manual_mode: bool = False,
+                use_topo: bool = False,
+                topo_edge_threshold: float = 0.15,
+                topo_zscore_threshold: float = 3.5,  # Changed name
+                topo_peak_threshold: float = 3,  # Added
+                topo_focal_threshold: float = 0.2,
                 ica_callback: Optional[Callable] = None) -> None:
         """
         Run first ICA decomposition with TESA artifact detection.
@@ -623,6 +631,8 @@ class TMSEEGPreprocessor:
             Whether to use manual component selection
         ica_callback : callable, optional
             Callback function for GUI-based component selection
+        use_topo : bool
+            Whether to use topography-based component selection
         """
         # Store copy of data before ICA
         if hasattr(self, 'epochs') and self.epochs is not None:
@@ -644,7 +654,30 @@ class TMSEEGPreprocessor:
         self.ica.fit(inst)
         print("ICA fit complete")
 
-        if manual_mode:
+        if use_topo:
+            print("\nUsing topography-based component classification...")
+            from .ica_topo_classifier import ICATopographyClassifier
+
+            classifier = ICATopographyClassifier(self.ica, inst)
+            classifier.edge_dist_threshold = topo_edge_threshold
+            classifier.zscore_threshold = topo_zscore_threshold
+            classifier.peak_count_threshold = topo_peak_threshold
+            classifier.focal_area_threshold = topo_focal_threshold
+
+            results = classifier.classify_all_components()
+            suggested_exclude = [idx for idx, res in results.items()
+                                 if res['classification'] in ['artifact', 'noise']]
+
+            if suggested_exclude:
+                print(f"\nExcluding {len(suggested_exclude)} components based on topography")
+                self.ica.apply(inst, exclude=suggested_exclude)
+                self.selected_first_ica_components = suggested_exclude
+                self.preproc_stats['muscle_components'] = suggested_exclude
+            else:
+                print("\nNo components selected for exclusion by topography analysis")
+                self.preproc_stats['muscle_components'] = []
+
+        elif manual_mode:
             self.first_ica_manual = True
             print("\nStarting manual component selection...")
             print("A new window will open for component selection.")
@@ -739,8 +772,6 @@ class TMSEEGPreprocessor:
         else:
             self.raw = inst
 
-        #if plot_components:
-            #self._plot_and_save_components(output_dir, session_name)
 
     def run_second_ica(self,
                        method: str = "infomax",
@@ -749,6 +780,11 @@ class TMSEEGPreprocessor:
                        muscle_thresh: float = 0.6,
                        noise_thresh: float = 4.0,
                        manual_mode: bool = False,
+                       use_topo: bool = False,
+                       topo_edge_threshold: float = 0.15,
+                       topo_zscore_threshold: float = 3.5,  # Changed name
+                       topo_peak_threshold: float = 3,  # Added
+                       topo_focal_threshold: float = 0.2,
                        ica_callback: Optional[Callable] = None) -> None:
         """
         Run second ICA with both TESA and ICLabel detection methods.
@@ -772,6 +808,8 @@ class TMSEEGPreprocessor:
             Whether to use manual component selection
         ica_callback : callable, optional
             Callback function for GUI-based component selection
+        use_topo : bool
+            Whether to use topography-based component selection
         """
         # Determine if we're working with epochs or raw data
         if hasattr(self, 'epochs') and self.epochs is not None:
@@ -794,7 +832,31 @@ class TMSEEGPreprocessor:
         self.ica2.fit(inst)
         print("Second ICA fit complete")
 
-        if manual_mode:
+        if use_topo:
+            print("\nUsing topography-based component classification...")
+            from .ica_topo_classifier import ICATopographyClassifier
+
+            # Update classifier parameters
+            classifier = ICATopographyClassifier(self.ica2, inst)  # Note: Changed to ica2
+            classifier.edge_dist_threshold = topo_edge_threshold
+            classifier.zscore_threshold = topo_zscore_threshold
+            classifier.peak_count_threshold = topo_peak_threshold
+            classifier.focal_area_threshold = topo_focal_threshold
+
+            results = classifier.classify_all_components()
+            suggested_exclude = [idx for idx, res in results.items()
+                                 if res['classification'] in ['artifact', 'noise']]
+
+            if suggested_exclude:
+                print(f"\nExcluding {len(suggested_exclude)} components based on topography")
+                self.ica2.apply(inst, exclude=suggested_exclude)  # Fix: Use self.ica2
+                self.selected_second_ica_components = suggested_exclude  # Fix: Use second ICA stats
+                self.preproc_stats['excluded_ica_components'] = suggested_exclude
+            else:
+                print("\nNo components selected for exclusion by topography analysis")
+                self.preproc_stats['muscle_components'] = []
+
+        elif manual_mode:
             self.second_ica_manual = True
             print("\nStarting manual component selection for second ICA...")
 
@@ -901,8 +963,8 @@ class TMSEEGPreprocessor:
                              blink_thresh=2.5,
                              lat_eye_thresh=2.0,
                              muscle_freq_window=(30, 100),
-                             muscle_freq_thresh=0.6,
-                             noise_thresh=4.0,
+                             muscle_freq_thresh=1.0,
+                             noise_thresh=6.0,
                              verbose=True,
                              ica_instance=None) -> Dict:
         """
@@ -1236,17 +1298,17 @@ class TMSEEGPreprocessor:
         return noise_components, scores
 
 
-    def filter_raw(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+    def filter_raw(self, l_freq=0.1, h_freq=250, notch_freq=50, notch_width=2):
         """
         Filter raw data using a zero-phase Butterworth filter with improved stability.
 
         Parameters
         ----------
-        l_freq : float
+        l_freq : float or None
             Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
         h_freq : float
             Upper frequency cutoff for bandpass filter (default: 45 Hz)
-        notch_freq : float
+        notch_freq : float or None
             Frequency for notch filter (default: 50 Hz)
         notch_width : float
             Width of notch filter (default: 2 Hz)
@@ -1261,8 +1323,9 @@ class TMSEEGPreprocessor:
 
         # Get data and scale it up for better numerical precision
         data = filtered_raw.get_data()
-        scale_factor = 1e6  # Convert to microvolts
-        data = data * scale_factor
+        print(f"Data range before scaling: [{np.min(data)}, {np.max(data)}]")
+        #scale_factor = 1e6  # Convert to microvolts
+        #data = data * scale_factor
 
         print(f"Data shape: {data.shape}")
         print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
@@ -1274,25 +1337,27 @@ class TMSEEGPreprocessor:
         nyquist = sfreq / 2
 
         try:
-            # High-pass filter
-            sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
-            data = sosfiltfilt(sos_high, data, axis=-1)
-            print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
+            if l_freq is not None:
+                # High-pass filter
+                sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
+                data = sosfiltfilt(sos_high, data, axis=-1)
+                print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
             # Low-pass filter
             sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
             data = sosfiltfilt(sos_low, data, axis=-1)
             print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
-            # Multiple notch filters for harmonics
-            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
-                # Using iirnotch for sharper notch characteristics
-                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
-                data = filtfilt(b, a, data, axis=-1)
-            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
+            if notch_freq is not None:
+                # Multiple notch filters for harmonics
+                for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
+                    # Using iirnotch for sharper notch characteristics
+                    b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
+                    data = filtfilt(b, a, data, axis=-1)
+                print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
             # Scale back
-            data = data / scale_factor
+            #data = data / scale_factor
             filtered_raw._data = data
 
         except Exception as e:
@@ -1458,8 +1523,8 @@ class TMSEEGPreprocessor:
 
         # Get data and scale it up for better numerical precision
         data = filtered_epochs.get_data()
-        scale_factor = 1e6  # Convert to microvolts
-        data = data * scale_factor
+       # scale_factor = 1e6  # Convert to microvolts
+       # data = data * scale_factor
 
         print(f"Data shape: {data.shape}")
         print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
@@ -1489,7 +1554,7 @@ class TMSEEGPreprocessor:
             print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
             # Scale back
-            data = data / scale_factor
+            #data = data / scale_factor
             filtered_epochs._data = data
 
         except Exception as e:

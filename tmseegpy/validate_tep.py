@@ -1,17 +1,65 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 import mne
 from typing import Dict, Tuple, List, Optional, Union
 import os
 
 DEFAULT_TEP_COMPONENTS = {
-    'N15': {'time': (10, 20), 'polarity': 'negative', 'peak': 15},
-    'P30': {'time': (20, 40), 'polarity': 'positive', 'peak': 30},
-    'N45': {'time': (40, 55), 'polarity': 'negative', 'peak': 45},
-    'P60': {'time': (50, 70), 'polarity': 'positive', 'peak': 60},
-    'N100': {'time': (70, 150), 'polarity': 'negative', 'peak': 100},
-    'P180': {'time': (150, 240), 'polarity': 'positive', 'peak': 180},
-    'N280': {'time': (240, 350), 'polarity': 'negative', 'peak': 280}
+    'N15': {
+        'time': (10, 20),
+        'center_time': 15,
+        'search_window': 5,  # Half the window size
+        'polarity': 'negative',
+        'peak': 15,
+        'expected_distribution': 'focal',
+        'min_amplitude': 0.5
+    },
+    'P30': {
+        'time': (20, 40),
+        'center_time': 30,
+        'search_window': 10,
+        'polarity': 'positive',
+        'peak': 30,
+        'expected_distribution': 'focal',
+        'min_amplitude': 0.5
+    },
+    'N45': {
+        'time': (40, 55),
+        'center_time': 45,
+        'search_window': 7.5,
+        'polarity': 'negative',
+        'peak': 45,
+        'expected_distribution': 'focal',
+        'min_amplitude': 0.7
+    },
+    'P60': {
+        'time': (50, 70),
+        'center_time': 60,
+        'search_window': 10,
+        'polarity': 'positive',
+        'peak': 60,
+        'expected_distribution': 'focal',
+        'min_amplitude': 0.7
+    },
+    'N100': {
+        'time': (70, 150),
+        'center_time': 100,
+        'search_window': 40,
+        'polarity': 'negative',
+        'peak': 100,
+        'expected_distribution': 'contralateral',
+        'min_amplitude': 1.0
+    },
+    'P180': {
+        'time': (150, 240),
+        'center_time': 180,
+        'search_window': 45,
+        'polarity': 'positive',
+        'peak': 180,
+        'expected_distribution': 'bilateral',
+        'min_amplitude': 1.0
+    }
 }
 
 def find_peaks_tesa_style(data: np.ndarray,
@@ -38,11 +86,11 @@ def find_peaks_tesa_style(data: np.ndarray,
 
     # Loop through each potential peak point (avoiding edges)
     for b in range(samples, len(data) - samples):
-        # Initialize arrays for comparisons exactly as TESA does
+        # Initialize arrays for comparisons
         t_plus = np.zeros(samples)
         t_minus = np.zeros(samples)
 
-        # Calculate differences exactly as TESA does
+        # Calculate differences
         for c in range(samples):
             t_plus[c] = data[b] - data[b + c + 1]  # Compare with later points
             t_minus[c] = data[b] - data[b - c - 1]  # Compare with earlier points
@@ -151,16 +199,6 @@ def extract_tep(data: np.ndarray,
             'amplitude': data[global_idx]
         }
 
-
-# Default component definitions matching TESA
-DEFAULT_TEP_COMPONENTS = {
-    'N15': {'time': (12, 18), 'polarity': 'negative', 'peak': 15},
-    'P30': {'time': (25, 35), 'polarity': 'positive', 'peak': 30},
-    'N45': {'time': (36, 57), 'polarity': 'negative', 'peak': 45},
-    'P60': {'time': (58, 80), 'polarity': 'positive', 'peak': 60},
-    'N100': {'time': (81, 144), 'polarity': 'negative', 'peak': 100},
-    'P180': {'time': (145, 250), 'polarity': 'positive', 'peak': 180}
-}
 
 
 def analyze_gmfa(epochs: mne.Epochs,
@@ -314,6 +352,137 @@ def analyze_roi(epochs: mne.Epochs,
     return results
 
 
+def parse_peak_windows(peak_windows_str):
+    """Parse peak windows from command line string."""
+    if not peak_windows_str:
+        return None
+
+    windows = []
+    for window in peak_windows_str:
+        try:
+            start, end = map(float, window.split(','))
+            windows.append((start, end))
+        except ValueError:
+            print(f"Warning: Could not parse window {window}, skipping...")
+            continue
+    return windows if windows else None
+
+
+def classify_peaks(peaks: List[Dict],
+                   components: Dict = DEFAULT_TEP_COMPONENTS) -> List[Dict]:
+    """
+    Classify detected peaks according to known TEP components.
+
+    Parameters
+    ----------
+    peaks : List[Dict]
+        List of peaks from get_single_channel_peaks with 'latency' and 'amplitude'
+    components : Dict
+        Component definitions with center times and search windows
+
+    Returns
+    -------
+    List[Dict]
+        Original peaks with added classification information
+    """
+    classified_peaks = []
+    print("\nPeak Classification Results:")
+    print("-" * 30)
+
+    for peak in peaks:
+        peak_time = peak['latency']
+        peak_amp = peak['amplitude']
+
+        # Check each component
+        for name, params in components.items():
+            # Get window boundaries using either format
+            if 'time' in params:
+                min_time, max_time = params['time']
+                window_size = (max_time - min_time) / 2
+                center = (max_time + min_time) / 2
+            else:
+                center = params['center_time']
+                window_size = params['search_window']
+                min_time = center - window_size
+                max_time = center + window_size
+
+            # Check if peak falls within window
+            if min_time <= peak_time <= max_time:
+                # Calculate confidence based on distance from center
+                time_diff = abs(peak_time - center)
+                confidence = 1 - (time_diff / window_size)
+
+                # Get polarity from either format
+                polarity = params.get('polarity', 'unknown')
+
+                peak_with_class = peak.copy()
+                peak_with_class.update({
+                    'component': name,
+                    'confidence': confidence,
+                    'polarity': polarity,
+                    'expected_distribution': params.get('expected_distribution', 'unknown')
+                })
+                classified_peaks.append(peak_with_class)
+
+                print(f"Peak at {peak_time:.1f}ms classified as {name}")
+                print(f"  Channel: {peak['channel']}")
+                print(f"  Amplitude: {peak_amp:.2f}µV")
+                print(f"  Confidence: {confidence:.2f}")
+                print(f"  Polarity: {polarity}")
+                print(f"  Expected Distribution: {params.get('expected_distribution', 'unknown')}")
+                break
+        else:
+            # No matching component found
+            peak_with_class = peak.copy()
+            peak_with_class.update({
+                'component': 'unknown',
+                'confidence': 0.0,
+                'polarity': 'unknown',
+                'expected_distribution': None
+            })
+            classified_peaks.append(peak_with_class)
+            print(f"Unclassified peak found at {peak_time:.1f}ms")
+            print(f"  Channel: {peak['channel']}")
+            print(f"  Amplitude: {peak_amp:.2f}µV")
+
+    print("\nClassification Summary:")
+    component_counts = {}
+    for peak in classified_peaks:
+        component_counts[peak['component']] = component_counts.get(peak['component'], 0) + 1
+
+    for comp, count in component_counts.items():
+        print(f"{comp}: {count} peak(s)")
+
+    return classified_peaks
+
+
+def get_single_channel_peaks(evoked, windows, mode='neg'):
+    """
+    Find peaks using MNE's get_peak for specified windows.
+    Returns exactly one peak per window from the channel with the maximum peak.
+    """
+    peaks = []
+    for start, end in windows:
+        try:
+            # Convert from ms to seconds for MNE
+            ch_name, lat, amp = evoked.get_peak(
+                tmin=start / 1000,
+                tmax=end / 1000,
+                mode=mode,
+                return_amplitude=True
+            )
+            peaks.append({
+                'window': (start, end),
+                'channel': ch_name,
+                'latency': lat * 1000,  # Convert back to ms
+                'amplitude': amp # * 1e6  # Convert to µV?
+            })
+        except Exception as e:
+            print(f"Warning: Could not find peak in window {start}-{end}ms: {str(e)}")
+            continue
+    return peaks
+
+
 def plot_tep_analysis(epochs: mne.Epochs,
                       output_dir: str,
                       session_name: str,
@@ -321,9 +490,14 @@ def plot_tep_analysis(epochs: mne.Epochs,
                       analysis_type: str = 'gmfa',
                       channels: Optional[List[str]] = None,
                       n_samples: int = 5,
-                      method: str = 'largest') -> Dict[str, Dict]:
+                      method: str = 'largest',
+                      peak_mode: str = None,
+                      show_channel_peaks: bool = False,
+                      topomap_average: float = 0.01,
+                      peak_windows: Optional[List[str]] = None,
+                      override_windows: bool = False) -> Dict[str, Dict]:
     """
-    Create comprehensive TEP analysis plot.
+    Create TEP analysis plot with separate GFP and GMFA plots.
 
     Parameters
     ----------
@@ -343,6 +517,18 @@ def plot_tep_analysis(epochs: mne.Epochs,
         Number of samples for peak detection
     method : str
         Peak selection method
+    peak_mode : str
+        Mode for MNE peak detection ('pos', 'neg', or 'abs')
+    show_channel_peaks : bool
+        Whether to show individual channel peaks using MNE get_peaks
+    peak_windows : Optional[List[str]]
+        Time windows for peak detection in format ["start,end", ...] (in ms)
+    override_windows : bool
+        Use peak_windows to override default component windows
+    topomap_average : float
+        Time window (in seconds) to average around each peak for topomaps.
+        Default is 0.005 (5ms). Increase for smoother but less temporally
+        specific topographies.
 
     Returns
     -------
@@ -353,7 +539,60 @@ def plot_tep_analysis(epochs: mne.Epochs,
     times = epochs.times * 1000
     evoked = epochs.average()
 
-    # Perform analysis
+    # Parse peak windows if provided
+    if peak_windows:
+        windows = []
+        for window in peak_windows:
+            try:
+                start, end = map(float, window.split(','))
+                windows.append((start, end))
+            except ValueError:
+                print(f"Warning: Could not parse window {window}, skipping...")
+                continue
+
+        if override_windows and windows:
+            # Modify component windows if override requested
+            print("Overriding default component windows with user-specified windows...")
+            for (start, end), name in zip(windows, components.keys()):
+                components[name]['time'] = (start, end)
+                print(f"Modified window for {name}: {start}-{end}ms")
+    else:
+        # Use component definition windows if no custom windows provided
+        windows = []
+        for name, params in components.items():
+            if 'time' in params:
+                windows.append(params['time'])
+            elif 'center_time' in params and 'search_window' in params:
+                windows.append((
+                    params['center_time'] - params['search_window'],
+                    params['center_time'] + params['search_window']
+                ))
+            else:
+                print(f"Warning: Component {name} has invalid window definition")
+
+    if not windows:
+        raise ValueError("No valid windows found in component definitions")
+
+    if peak_mode == None:
+
+        # Find peaks using the windows (either default, custom, or overridden)
+        detected_peaks = []
+        for window, component_name in zip(windows, components.keys()):
+            # Get the polarity from component definition
+            polarity = components[component_name].get('polarity', 'positive')
+            # Set peak detection mode based on polarity
+            detection_mode = 'neg' if polarity == 'negative' else 'pos'
+
+            # Get peaks for this window with appropriate polarity
+            window_peaks = get_single_channel_peaks(evoked, [window], detection_mode)
+            detected_peaks.extend(window_peaks)
+
+        # Classify the detected peaks
+        classified_peaks = classify_peaks(detected_peaks, components)
+    else:
+        detected_peaks = get_single_channel_peaks(evoked, windows, peak_mode)
+
+    # Perform standard analysis
     if analysis_type.lower() == 'gmfa':
         results = analyze_gmfa(epochs, components, n_samples, method)
         plot_data = np.std(evoked.get_data(), axis=0)
@@ -372,84 +611,238 @@ def plot_tep_analysis(epochs: mne.Epochs,
     else:
         raise ValueError("analysis_type must be either 'gmfa' or 'roi'")
 
-    # Create figure
-    fig = plt.figure(figsize=(16, 10))
-    gs = plt.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.3)
-    gs_main = gs[0].subgridspec(2, 1, height_ratios=[1.5, 1], hspace=0.3)
+    # Determine number of subplots based on channel peaks display
+    n_rows = 5 if show_channel_peaks else 4
 
-    # Butterfly plot - different for GMFA and ROI
+    # Create figure with larger dimensions and higher DPI
+    plt.rcParams['figure.constrained_layout.use'] = False
+    fig = plt.figure(figsize=(24, 7 * n_rows), dpi=800)
+
+    # Create main grid for time series plots with more space between subplots
+    height_ratios = [1.5, 1, 1, 1.2]
+    if show_channel_peaks:
+        height_ratios.append(1.2)
+    gs_main = GridSpec(len(height_ratios), 1, figure=fig, height_ratios=height_ratios, hspace=0.4)
+
+    # Butterfly plot (keeping existing code)
     ax_butterfly = fig.add_subplot(gs_main[0])
     if analysis_type.lower() == 'gmfa':
-        evoked.plot(gfp=True, xlim=(-0.1, 0.4), axes=ax_butterfly, show=False)
-        ax_butterfly.set_title('TEP Butterfly Plot with GMFA')
-    else:  # ROI analysis
+        evoked.plot(gfp=False, xlim=(-0.1, 0.4), axes=ax_butterfly, show=False,
+                    selectable=False, picks='all')
+        ax_butterfly.set_title('TEP Butterfly Plot', fontsize=10, pad=10)
+        ax_butterfly.axvline(x=0, color='k', linestyle='--', alpha=0.5)
+    else:
         if channels[0].lower() == 'all':
             ch_picks = slice(None)
         else:
             ch_picks = [i for i, ch in enumerate(evoked.ch_names) if ch in channels]
-
-        # Plot only ROI channels
         evoked_roi = evoked.copy()
         evoked_roi.pick(ch_picks)
         evoked_roi.plot(xlim=(-0.1, 0.4), axes=ax_butterfly, show=False)
-        ax_butterfly.set_title(f'TEP Plot - ROI Channels ({", ".join(channels)})')
+        ax_butterfly.set_title(f'TEP Plot - ROI Channels ({", ".join(channels)})',
+                               fontsize=10, pad=10)
+        ax_butterfly.axvline(x=0, color='k', linestyle='--', alpha=0.5)
 
-    # Analysis plot
-    ax_analysis = fig.add_subplot(gs_main[1])
+    # GFP plot (keeping existing code)
+    ax_gfp = fig.add_subplot(gs_main[1])
+    ax_gfp.axvline(x=0, color='k', linestyle='--', alpha=0.5)
+    data = evoked.get_data()
+    ch_types = evoked.get_channel_types()
+
+    if all(ch_type == 'eeg' for ch_type in ch_types):
+        gfp_data = np.std(data, axis=0, ddof=0)
+        label = 'GFP'
+    else:
+        gfp_data = np.linalg.norm(data, axis=0) / np.sqrt(len(data))
+        label = 'RMS'
+
+    ax_gfp.plot(evoked.times, gfp_data, 'b-', label=label)
+    ax_gfp.set_title(f'Global Field Power from MNE-Python ({label})', fontsize=10, pad=20)
+    ax_gfp.set_xlim(-0.1, 0.4)
+    ax_gfp.set_ylabel(f'{label} (µV)')
+    ax_gfp.grid(True, alpha=0.3)
+    ax_gfp.legend()
+
+    # GMFA/ROI analysis plot (keeping existing code)
+    ax_analysis = fig.add_subplot(gs_main[2])
     ax_analysis.plot(times, plot_data, 'b-', label=analysis_type.upper())
+    ax_analysis.axvline(x=0, color='k', linestyle='--', alpha=0.5)
 
-    # Add confidence intervals if available
     if all('ci' in comp for comp in results.values()):
         ci = next(iter(results.values()))['ci']
         ax_analysis.fill_between(times, plot_data - ci, plot_data + ci,
                                  color='b', alpha=0.2, label='95% CI')
 
-    # Plot detected components
     colors = plt.cm.tab10(np.linspace(0, 1, len(components)))
     for (name, comp), color in zip(results.items(), colors):
         if comp['found'] == 'yes':
             ax_analysis.plot(comp['lat'], comp['amp'], 'o',
-                             color=color, label=f"{name} ({comp['lat']:.0f} ms)")
+                             color=color, label=f"{name} ({comp['lat']:.0f} ms, {comp['amp']:.1f} µV)")
             ax_analysis.axvline(comp['lat'], color=color, alpha=0.2)
-
-            # Add window markers
             t_min, t_max = components[name]['time']
             ax_analysis.axvspan(t_min, t_max, color=color, alpha=0.1)
 
-    # Customize analysis plot
     ax_analysis.set_xlabel('Time (ms)')
     ax_analysis.set_ylabel(ylabel)
-    ax_analysis.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax_analysis.legend(loc='upper right', fontsize=12, bbox_to_anchor=(0.98, 0.98))
     ax_analysis.grid(True, alpha=0.3)
     ax_analysis.set_xlim(-100, 400)
-    ax_analysis.set_title(f'{analysis_type.upper()} with TEP Components')
+    ax_analysis.set_title(f'{analysis_type.upper()} with TEP Components',
+                          fontsize=10, pad=10)
 
-    # Add topomaps
-    gs_topos = gs[1].subgridspec(1, len(components), wspace=0.3)
+    # Add MNE get_peaks analysis if requested
+    if show_channel_peaks:
+        ax_peaks = fig.add_subplot(gs_main[3])
 
-    for idx, (name, comp) in enumerate(results.items()):
-        ax = fig.add_subplot(gs_topos[idx])
-        if comp['found'] == 'yes':
+        # Find peaks for each window
+        mne_peaks = []
+        for window, component_name in zip(windows, components.keys()):
             try:
-                evoked.plot_topomap(times=comp['lat'] / 1000.0,
-                                    axes=ax,
-                                    show=False,
-                                    time_format=f'{name}\n{comp["lat"]:.0f} ms',
-                                    colorbar=False)
+                # Get the polarity from component definition if no peak_mode specified
+                if peak_mode is None:
+                    polarity = components[component_name].get('polarity', 'positive')
+                    detection_mode = 'neg' if polarity == 'negative' else 'pos'
+                else:
+                    detection_mode = peak_mode
+
+                # Convert from ms to seconds for MNE
+                ch_name, lat, amp = evoked.get_peak(
+                    tmin=window[0] / 1000,  # Convert to seconds
+                    tmax=window[1] / 1000,  # Convert to seconds
+                    mode=detection_mode,
+                    return_amplitude=True
+                )
+                mne_peaks.append({
+                    'window': window,
+                    'channel': ch_name,
+                    'latency': lat * 1000,  # Convert back to ms
+                    'amplitude': amp  # Already in µV!!
+                })
             except Exception as e:
-                ax.text(0.5, 0.5, f"Could not plot\n{name}",
-                        ha='center', va='center')
+                print(f"Warning: Could not find peak in window {window[0]}-{window[1]}ms: {str(e)}")
+                continue
+
+        # Plot each channel that has a peak
+        plotted_channels = set()
+        for peak in classified_peaks:  # Use classified_peaks instead of mne_peaks
+            ch_name = peak['channel']
+            if ch_name not in plotted_channels:
+                ch_idx = evoked.ch_names.index(ch_name)
+                ch_data = evoked.data[ch_idx]
+                ax_peaks.plot(times, ch_data, '-', alpha=0.7,
+                              label=f'Channel {ch_name}')
+                plotted_channels.add(ch_name)
+
+            # Determine marker color based on component and confidence
+            if peak['component'] != 'unknown':
+                marker_color = 'green' if peak['confidence'] > 0.7 else 'orange'
+                component_label = peak['component']
+            else:
+                marker_color = 'gray'
+                component_label = 'Unknown'
+
+            # Plot the peak with classification information
+            ax_peaks.plot(peak['latency'], peak['amplitude'], '*',
+                          markersize=10,
+                          color=marker_color,
+                          label=f"{component_label}: {peak['latency']:.1f}ms, {peak['amplitude']:.1f}µV ({ch_name})")
+            ax_peaks.axvline(peak['latency'], color=marker_color, alpha=0.2)
+
+            # Add text annotation with component information
+            annotation_text = [f"{peak['amplitude']:.1f}µV"]
+            if peak['component'] != 'unknown':
+                annotation_text.append(f"{peak['component']}")
+                if 'confidence' in peak:
+                    annotation_text.append(f"(conf: {peak['confidence']:.2f})")
+
+            ax_peaks.annotate(
+                '\n'.join(annotation_text),
+                (peak['latency'], peak['amplitude']),
+                xytext=(0, 10),
+                textcoords='offset points',
+                ha='center',
+                va='bottom',
+                color=marker_color
+            )
+
+        ax_peaks.set_xlabel('Time (ms)')
+        ax_peaks.set_ylabel('Amplitude (µV)')
+        ax_peaks.legend(loc='upper right', fontsize=12, bbox_to_anchor=(0.98, 0.98))
+        ax_peaks.grid(True, alpha=0.3)
+        ax_peaks.set_xlim(-100, 400)
+        ax_peaks.set_title(f'Single-Channel Peak Detection (Component-Specific Polarity)',
+                           fontsize=10, pad=10)
+        ax_peaks.axvline(x=0, color='k', linestyle='--', alpha=0.5)
+
+    # Topomaps section
+    n_peaks = len(classified_peaks)
+    bottom_pos = 0.02 if show_channel_peaks else 0.05
+    top_pos = 0.22
+    gs_topos = GridSpec(1, n_peaks, bottom=bottom_pos, top=top_pos,
+                        left=0.03, right=0.97, wspace=0.1)
+
+    for idx, peak in enumerate(classified_peaks):
+        ax = fig.add_subplot(gs_topos[idx])
+        try:
+            # Plot topomap at the detected peak time
+            evoked.plot_topomap(times=peak['latency'] / 1000.0,
+                                average=topomap_average,
+                                axes=ax,
+                                show=False,
+                                time_format='',
+                                colorbar=False,
+                                size=8.0,
+                                res=1024,
+                                outlines='head',
+                                extrapolate='head')
+
+            # Create title with component classification
+            title_parts = []
+            title_parts.append(f"{peak['latency']:.0f}ms")
+
+            if peak['component'] != 'unknown':
+                title_parts.append(f"{peak['component']}")
+                confidence_color = 'green' if peak['confidence'] > 0.7 else 'orange'
+            else:
+                title_parts.append("Unknown")
+                confidence_color = 'gray'
+
+            # Add channel info
+            title_parts.append(f"Ch: {peak['channel']}")
+
+            title = '\n'.join(title_parts)
+            ax.set_title(title, color=confidence_color, pad=10, fontsize=10)
+
+            # Add window information
+            window_text = f"Window: {peak['window'][0]:.0f}-{peak['window'][1]:.0f}ms (topomap average: {topomap_average}s)"
+            ax.text(0.5, -0.15, window_text,
+                    ha='center', va='top', transform=ax.transAxes,
+                    fontsize=8)
+
+        except Exception as e:
+            print(f"Error plotting topomap: {str(e)}")
+            ax.clear()
+            ax.set_visible(False)
 
     # Add colorbar
-    cax = fig.add_axes([0.92, 0.11, 0.02, 0.15])
-    plt.colorbar(ax.images[-1], cax=cax)
+    if n_peaks > 0:
+        try:
+            cax = fig.add_axes([0.96, 0.05, 0.01, 0.15])
+            plt.colorbar(ax.images[-1], cax=cax)
+        except (IndexError, UnboundLocalError):
+            pass
 
-    plt.suptitle(f'TEP Analysis - {session_name}', y=0.95)
-    plt.subplots_adjust(right=0.85)
+    plt.suptitle(f'TEP Analysis - {session_name}', y=0.98, fontsize=12)
+
+    # Adjust main plots area
+    top_pos = 0.95 if show_channel_peaks else 0.95
+    gs_main.update(top=top_pos, bottom=0.25, left=0.1, right=0.9)
 
     # Save figure
     fig.savefig(os.path.join(output_dir, f'{session_name}_tep_analysis.png'),
-                dpi=600, bbox_inches='tight')
+                dpi=800,
+                bbox_inches=None,
+                pad_inches=0.1)
     plt.close(fig)
 
     return results

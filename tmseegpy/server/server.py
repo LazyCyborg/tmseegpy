@@ -31,7 +31,7 @@ import mne
 from PyQt6.QtWidgets import QApplication
 
 # Project imports
-from tmseegpy.run import process_subjects, process_continuous_data, setup_qt_plugin_path
+from tmseegpy.run import process_subjects, setup_qt_plugin_path
 from tmseegpy.preproc import TMSEEGPreprocessor
 from tmseegpy.dataloader import TMSEEGLoader
 from .server_logger import ServerLogger
@@ -111,7 +111,7 @@ def map_frontend_to_backend_params(frontend_params):
     Maps parameters from the frontend naming convention to backend parameters.
     Ensures alignment with run.py's argparse parameters.
     """
-    required_params = ['processingMode', 'dataFormat']
+    required_params = ['dataFormat']
     for param in required_params:
         if param not in frontend_params:
             raise ValueError(f"Missing required parameter: {param}")
@@ -121,16 +121,14 @@ def map_frontend_to_backend_params(frontend_params):
 
     backend_params = {
         # Core Processing Parameters
-        'processing_mode': frontend_params.get('processingMode', 'epoched'),
         'data_dir': str(data_dir),
         'output_dir': frontend_params.get('outputDir', str(Path.cwd() / 'output')),
-        'gui_mode': True,
         'data_format': frontend_params.get('dataFormat', 'neurone'),
         'no_preproc_output': frontend_params.get('noPreprocessOutput', False),
         'no_pcist': frontend_params.get('noPcist', False),
         'eeglab_montage_units': frontend_params.get('eeglabMontageUnits', 'auto'),
         'stim_channel': frontend_params.get('stimChannel', 'STI 014'),
-        'save_preproc': frontend_params.get('plotPreproc', False),
+        'save_preproc': frontend_params.get('savePreproc', False),
         'random_seed': int(frontend_params.get('randomSeed', 42)),
         'substitute_zero_events_with': int(frontend_params.get('substituteZeroEventsWith', 10)),
 
@@ -154,6 +152,7 @@ def map_frontend_to_backend_params(frontend_params):
         # Filtering Parameters
         'l_freq': float(frontend_params.get('lFreq', 0.1)),
         'h_freq': float(frontend_params.get('hFreq', 45)),
+        'raw_h_freq': float(frontend_params.get('rawHFreq', 250)),
         'notch_freq': float(frontend_params.get('notchFreq', 50)),
         'notch_width': float(frontend_params.get('notchWidth', 2)),
 
@@ -162,15 +161,16 @@ def map_frontend_to_backend_params(frontend_params):
         'epochs_tmax': float(frontend_params.get('epochsTmax', 0.41)),
 
         # Artifact Detection Parameters
-        'bad_channels_threshold': float(frontend_params.get('badChannelsThreshold', 2)),
-        'bad_epochs_threshold': float(frontend_params.get('badEpochsThreshold', 2)),
+        'bad_channels_threshold': float(frontend_params.get('badChannelsThreshold', 3)),
+        'bad_epochs_threshold': float(frontend_params.get('badEpochsThreshold', 3)),
         'amplitude_threshold': float(frontend_params.get('amplitudeThreshold', 300.0)),
 
         # ICA Parameters
         'ica_method': frontend_params.get('icaMethod', 'fastica'),
-        'first_ica_manual': frontend_params.get('firstIcaManual', False),
-        'second_ica_manual': frontend_params.get('secondIcaManual', False),
-        'no_second_ICA': frontend_params.get('noSecondIca', False),
+        'first_ica_manual': frontend_params.get('firstIcaManual', True),
+        'second_ica_manual': frontend_params.get('secondIcaManual', True),
+        'no_first_ica': frontend_params.get('noFirstIca', False),
+        'no_second_ica': frontend_params.get('noSecondIca', False),
         'second_ica_method': frontend_params.get('secondIcaMethod', 'fastica'),
 
         # Artifact Thresholds
@@ -196,7 +196,7 @@ def map_frontend_to_backend_params(frontend_params):
 
         # TEP Analysis Parameters
         'save_evoked': frontend_params.get('saveEvoked', False),
-        'validate_teps': frontend_params.get('validateTeps', True),
+        'analyze_teps': frontend_params.get('analyzeTeps', True),
         'save_validation': frontend_params.get('saveValidation', False),
         'tep_analysis_type': frontend_params.get('tepAnalysisType', 'gmfa'),
         'tep_roi_channels': frontend_params.get('tepRoiChannels', ['C3', 'C4']),
@@ -223,6 +223,7 @@ def map_frontend_to_backend_params(frontend_params):
         # Research Mode
         'research': frontend_params.get('research', False),
     }
+
 
     return backend_params
 
@@ -943,27 +944,27 @@ def process_task(params):
             args.ica_callback = ica_callback
 
         # Process based on mode
-        if args.processing_mode == 'epoched':
-            server_logger.info("Starting epoched processing mode...")
-            current_progress['logs'].append("Running epoched processing mode...")
-            socketio.emit('status_update', current_progress)
 
-            results = process_subjects(args, status_callback=status_callback)
-            current_progress['results'] = {
-                'pcist_values': results if isinstance(results, list) else [],
-                'processing_mode': 'epoched'
-            }
-        else:
-            server_logger.info("Starting continuous processing mode...")
-            current_progress['logs'].append("Running continuous processing mode...")
-            socketio.emit('status_update', current_progress)
+        server_logger.info("Starting epoched processing mode...")
+        current_progress['logs'].append("Running epoched processing mode...")
+        socketio.emit('status_update', current_progress)
 
-            processed_raws, pcist_values, pcist_objects, pcist_details, session_names = process_continuous_data(args)
-            current_progress['results'] = {
-                'pcist_values': pcist_values,
-                'processing_mode': 'continuous',
-                'session_names': session_names
-            }
+        results = process_subjects(args, status_callback=status_callback)
+        current_progress['results'] = {
+            'pcist_values': results if isinstance(results, list) else [],
+            'processing_mode': 'epoched'
+        }
+
+            #server_logger.info("Starting continuous processing mode...")
+            #current_progress['logs'].append("Running continuous processing mode...")
+           # socketio.emit('status_update', current_progress)
+
+           # processed_raws, pcist_values, pcist_objects, pcist_details, session_names = process_continuous_data(args)
+           # current_progress['results'] = {
+            #    'pcist_values': pcist_values,
+           #     'processing_mode': 'continuous',
+           #     'session_names': session_names
+           # }
 
         # Process completion
         server_logger.info("Processing completed successfully")

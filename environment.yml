@@ -1,31 +1,39 @@
-# environment.yml
-name: tmseegpy-env
+name: tmseeg-env
 channels:
   - conda-forge
-  - pytorch
   - defaults
 dependencies:
-  - python>=3.8
+  - python=3.11
   # Core scientific packages
-  - numpy>=1.16.0
-  - scipy>=1.2.0
-  - scikit-learn
-  # MNE and related
-  - mne>=1.1
-  - mne-base
-  # Deep learning
-  - pytorch
-  - tensorly
+  - numpy=1.26.0
+  - scipy=1.12.0
+  - scikit-learn=1.4.0
+  - pandas=2.2.0
   # Visualization
-  - matplotlib
-  - seaborn
+  - matplotlib=3.9.2
+  - seaborn=0.13.2
+  # MNE ecosystem
+  - mne=1.8.0
+  - mne-qt-browser=0.6.3
+  # Jupyter support
+  - ipykernel=6.29.0
+  - ipympl=0.9.3
+  - matplotlib-inline=0.1.6
   # Utilities
-  - tqdm
-  - psutil
-  - pooch
-  - construct
-  - pip
+  - psutil=5.9.8
+  - tqdm=4.66.2
+  - appdirs=1.4.4
+  # Web components
+  - flask=3.0.2
+  - flask-cors=4.0.1
+  - pip=23.3.1
   - pip:
-    - mne-faster
-
-
+    - tensorly==0.8.1
+    - construct==2.10.70
+    - mne-faster==1.2
+    - gevent==24.11.1
+    - gevent-websocket==0.10.1
+    - pyopengl==3.1.7
+    - PyQt6>=6.4.0
+    - PyQt6-Qt6
+    - PyQt6-sip

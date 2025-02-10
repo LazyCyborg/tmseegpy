@@ -68,7 +68,7 @@ class ICAComponentSelector:
         # Create main window using Qt
         self._window = QMainWindow(self.parent)
         self._window.setWindowTitle(title)
-        self._window.setMinimumSize(1600, 1000)
+        self._window.setMinimumSize(1600, 800)
 
         # Create central widget and layout
         central_widget = QWidget()
@@ -80,7 +80,7 @@ class ICAComponentSelector:
         left_layout = QVBoxLayout(left_frame)
 
         # Create matplotlib figure
-        self._fig = plt.figure(figsize=(12, 8))
+        self._fig = plt.figure(figsize=(14, 6))
         self._canvas = FigureCanvasQTAgg(self._fig)
         self._canvas.mpl_connect('button_press_event', self._on_click)
 
@@ -417,98 +417,110 @@ class ICAComponentSelector:
             self.scores_window = None
             self.showing_scores = False
 
-
     def _show_scores_window(self):
-        """Create and show the artifact scores window"""
-        if not self._component_scores:
-            QMessageBox.warning(self._window, "Warning", "No component scores available")
-            return None
-
+        """Create and show the artifact classification window"""
         try:
-            dialog = QDialog(self._window)
-            dialog.setWindowTitle("Artifact Detection Scores")
-            dialog.setMinimumSize(1200, 800)
+            from ..ica_topo_classifier import ICATopographyClassifier
+            classifier = ICATopographyClassifier(self._ica_instance,
+                                                 self._epochs if self._epochs is not None else self._raw)
+            results = classifier.classify_all_components()
 
+            dialog = QDialog(self._window)
+            dialog.setWindowTitle("Artifact Classification Analysis")
+            dialog.setMinimumSize(1200, 800)
             layout = QVBoxLayout(dialog)
 
-            fig = plt.figure(figsize=(12, 8))
-            gs = GridSpec(3, 2, figure=fig)
+            # Create top frame for plots
+            plot_frame = QFrame()
+            plot_layout = QVBoxLayout(plot_frame)
 
-            # Plot TMS-Muscle ratios
-            if 'tms_muscle' in self._component_scores:
-                ax1 = fig.add_subplot(gs[0, 0])
-                self._plot_scores(ax1,
-                                  self._component_scores['tms_muscle'],
-                                  "TMS-Muscle Ratios", 2.0)
+            fig = plt.figure(figsize=(12, 4))  # Reduced height for plots
+            gs = GridSpec(1, 2, figure=fig)  # Changed to 1 row, 2 columns
 
-            # Plot Blink z-scores
+            # Plot Z-scores
+            ax1 = fig.add_subplot(gs[0, 0])
+            z_scores = [res['details']['max_zscore'] for res in results.values()]
+            self._plot_classifier_metric(ax1, z_scores,
+                                         "Maximum Z-Scores",
+                                         classifier.zscore_threshold,
+                                         "Z-Score")
+
+            # Plot number of peaks
             ax2 = fig.add_subplot(gs[0, 1])
-            self._plot_scores(ax2,
-                              self._component_scores.get('blink', []),
-                              "Blink Z-Scores", 2.5)
-
-            # Plot Lateral Eye z-scores
-            ax3 = fig.add_subplot(gs[1, 0])
-            lat_eye = self._component_scores.get('lat_eye', [])
-            lat_eye_scores = [max(scores) if isinstance(scores, list) else scores
-                              for scores in lat_eye]
-            self._plot_scores(ax3,
-                              lat_eye_scores,
-                              "Lateral Eye Z-Scores", 2.0)
-
-            # Plot Muscle frequency power ratios
-            ax4 = fig.add_subplot(gs[1, 1])
-            self._plot_scores(ax4,
-                              self._component_scores.get('muscle', []),
-                              "Muscle Power Ratios", 0.6)
-
-            # Plot Noise z-scores
-            ax5 = fig.add_subplot(gs[2, 0])
-            self._plot_scores(ax5,
-                              self._component_scores.get('noise', []),
-                              "Noise Z-Scores", 4.0)
-
-            # Add legend
-            ax_legend = fig.add_subplot(gs[2, 1])
-            ax_legend.axis('off')
-            legend_text = ("Threshold Values:\n"
-                           "TMS-Muscle: 2.0\n"
-                           "Blink: 2.5\n"
-                           "Lateral Eye: 2.0\n"
-                           "Muscle Power: 0.6\n"
-                           "Noise: 4.0")
-            ax_legend.text(0.1, 0.5, legend_text,
-                           bbox=dict(facecolor='white', alpha=0.8),
-                           transform=ax_legend.transAxes)
-
-            fig.tight_layout()
+            n_peaks = [res['details']['n_peaks'] for res in results.values()]
+            self._plot_classifier_metric(ax2, n_peaks,
+                                         "Number of Peaks",
+                                         classifier.peak_count_threshold,
+                                         "Count",
+                                         threshold_direction='below')
 
             canvas = FigureCanvasQTAgg(fig)
             toolbar = NavigationToolbar2QT(canvas, dialog)
 
-            layout.addWidget(toolbar)
-            layout.addWidget(canvas)
+            plot_layout.addWidget(toolbar)
+            plot_layout.addWidget(canvas)
+
+            # Create text area with scroll
+            text_scroll = QScrollArea()
+            text_scroll.setWidgetResizable(True)
+            text_widget = QLabel()
+            text_scroll.setWidget(text_widget)
+            text_scroll.setMinimumHeight(400)  # Set minimum height for scroll area
+
+            # Generate classification summary text
+            summary_text = "Classification Summary:\n\n"
+            for idx, res in results.items():
+                if res['classification'] == 'artifact':
+                    reasons = res['details']['reasons']
+                    summary_text += f"Component {idx}: ARTIFACT\n"
+                    summary_text += f"    Z-score: {res['details']['max_zscore']:.2f}\n"
+                    summary_text += f"    Peaks: {res['details']['n_peaks']}\n"
+                    summary_text += f"    Reasons: {', '.join(reasons)}\n\n"
+
+            # Add threshold information
+            threshold_text = (
+                "\nClassification Thresholds:\n"
+                f"Z-score > {classifier.zscore_threshold}\n"
+                f"Peak count < {classifier.peak_count_threshold}\n"
+                f"At least 2 criteria must be met for artifact classification"
+            )
+
+            text_widget.setText(summary_text + threshold_text)
+            text_widget.setStyleSheet("font-family: monospace;")
+
+            # Add both frames to main layout
+            layout.addWidget(plot_frame)
+            layout.addWidget(text_scroll)
 
             dialog.show()
             return dialog
 
         except Exception as e:
-            print(f"Error showing scores plot: {str(e)}")
-            QMessageBox.critical(self._window, "Error", f"Error showing scores plot:\n{str(e)}")
+            print(f"Error showing classification analysis: {str(e)}")
+            QMessageBox.critical(self._window, "Error",
+                                 f"Error showing classification analysis:\n{str(e)}")
             return None
 
-    def _plot_scores(self, ax, scores, title, threshold):
-        """Plot component scores with threshold line"""
-        if not scores:
-            ax.set_title(f"No data for {title}")
-            ax.axis('off')
-            return
+    def _plot_classifier_metric(self, ax, values, title, threshold, ylabel,
+                                threshold_direction='above'):
+        """Plot component metric with threshold line"""
+        x = range(len(values))
+        bars = ax.bar(x, values)
 
-        x = range(len(scores))
-        ax.bar(x, scores)
+        # Add threshold line
         ax.axhline(y=threshold, color='r', linestyle='--', label='Threshold')
+
+        # Color bars based on threshold
+        for i, bar in enumerate(bars):
+            if threshold_direction == 'above':
+                if values[i] > threshold:
+                    bar.set_color('salmon')
+            else:  # below
+                if values[i] < threshold:
+                    bar.set_color('salmon')
+
         ax.set_xlabel('Component')
-        ax.set_ylabel('Score')
+        ax.set_ylabel(ylabel)
         ax.set_title(title)
         ax.legend()
         ax.grid(True, alpha=0.3)

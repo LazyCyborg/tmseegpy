@@ -7,9 +7,14 @@
 
 # testing
 /coverage
+/notebooks
+
 
 # production
 /build
+
+# data
+/data
 
 # misc
 .DS_Store

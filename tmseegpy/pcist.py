@@ -531,10 +531,20 @@ class PCIst:
         required_keys = ['components', 'times', 'evoked_data', 'eigenvalues', 'var_exp']
         if not all(key in details for key in required_keys):
             raise ValueError("Missing required keys in details dictionary")
-        
+
+        # Time window limits
+        time_min, time_max = -300, 300  # in milliseconds
+
+        # Filter times and data within our window
+        mask = (details['times'] >= time_min) & (details['times'] <= time_max)
+        plot_times = details['times'][mask]
+        plot_evoked = details['evoked_data'][:, mask]
+        plot_components = details['components'][:, mask]
+
         # Get number of available components
         n_available_components = details['components'].shape[0]
-        # Create larger figure and adjust height ratios for bigger surfaces
+
+        # Create figure
         fig = plt.figure(figsize=(12, 20))
         gs = plt.GridSpec(8, 2, height_ratios=[0.5, 1.5, 0.75, 0.75, 1.5, 2.5, 2, 1])
 
@@ -585,15 +595,17 @@ class PCIst:
         
         # A: TMS-evoked potentials
         ax1 = fig.add_subplot(gs[1, :])
-        ax1.plot(details['times'], details['evoked_data'].T, 'b-', alpha=0.3, linewidth=0.5)
+        ax1.plot(plot_times, plot_evoked.T, 'b-', alpha=0.3, linewidth=0.5)
         ax1.set_title('A) TMS-Evoked Potentials')
         ax1.axvline(x=0, color='k', linestyle='--')
+        ax1.set_xlim(time_min, time_max)
         ax1.text(0, ax1.get_ylim()[1], 'TMS', ha='center', va='bottom')
         ax1.text(-350, ax1.get_ylim()[1], 'TEPs', va='center', ha='right')
-        
+
         max_pcs_to_plot = min(2, n_available_components)  # Plot up to 2 PCs if available
         for i in range(max_pcs_to_plot):
             ax_pc = fig.add_subplot(gs[2 + i, :])
+            ax_pc.set_xlim(time_min, time_max)
             if i == 0:
                 ax_pc.plot(details['times'], details['components'][i], 'k-')
                 ax_pc.text(-350, ax_pc.get_ylim()[1], 'Principal\nComponents', 

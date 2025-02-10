@@ -18,7 +18,7 @@ If you have trouble with the current dataloader and creates one that is compatib
 
    ```bash
    conda env create -f environment.yml
-   conda activate tmseegpy-env
+   conda activate tmseegpy
    ``` 
 
 3. Install the package:
@@ -69,16 +69,16 @@ Run tmseegpy --help for full list of command line arguments and default values
 
 ### Example Usage
 
-To run the pipeline with default settings:
+To run the pipeline with default settings with manual ICA component selection using MNEs QT viewer and PyQt6:
 
 ```bash
 tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir
 ```
 
-Manual ICA component selection using MNEs QT viewer and PyQt6
+To run and for example disable ICA preprocessing and PCIst plots 
 
 ```bash
-tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --first_ica_manual --second_ica_manual
+tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --no_first_ica --no_second_ica --no_pcist
 ```
 
 To enable PARAFAC muscle artifact removal :
@@ -87,10 +87,10 @@ To enable PARAFAC muscle artifact removal :
 tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --parafac_muscle_artifacts
 ```
 
-To enable plotting of eeg data during preprocessing for quality checks (plots will be saved in a steps directory):
+To enable saving of eeg data in .fif format during preprocessing for quality checks (plots will be saved in a steps directory):
 
 ```bash
-tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --plot_preproc
+tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --save_preproc
 ```
 
 ## Data Preparation
@@ -142,19 +142,19 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 3. Drop unused channels (e.g., EMG)  
 4. **(First TMS artifact removal)** -2 to 10 ms  
 5. **(First interpolation)** cubic, 1.0 ms
-6. **Create epochs** (-0.41 to 0.41)  
+6. **Create epochs** (-0.8 to 0.8)  
 7. **Remove bad channels** (threshold=3)  
 8. **Remove bad epochs** (threshold=3)  
 9. **Average reference**  
 10. **First ICA** (FastICA, threshold=3.0)  
 11. **(Optional) Clean muscle (PARAFAC)**  
-12. **(Second TMS artifact removal)** -2 to 15 ms  
+12. **(Second TMS artifact removal)** -5 to 25 ms  
 13. **(Second interpolation)** cubic, 5 ms  
 14. **(Filter epoched data)** if raw not filtered  
 15. **Second ICA** (FastICA)  
 16. **(Optional) SSP**  
 17. **Baseline correction** (-400 to -50 ms)
-18. **Final downsampling** (725 Hz)  
+18. **Downsampling** (725 Hz)  
 19. **(Optional) TEP validation**  
 20. **Plot evoked**  
 21. **PCIst**  

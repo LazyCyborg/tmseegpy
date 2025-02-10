@@ -6,35 +6,60 @@ build-backend = "setuptools.build_meta"
 name = "tmseegpy"
 version = "0.1.8"
 description = "A pipeline for preprocessing and analyzing TMS-EEG data"
-readme = "README.md"
-requires-python = ">=3.8"
 authors = [
-    {name = "LazyCyborg"}
+    {name = "LazyCyborg", email = "hjarneko@gmail.com"}
 ]
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
 dependencies = [
-    "numpy>=1.16.0",
-    "scipy>=1.2.0",
-    "mne>=1.1",
-    "pooch",
-    "torch",
-    "scikit-learn",
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "mne>=1.8.0",
+    "scikit-learn>=1.4.0",
     "tensorly",
-    "matplotlib",
+    "matplotlib>=3.9.2",
     "seaborn",
     "tqdm",
-    "PyQt6",
-    "mne-faster",
+    "PyQt6>=6.4.0",
+    "PyQt6-Qt6",
+    "PyQt6-sip",
+    "mne-faster>=1.2",
+    "mne-qt-browser",
     "psutil",
     "construct",
+    "appdirs",
+    "Flask",
+    "Flask-Cors",
+    "Flask-SocketIO",
+    "gevent",
+    "gevent-websocket",
+    "ipykernel",
+    "jupyter",
+    "matplotlib-inline",
+    "PyOpenGL",
+    "ipympl",
+    "pyopengl-accelerate",  # Critical for OpenGL stability
+    "nomkl",                # For better numerical stability
+    "h5py>=3.10.0"
 ]
 
+
+
+[project.urls]
+Homepage = "https://github.com/LazyCyborg/tmseegpy"
+
+
 [project.scripts]
-tmseegpy = "tmseegpy.main:main"
+tmseegpy = "tmseegpy:run_cli"
+tmseegpy-server = "tmseegpy:run_server_cmd"
 
 [tool.setuptools]
 include-package-data = true
+packages = ["tmseegpy"]

@@ -39,10 +39,8 @@ data/
 
 
 # Jupyter Notebooks
-*.ipynb
 
 # Project Folders
-notebooks/
 simulate/
 old_code/
 output/
@@ -53,3 +51,4 @@ output_copy/
 output_PARAFAC/
 for_neurophysiologists/
 PCIst_output/
+notebooks/

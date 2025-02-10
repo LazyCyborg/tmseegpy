@@ -132,17 +132,13 @@ lspopt==1.3.0
 lxml @ file:///Users/runner/miniforge3/conda-bld/lxml_1730194242983/work
 markdown-it-py @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_43l_4ajkho/croot/markdown-it-py_1684279912406/work
 MarkupSafe @ file:///Users/runner/miniforge3/conda-bld/markupsafe_1729351343187/work
-matplotlib==3.9.2
 matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1713250518406/work
 mccabe @ file:///opt/conda/conda-bld/mccabe_1644221741721/work
 mdurl @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_0a8xm6w4wv/croots/recipe/mdurl_1659716035810/work
 mffpy @ file:///home/conda/feedstock_root/build_artifacts/mffpy_1727395097168/work
 mistune @ file:///home/conda/feedstock_root/build_artifacts/mistune_1698947099619/work
-mne @ file:///Users/runner/miniforge3/conda-bld/mne-python_1734328161584/work
 mne-bids @ file:///home/conda/feedstock_root/build_artifacts/mne-bids_1717584175369/work
 mne-connectivity @ file:///home/conda/feedstock_root/build_artifacts/mne-connectivity_1720290664347/work
-mne-faster==1.2
-mne-qt-browser @ file:///home/conda/feedstock_root/build_artifacts/mne-qt-browser_1718056629840/work
 more-itertools @ file:///home/conda/feedstock_root/build_artifacts/more-itertools_1725630081114/work
 mpmath @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_17iu6a8a3m/croot/mpmath_1690848269369/work
 msgpack @ file:///Users/runner/miniforge3/conda-bld/msgpack-python_1725975032601/work
@@ -163,7 +159,6 @@ notebook @ file:///home/conda/feedstock_root/build_artifacts/notebook_1724861303
 notebook_shim @ file:///home/conda/feedstock_root/build_artifacts/notebook-shim_1707957777232/work
 numba @ file:///Users/runner/miniforge3/conda-bld/numba_1718888154750/work
 numexpr @ file:///Users/runner/miniforge3/conda-bld/numexpr_1732612843855/work
-numpy==1.25.2
 numpydoc @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_69xghc3i3n/croot/numpydoc_1718279166747/work
 onnxruntime @ file:///Users/runner/miniforge3/conda-bld/onnxruntime_1730054258546/work/build-ci/Release/dist/onnxruntime-1.19.2-cp39-cp39-macosx_11_0_arm64.whl#sha256=59af9f8e81fed88e83f001d9511f1467846429c23af445f603936a5e8b7b2f43
 opencv-python-headless==4.11.0.86
@@ -172,7 +167,6 @@ openpyxl @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_9
 orderly-set @ file:///home/conda/feedstock_root/build_artifacts/orderly-set_1724930971097/work
 overrides @ file:///home/conda/feedstock_root/build_artifacts/overrides_1706394519472/work
 packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1731802491770/work
-pandas==2.1.0
 pandocfilters @ file:///home/conda/feedstock_root/build_artifacts/pandocfilters_1631603243851/work
 parso @ file:///home/conda/feedstock_root/build_artifacts/parso_1712320355065/work
 pathspec @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_f954ebvbxx/croot/pathspec_1674681573969/work
@@ -341,3 +335,16 @@ yarl @ file:///Users/runner/miniforge3/conda-bld/yarl_1732220933773/work
 yasa==0.6.5
 zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1732827521216/work
 zstandard==0.23.0
+
+
+# Core dependencies
+numpy>=1.26.0
+scipy>=1.12.0
+mne>=1.8.0
+mne-qt-browser
+scikit-learn>=1.4.0
+pandas>=2.2.0
+matplotlib>=3.9.2
+
+# GUI and visualization
+seaborn
