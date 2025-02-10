@@ -146,8 +146,8 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 7. **Remove bad channels** (threshold=3)  
 8. **Remove bad epochs** (threshold=3)  
 9. **Average reference**  
-10. **First ICA** (FastICA, threshold=3.0)  
-11. **(Optional) Clean muscle (PARAFAC)**  
+10. **First ICA** (FastICA)  
+11. **(Optional and very experimental) Clean muscle (PARAFAC)**  
 12. **(Second TMS artifact removal)** -5 to 25 ms  
 13. **(Second interpolation)** cubic, 5 ms  
 14. **(Filter epoched data)** if raw not filtered  
@@ -155,9 +155,8 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 16. **(Optional) SSP**  
 17. **Baseline correction** (-400 to -50 ms)
 18. **Downsampling** (725 Hz)  
-19. **(Optional) TEP validation**  
-20. **Plot evoked**  
-21. **PCIst**  
+19. **(Optional) TEP plotting**
+20. **PCIst**  
 
 
 ### TMSArtifactCleaner (which might work)
