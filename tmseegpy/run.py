@@ -511,7 +511,6 @@ def process_subjects(args, status_callback=None):
                     use_topo=True,
                     topo_edge_threshold=args.topo_edge_threshold,
                     topo_focal_threshold=args.topo_focal_threshold,
-                    topo_global_threshold=args.topo_global_threshold
                 )
             elif args.first_ica_manual:
                 processor.run_ica(
@@ -606,7 +605,6 @@ def process_subjects(args, status_callback=None):
                     use_topo=True,
                     topo_edge_threshold=args.topo_edge_threshold,
                     topo_focal_threshold=args.topo_focal_threshold,
-                    topo_global_threshold=args.topo_global_threshold
 
                 )
             elif args.second_ica_manual:
