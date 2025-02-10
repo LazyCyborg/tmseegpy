@@ -93,6 +93,19 @@ To enable saving of eeg data in .fif format during preprocessing for quality che
 tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --save_preproc
 ```
 
+3. Use the scripts:
+
+Ofcourse it is also possible to use the separate parts of the pipeline in a Jupyter Notebook or similar:
+
+```Python
+from tmseegpy.preproc import TMSEEGPreprocessor
+
+processor = TMSEEGPreprocessor(raw=raw)
+
+processor.create_epochs()
+
+processor.remove_tms_artifact()
+```
 ## Data Preparation
 
 Your data should be organized in the following structure (currently the toolbox is only tested on .ses files from Bittium NeurOne):
