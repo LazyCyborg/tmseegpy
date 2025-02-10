@@ -95,7 +95,7 @@ tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_ou
 
 3. Use the scripts:
 
-Ofcourse it is also possible to use the separate parts of the pipeline in a Jupyter Notebook or similar:
+Ofcourse it is also possible to use the separate parts of the pipeline in a Jupyter Notebook or similar (I mostly run it like this for debugging, and it is probably impractical to run an entire analysis pipeline like this):
 
 ```Python
 from tmseegpy.preproc import TMSEEGPreprocessor
