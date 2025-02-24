@@ -174,15 +174,7 @@ Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richa
 - Artifact Cleaning: Uses Tucker decomposition to clean the detected artifacts.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
 
-### Acknowledgements
-
-This pipeline includes various processing steps from several sources:
-
-- **Artifact removal** methods written by **Silvia Casarotto**
-- **Independent Component Analysis (ICA)** adapted from **Nigel Rogasch's TESA toolbox**, which served as the main inspiration and benchmark for this code
-- **Muscle artifact removal** (using Tensorly) inspired by **Tangwiriyasakul et al., 2019**
-
-  ### Special Thanks
+### Special Thanks
 
 - **Dr. Silvia Casarotto** for kindly sharing code and verifying the preprocessing output
 - **Dr. Nigel Rogasch** for sanctioning the adaptation of TESA in Python

@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
+.Python
 env/
 build/
 develop-eggs/
@@ -37,6 +37,8 @@ data/
 *.npz
 *.png
 *.ipynb
+.ipynb_checkpoints
+**/*.ipynb
 
 
 # Jupyter Notebooks
