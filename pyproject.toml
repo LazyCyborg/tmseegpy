@@ -19,35 +19,57 @@ classifiers = [
     "Operating System :: OS Independent"
 ]
 dependencies = [
+    # Core scientific computing
     "numpy>=1.26.0",
     "scipy>=1.12.0",
+    "pandas>=2.0.0",  # Added for data handling
+
+    # MNE and extensions
     "mne>=1.8.0",
+    "mne-faster>=1.2",
+    "mne-qt-browser",
+
+    # Machine learning
     "scikit-learn>=1.4.0",
-    "tensorly",
+    "tensorly>=0.8.0",  # Added version
+
+    # Visualization
     "matplotlib>=3.9.2",
-    "seaborn",
-    "tqdm",
+    "seaborn>=0.12.0",
+    "plotly>=5.13.0",  # Added for interactive plots
+
+    # GUI
     "PyQt6>=6.4.0",
     "PyQt6-Qt6",
     "PyQt6-sip",
-    "mne-faster>=1.2",
-    "mne-qt-browser",
+    "pyqtgraph>=0.13.0",  # Added for real-time plotting
+
+    # Streamlit GUI
+    "streamlit>=1.24.0",  # Added for GUI
+
+    # Utils
+    "tqdm",
     "psutil",
     "construct",
     "appdirs",
-    "Flask",
-    "Flask-Cors",
-    "Flask-SocketIO",
-    "gevent",
-    "gevent-websocket",
+
+    # Jupyter support
     "ipykernel",
     "jupyter",
     "matplotlib-inline",
-    "PyOpenGL",
     "ipympl",
-    "pyopengl-accelerate",  # Critical for OpenGL stability
-    "nomkl",                # For better numerical stability
-    "h5py>=3.10.0"
+
+    # OpenGL
+    "PyOpenGL",
+    "pyopengl-accelerate",
+
+    # File handling
+    "h5py>=3.10.0",
+
+    # GUI
+    "streamlit>=1.24.0",
+    "plotly>=5.13.0",
+    "pyqtgraph>=0.13.0"
 ]
 
 
@@ -58,7 +80,6 @@ Homepage = "https://github.com/LazyCyborg/tmseegpy"
 
 [project.scripts]
 tmseegpy = "tmseegpy:run_cli"
-tmseegpy-server = "tmseegpy:run_server_cmd"
 
 [tool.setuptools]
 include-package-data = true

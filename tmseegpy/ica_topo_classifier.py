@@ -123,6 +123,10 @@ class ICATopographyClassifier:
         dict
             Classification details and metrics
         """
+        #print(f"\nClassifier thresholds:")
+        #print(f"Z-score threshold: {self.zscore_threshold}")
+        #print(f"Peak count threshold: {self.peak_count_threshold}")
+       # print(f"Focal area threshold: {self.focal_area_threshold}")
         # Get component pattern
         pattern = self.patterns[:, idx]
         z_pattern = self._normalize_pattern(pattern)

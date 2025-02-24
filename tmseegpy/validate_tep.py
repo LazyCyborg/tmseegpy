@@ -4,6 +4,7 @@ from matplotlib.gridspec import GridSpec
 import mne
 from typing import Dict, Tuple, List, Optional, Union
 import os
+import plotly.graph_objects as go
 
 DEFAULT_TEP_COMPONENTS = {
     'N15': {
@@ -483,6 +484,8 @@ def get_single_channel_peaks(evoked, windows, mode='neg'):
     return peaks
 
 
+
+
 def plot_tep_analysis(epochs: mne.Epochs,
                       output_dir: str,
                       session_name: str,
@@ -840,12 +843,47 @@ def plot_tep_analysis(epochs: mne.Epochs,
 
     # Save figure
     fig.savefig(os.path.join(output_dir, f'{session_name}_tep_analysis.png'),
-                dpi=800,
+                dpi=400,
                 bbox_inches=None,
                 pad_inches=0.1)
     plt.close(fig)
 
     return results
+
+
+def plotly_evoked(evoked, tlims=(-0.3, 0.6)):
+    ixs = (tlims[0] < evoked.times) & (evoked.times < tlims[1])
+    data = evoked.data[:, ixs] #* 1e6
+    n_chs, n_times = data.shape
+    times = evoked.times[ixs] * 1e3
+
+    # Create traces for each channel
+    traces = []
+    for ch in range(n_chs):
+        trace = go.Scatter(
+            x=times,
+            y=data[ch, :],  # Y-axis (evoked potential data for the channel)
+            mode='lines',
+            name=evoked.ch_names[ch],
+            hovertemplate='Amplitude: %{y:.2f} uV<br>Time: %{x:.2f} ms'
+        )
+        traces.append(trace)
+
+    # Create layout for the plot
+    layout = go.Layout(
+        title='',
+        xaxis=dict(title='Time (ms)'),
+        yaxis=dict(title='Voltage (uV)'),
+        hovermode='closest',
+        width=1000,  # Set the width in pixels
+        height=600
+    )
+
+    # Create the figure
+    fig = go.Figure(data=traces, layout=layout)
+
+    # Show the interactive plot
+    fig.show()
 
 
 def generate_validation_summary(components: Dict,

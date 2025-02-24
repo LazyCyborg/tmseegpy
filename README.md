@@ -6,6 +6,26 @@ The pipeline includes steps for artifact removal, filtering, Independent Compone
 
 If you have trouble with the current dataloader and creates one that is compatible with multiple systems (maybe out of frustration) feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. 
 
+### Acknowledgements
+
+This pipeline includes various processing steps from several sources:
+
+- **Artifact removal** methods written by **Silvia Casarotto**
+- **Independent Component Analysis (ICA)** adapted from **Nigel Rogasch's TESA toolbox**, which served as the main inspiration and benchmark for this code
+- **Muscle artifact removal** (using Tensorly) inspired by **Tangwiriyasakul et al., 2019**
+
+  ### Special Thanks
+
+- **Dr. Silvia Casarotto** for kindly sharing code and verifying the preprocessing output
+- **Dr. Nigel Rogasch** for sanctioning the adaptation of TESA in Python
+- **Dr. Mats Svantesson** (Linköping University Hospital) for many hours of assistance with code, signal processing, and EEG data verification
+- **Dr. Magnus Thordstein** (Linköping University Hospital) for providing access to TMS and TMS-EEG equipment for sample data collection
+- **Dr. Andrew Wold, PhD** for teaching me how to use the TMS equipment
+- **Gramfort et al.** for creating MNE-Python, which this program is built upon
+
+  This project would not have been possible to complete without the support and contributions of these individuals.
+
+
 ## Installation 
 
 1. Clone the repository:
@@ -35,7 +55,7 @@ The pipeline is designed to be run from the command line or through the simple G
 
 ## GUI Application
 
-A graphical user interface is available in the `tmseegpy-gui-react` directory. 
+A graphical user interface is available in the `tmseegpy/main_gui` directory. 
 To use the GUI version:
 
 ### Download Releases
@@ -51,21 +71,17 @@ https://github.com/LazyCyborg/tmseegpy/releases (look for GUI releases tagged wi
 2. Install the GUI:
    - Copy the TMSeegpy GUI application to your Applications folder (Mac) or Program Files (Windows)
 
-#### Usage
+### GUI Application (Recommended)
 
-1. Start the TMSeegpy server:
-   ```bash
-   tmseegpy server
-   ```
-
-2. Launch the TMSeegpy GUI application.
-
-The GUI will automatically connect to the running server. If the connection fails, ensure the server is running and retry the connection using the GUI's retry button.
-
-The GUI is basically a wrapper for the argparser bellow and is intended as the main way to test the pipeline in a clinical setting. 
+The GUI application provides an interactive way to load data, configure preprocessing steps, visualize data at each stage, and run the analysis.  
+The GUI is bundled as a standalone application using PyInstaller, meaning it can be run without any additional Python installations or dependencies.
 
 ### Command-Line Arguments
-Run tmseegpy --help for full list of command line arguments and default values
+Run tmseegpy --help for full list of command line arguments and default values. The CLI-version is mostly built so that experienced user can run batch processing of large datasets.
+
+Note that, if run in fully automatic mode the code uses MNE-FASTER for both channel and epoch rejection and uses either an adapted version of the TESA classification algorithm of ICA-components 
+or a my own classification algorithm which classifies components based on the topography and number of peaks in the components. This means that a lot of cortical avtivity can be 
+removed and artifacts can remain which probably makes the final result unreliable due to the low SNR of of TEPs. However it might be useful as a quick first pass of a large dataset. 
 
 ### Example Usage
 
@@ -99,16 +115,21 @@ Ofcourse it is also possible to use the separate parts of the pipeline in a Jupy
 
 ```Python
 from tmseegpy.preproc import TMSEEGPreprocessor
+from tmseegpy.preproc import detect_tms_artifacts
 
 processor = TMSEEGPreprocessor(raw=raw)
 
-processor.create_epochs()
+events = detect_tms_artifacts(raw=raw)
 
-processor.remove_tms_artifact()
+processor.fix_tms_artifact(events=events)
+
+processor.run_ica(use_topo=True, manual_mode=False) ## For using automatic topography based classification of TMS-artifacts (I would however recommend to always inspect ICA components)
+
+
 ```
-## Data Preparation
+## Data Preparation for batch processing through the CLI
 
-Your data should be organized in the following structure (currently the toolbox is only tested on .ses files from Bittium NeurOne):
+If running the code through the CLI your data should be organized in the following structure:
 
 ```
 data/
@@ -122,6 +143,16 @@ data/
 
 - The `--data_dir` argument should point to the directory containing your TMS data (e.g., `data/`).
 - Each session should be in its own subdirectory under `TMSEEG/`.
+
+Or if using EDF or other formats that are directly compatible with MNE-Python
+```
+data/
+└── TMSEEG/
+    ├── session1.edf
+    │    
+    └──session2.edf/
+
+```
 
 # Processing Pipeline
 
@@ -151,25 +182,21 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 ## Order of steps 
 
 1. Load data  
-2. Set seed, find/create events  
-3. Drop unused channels (e.g., EMG)  
-4. **(First TMS artifact removal)** -2 to 10 ms  
-5. **(First interpolation)** cubic, 1.0 ms
+2. Set seed, find/create events
+3. Drop unused channels (e.g., EMG)
+4. Remove TMS artifact using baseline data (window: -5 - 2ms)
+5. Filter raw EEG data (high-pass 1 Hz and low-pass: 100 Hz)
 6. **Create epochs** (-0.8 to 0.8)  
-7. **Remove bad channels** (threshold=3)  
-8. **Remove bad epochs** (threshold=3)  
-9. **Average reference**  
+7. **Average reference**  
+8. **Remove bad channels** (threshold=3)  
+9. **Remove bad epochs** (threshold=3)
 10. **First ICA** (FastICA)  
-11. **(Optional and very experimental) Clean muscle (PARAFAC)**  
-12. **(Second TMS artifact removal)** -5 to 25 ms  
-13. **(Second interpolation)** cubic, 5 ms  
-14. **(Filter epoched data)** if raw not filtered  
-15. **Second ICA** (FastICA)  
-16. **(Optional) SSP**  
-17. **Baseline correction** (-400 to -50 ms)
-18. **Downsampling** (725 Hz)  
-19. **(Optional) TEP plotting**
-20. **PCIst**  
+11. **(Optional and very experimental) Clean muscle (PARAFAC)**
+12. **Optional) Second ICA** (Infomax)  
+13. **(Optional) SSP**
+14. **Downsampling** (725 Hz)  
+15. **(Optional) TEP plotting**
+16. **PCIst**  
 
 
 ### TMSArtifactCleaner (which might work)

@@ -1,39 +1,22 @@
 # preproc.py
 
 #### Debug mne_filter epochs after PARAFAC which might not work
-import numpy as np
-from scipy import stats, signal
-from scipy.interpolate import interp1d
-from scipy.stats import zscore
-import matplotlib.pyplot as plt
-import seaborn as sns
-from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
-from scipy.spatial.distance import pdist, squareform
-from scipy import optimize
-import mne
-from mne.preprocessing import compute_current_source_density
-from mne.io.constants import FIFF
-from matplotlib.widgets import CheckButtons, Button
-from matplotlib.gridspec import GridSpec
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-import tkinter as tk
-from tkinter import ttk
-import threading
-import queue
-import mne
-from mne.preprocessing import ICA
-from typing import List
-
 from typing import List, Optional, Callable, Dict, Union, Tuple, Any, TypeVar
 import warnings
 import os
+import numpy as np
+import matplotlib.pyplot as plt
+import threading
+import queue
+from scipy import stats, signal
+from scipy.interpolate import interp1d
+from scipy.stats import zscore
+from scipy.spatial.distance import pdist, squareform
+from scipy import optimize
 
 # MNE imports
 import mne
-from mne.minimum_norm import (make_inverse_operator, 
-                            apply_inverse,
-                            write_inverse_operator)
-from mne.preprocessing import compute_proj_ecg, compute_proj_eog
+from mne.preprocessing import compute_proj_ecg, compute_proj_eog, compute_current_source_density, ICA
 from mne import (compute_raw_covariance,
                 read_source_spaces,
                 setup_source_space,
@@ -42,10 +25,7 @@ from mne import (compute_raw_covariance,
                 make_forward_solution,
                 read_trans,
                 read_bem_solution)
-from mne.viz import plot_alignment, plot_bem
-
-# Required for ICA and component labeling
-
+from mne.io.constants import FIFF
 
 # I currently disabled ica_label functionality since it is not used but the references to it are only commented out
 from mne.preprocessing import ICA
@@ -60,8 +40,99 @@ from tensorly.decomposition import parafac, non_negative_parafac, tucker
 from tqdm import tqdm
 
 
-## Custom TMS-artefact cleaner
+## Custom TMS-artefact removal using PARAFAC decomposition
 from .clean import TMSArtifactCleaner
+
+
+def detect_tms_artifacts(raw, threshold_std=10, min_distance_ms=50, existing_events=None):
+    """
+    Automatically detect TMS artifacts based on amplitude threshold, considering existing events.
+
+    Parameters
+    ----------
+    threshold_std : float
+        Number of standard deviations above mean for detection
+    min_distance_ms : float
+        Minimum distance between artifacts in milliseconds
+    existing_events : array | None
+        Existing event samples to avoid duplicate detection
+
+    Returns
+    -------
+    additional_events : array
+        Array of additional events in MNE format (N x 3)
+    """
+    if raw is None:
+        raise ValueError("Must have raw data to detect artifacts")
+
+    data = raw.get_data()
+    sfreq = raw.info['sfreq']
+    min_distance_samples = int(min_distance_ms * sfreq / 1000)
+
+    print(
+        f"Running automatic artifact detection for {min_distance_samples} ms samples with standard deviation {threshold_std}")
+
+    # Calculate statistics across all channels
+    data_flat = data.reshape(-1)
+    mean = np.mean(data_flat)
+    std = np.std(data_flat)
+    threshold = mean + threshold_std * std
+    print(f"mean: {mean}, std: {std} for data")
+
+    # Find peaks above threshold
+    peaks = []
+    for ch in range(data.shape[0]):
+        channel_peaks = np.where(np.abs(data[ch, :]) > threshold)[0]
+        peaks.extend(channel_peaks.tolist())
+
+    if not peaks:
+        print("No peaks detected above threshold")
+        return None
+
+    peaks = np.unique(np.array(peaks))
+
+    # If we have existing events, prepare exclusion zones
+    excluded_zones = []
+    if existing_events is not None and len(existing_events) > 0:
+        for event_sample in existing_events[:, 0]:
+            excluded_zones.append((event_sample - min_distance_samples,
+                                   event_sample + min_distance_samples))
+
+    # Group nearby peaks and enforce minimum distance
+    artifact_samples = []
+    last_peak = -min_distance_samples
+
+    for peak in sorted(peaks):
+        # Check if peak is in any exclusion zone
+        should_exclude = False
+        for start, end in excluded_zones:
+            if start <= peak <= end:
+                should_exclude = True
+                break
+
+        if should_exclude:
+            continue
+
+        if peak - last_peak >= min_distance_samples:
+            artifact_samples.append(peak)
+            last_peak = peak
+
+    if len(artifact_samples) > 0:
+        print(f"Detected {len(artifact_samples)} additional TMS artifacts")
+
+        # Create new events array for the additional artifacts
+        additional_events = np.zeros((len(artifact_samples), 3), dtype=int)
+        additional_events[:, 0] = artifact_samples  # Sample numbers
+        additional_events[:, 1] = 0  # Middle column should be 0
+        additional_events[:, 2] = 1  # Event ID/value
+
+        # Sort by time
+        additional_events = additional_events[additional_events[:, 0].argsort()]
+
+        return additional_events
+    else:
+        print("No additional artifacts detected")
+        return None
 
 
 class TMSEEGPreprocessor:
@@ -96,13 +167,11 @@ class TMSEEGPreprocessor:
     def __init__(self,
                  raw: mne.io.Raw,
                  montage: Union[str, mne.channels.montage.DigMontage] = 'easycap-M1',
-                 initial_sfreq: float = 1000,
                  final_sfreq: float = 725):
 
         self.raw = raw.copy()
         self.epochs = None
         self.evoked = None
-        self.initial_sfreq = initial_sfreq
         self.final_sfreq = final_sfreq
 
         self.first_ica_manual = False
@@ -221,17 +290,479 @@ class TMSEEGPreprocessor:
             'original_sfreq': 0,
             'interpolated_times': [],
         }
-        
-        
-        
-    def create_epochs(self, 
-                    tmin: float = -0.5, 
-                    tmax: float = 1,
-                    baseline: Optional[Tuple[float, float]] = None,
-                    amplitude_threshold: float = 300.0) -> None:
+
+
+
+
+
+
+
+
+######################## TMS ARTIFACT AND EPOCHS ######################################
+
+    def fix_tms_artifact(self,
+                         window: Tuple[float, float] = (-0.002, 0.005),
+                         smooth_window: Tuple[float, float] = (-0.002, 0.002),
+                         span: int = 2,
+                         events: Optional[np.ndarray] = None,
+                         verbose: bool = True) -> None:
+        """
+        Remove TMS artifacts using reversed data and boundary smoothing.
+
+        Parameters
+        ----------
+        window : tuple
+            Start and end time of cut window in seconds (default: (-0.002, 0.005))
+        smooth_window : tuple
+            Start and end time of smoothing window in seconds (default: (-0.002, 0.002))
+        span : int
+            Number of samples to use for smoothing on each side (default: 2)
+        events : array, optional
+            Custom events array (n_events × 3). If None, tries to find events
+        verbose : bool
+            Whether to print progress information
+        """
+        if hasattr(self, 'epochs') and self.epochs is not None:
+            raise NotImplementedError("TMS pulse removal not yet implemented for epoched data")
+
+        raw_out = self.raw.copy()
+        sfreq = raw_out.info['sfreq']
+
+        # Convert windows to samples
+        window = np.array([w * sfreq for w in window])
+        window_len = int(window[1] - window[0])
+        smooth_window = np.array([int(sw * sfreq) for sw in smooth_window])
+
+        # Get events if not provided
+        if events is None:
+            try:
+                events = mne.find_events(raw_out, stim_channel='STI 014')
+                if verbose:
+                    print(f"\nFound {len(events)} events from STI 014 channel")
+            except Exception as e:
+                try:
+                    events, _ = mne.events_from_annotations(raw_out)
+                    if verbose:
+                        print(f"\nFound {len(events)} events from annotations")
+                except Exception as e2:
+                    raise ValueError("No events found or provided. Cannot remove artifacts.")
+
+        if len(events) == 0:
+            raise ValueError("No events to process. Cannot remove artifacts.")
+
+        events_sample = events[:, 0]  # Get event sample points
+
+        if verbose:
+            print(f"Processing {len(events_sample)} event time points")
+            print(f"Window in samples: {window[0]} to {window[1]}")
+
+        # Define the removal function with added validation
+        def tms_pulse_removal(y):
+            for onset in events_sample:
+                cut0 = int(onset + window[0])
+                cut1 = int(onset + window[1])
+
+                # Add validation to ensure window is valid
+                if cut0 >= cut1:
+                    if verbose:
+                        print(f"Warning: Invalid window at onset {onset}: cut0={cut0}, cut1={cut1}")
+                    continue
+
+                # Calculate the actual window length
+                actual_window_len = cut1 - cut0
+
+                # Check if there's enough data before the event
+                if cut0 - actual_window_len < 0:
+                    if verbose:
+                        print(f"Warning: Not enough data before event at {onset} to substitute")
+                    continue
+
+                # Substitute data with the reverse of previous data (to remove artifact)
+                y[cut0:cut1] = y[cut0 - actual_window_len:cut1 - actual_window_len][::-1]
+
+                # Smooth first "cut"
+                smooth_start = int(cut0 + smooth_window[0])
+                smooth_end = int(cut0 + smooth_window[1])
+                if smooth_start < smooth_end and smooth_start >= 0 and smooth_end < len(y):
+                    y[smooth_start:smooth_end] = np.array(
+                        [np.mean(y[max(0, samp - span):min(len(y), samp + span + 1)])
+                         for samp in range(smooth_start, smooth_end)]
+                    )
+
+                # Smooth second "cut"
+                smooth_start = int(cut1 + smooth_window[0])
+                smooth_end = int(cut1 + smooth_window[1])
+                if smooth_start < smooth_end and smooth_start >= 0 and smooth_end < len(y):
+                    y[smooth_start:smooth_end] = np.array(
+                        [np.mean(y[max(0, samp - span):min(len(y), samp + span + 1)])
+                         for samp in range(smooth_start, smooth_end)]
+                    )
+
+            return y
+
+        # Apply function to all channels
+        raw_out.apply_function(tms_pulse_removal, picks='all', verbose=False)
+
+        # Store info about the removal
+        if not hasattr(self, 'tmscut'):
+            self.tmscut = []
+
+        self.tmscut.append({
+            'window': window,
+            'smooth_window': smooth_window,
+            'sfreq': sfreq,
+            'interpolated': 'no'
+        })
+
+        self.raw = raw_out
+
+    def remove_tms_artifact(self,
+                            cut_times_tms: Tuple[float, float] = (-2, 10),
+                            replace_times: Optional[Tuple[float, float]] = None,
+                            events: Optional[np.ndarray] = None,
+                            event_id: Optional[Dict] = None,
+                            verbose: bool = True) -> None:
+        """
+        Remove TMS artifacts from all marked events.
+
+        Parameters
+        ----------
+        cut_times_tms : tuple
+            Start and end time of cut window in milliseconds
+        replace_times : tuple, optional
+            Time window for baseline calculation if replacing with mean
+        events : array, optional
+            Custom events array (n_events × 3). If None, tries to find events
+        event_id : dict, optional
+            Dictionary mapping event names to event codes
+        verbose : bool
+            Whether to print progress information
+        """
+        # Check if we're working with epochs
+        if hasattr(self, 'epochs') and self.epochs is not None:
+            if verbose:
+                print("\nRemoving TMS artifacts from epochs...")
+
+            # Get data from epochs
+            data = self.epochs.get_data()
+            sfreq = self.epochs.info['sfreq']
+
+            # Convert cut times from ms to samples
+            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
+
+            # Calculate sample points relative to epoch start
+            start_sample = int(self.epochs.tmin * sfreq) + cut_samples[0]
+            end_sample = int(self.epochs.tmin * sfreq) + cut_samples[1]
+
+            # Ensure we're within epoch boundaries
+            if start_sample < 0:
+                print(f"Warning: Start time {cut_times_tms[0]}ms is before epoch start. Adjusting...")
+                start_sample = 0
+            if end_sample >= data.shape[2]:
+                print(f"Warning: End time {cut_times_tms[1]}ms is after epoch end. Adjusting...")
+                end_sample = data.shape[2] - 1
+
+            # Remove artifact from each epoch
+            for epoch_idx in range(data.shape[0]):
+                if replace_times is None:
+                    data[epoch_idx, :, start_sample:end_sample] = 0
+                else:
+                    # Handle replacement if specified
+                    replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
+                    baseline_start = int(self.epochs.tmin * sfreq) + replace_samples[0]
+                    baseline_end = int(self.epochs.tmin * sfreq) + replace_samples[1]
+
+                    if baseline_start >= 0 and baseline_end < data.shape[2]:
+                        baseline_mean = np.mean(data[epoch_idx, :, baseline_start:baseline_end], axis=1)
+                        data[epoch_idx, :, start_sample:end_sample] = baseline_mean[:, np.newaxis]
+
+            # Update epochs data
+            self.epochs._data = data
+
+        else:
+            raw_out = self.raw.copy()
+            data = raw_out.get_data()
+            sfreq = raw_out.info['sfreq']
+
+            if not hasattr(self, 'tmscut'):
+                self.tmscut = []
+
+            tmscut_info = {
+                'cut_times_tms': cut_times_tms,
+                'replace_times': replace_times,
+                'sfreq': sfreq,
+                'interpolated': 'no'
+            }
+
+            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
+
+            # Use provided events or try to find them
+            if events is None:
+                # First try to get events from stim channel
+                if 'STI 014' in raw_out.ch_names:
+                    try:
+                        events = mne.find_events(raw_out, stim_channel='STI 014')
+                        if verbose:
+                            print(f"\nFound {len(events)} events from STI 014 channel")
+                        # Create event_id from unique event codes if not provided
+                        if event_id is None:
+                            unique_events = np.unique(events[:, 2])
+                            event_id = {str(code): code for code in unique_events}
+                            if verbose:
+                                print(f"Event IDs: {list(event_id.values())}")
+                    except Exception as e:
+                        if verbose:
+                            print(f"Error finding events from STI 014: {str(e)}")
+
+                # If no events found from stim channel, try annotations
+                if events is None or len(events) == 0:
+                    try:
+                        events, event_id = mne.events_from_annotations(raw_out)
+                        if verbose:
+                            print(f"\nFound {len(events)} events from annotations")
+                    except Exception as e:
+                        if verbose:
+                            print(f"Error finding events from annotations: {str(e)}")
+
+            if events is None or len(events) == 0:
+                raise ValueError("No events found or provided. Cannot remove artifacts.")
+
+            # Store events and event_id for later use
+            self._stored_events = events.copy()
+            self._stored_event_id = event_id
+            self.events = events.copy()
+            self.event_id = event_id
+
+            if verbose:
+                print(f"\nFound {len(events)} events to process")
+                print(f"Removing artifact in window {cut_times_tms} ms")
+
+            processed_count = 0
+            skipped_count = 0
+
+            # Sort events by time to ensure consistent processing
+            events = events[events[:, 0].argsort()]
+
+            for event_idx in range(len(events)):
+                event_sample = events[event_idx, 0]
+                start = event_sample + cut_samples[0]
+                end = event_sample + cut_samples[1]
+
+                if start < 0 or end >= data.shape[1]:
+                    skipped_count += 1
+                    continue
+
+                if replace_times is None:
+                    data[:, start:end] = 0
+                else:
+                    replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
+                    baseline_start = event_sample + replace_samples[0]
+                    baseline_end = event_sample + replace_samples[1]
+                    if baseline_start >= 0 and baseline_end < data.shape[1]:
+                        baseline_mean = np.mean(data[:, baseline_start:baseline_end], axis=1)
+                        data[:, start:end] = baseline_mean[:, np.newaxis]
+                processed_count += 1
+
+            if verbose:
+                print(f"Successfully removed artifacts from {processed_count} events")
+                if skipped_count > 0:
+                    print(f"Skipped {skipped_count} events due to window constraints")
+
+            raw_out._data = data
+            self.raw = raw_out
+            self.tmscut.append(tmscut_info)
+
+    def interpolate_tms_artifact(self,
+                                 method: str = 'cubic',
+                                 interp_window: float = 1.0,
+                                 cut_times_tms: Tuple[float, float] = (-2, 10),
+                                 events: Optional[np.ndarray] = None,
+                                 event_id: Optional[Dict] = None,
+                                 verbose: bool = True) -> None:
+        """
+        Interpolate TMS artifacts for all marked events.
+
+        Parameters
+        ----------
+        method : str
+            Interpolation method ('cubic')
+        interp_window : float
+            Window size for interpolation in ms
+        cut_times_tms : tuple
+            Start and end time of cut window in milliseconds
+        events : array, optional
+            Custom events array (n_events × 3). If None, uses stored events
+        event_id : dict, optional
+            Dictionary mapping event names to event codes
+        verbose : bool
+            Whether to print progress information
+        """
+        if hasattr(self, 'epochs') and self.epochs is not None:
+            data = self.epochs.get_data()
+            sfreq = self.epochs.info['sfreq']
+
+            # Get the last cut times from tmscut
+            if not hasattr(self, 'tmscut') or not self.tmscut:
+                raise ValueError("Must run remove_tms_artifact first")
+
+            cut_times_tms = self.tmscut[-1]['cut_times_tms']
+
+            # Convert to samples
+            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
+            interp_samples = int(round(interp_window * sfreq / 1000))
+
+            # Calculate sample points relative to epoch start
+            start_sample = int(self.epochs.tmin * sfreq) + cut_samples[0]
+            end_sample = int(self.epochs.tmin * sfreq) + cut_samples[1]
+
+            # Interpolate each epoch
+            for epoch_idx in range(data.shape[0]):
+                window_start = start_sample - interp_samples
+                window_end = end_sample + interp_samples
+
+                if window_start >= 0 and window_end < data.shape[2]:
+                    x = np.arange(window_end - window_start + 1)
+                    x_fit = np.concatenate([x[:interp_samples], x[-interp_samples:]])
+                    x_fit = x_fit - x_fit[0]
+                    x_interp = x[interp_samples:-interp_samples] - x_fit[0]
+
+                    for ch in range(data.shape[1]):
+                        y_full = data[epoch_idx, ch, window_start:window_end + 1]
+                        y_fit = np.concatenate([y_full[:interp_samples], y_full[-interp_samples:]])
+
+                        if method == 'cubic':
+                            p = np.polyfit(x_fit, y_fit, 3)
+                            data[epoch_idx, ch, start_sample:end_sample + 1] = np.polyval(p, x_interp)
+
+            self.epochs._data = data
+
+        else:
+            if not hasattr(self, 'tmscut') or not self.tmscut:
+                raise ValueError("Must run remove_tms_artifact first")
+
+            if verbose:
+                print(f"\nStarting interpolation with {method} method")
+                print(f"Using interpolation window of {interp_window} ms")
+                print(f"Processing cut window {cut_times_tms} ms")
+
+            raw_out = self.raw.copy()
+            data = raw_out.get_data()
+            sfreq = raw_out.info['sfreq']
+
+            # Use provided events, stored events, or try to find events
+            if events is not None:
+                current_events = events
+                if verbose:
+                    print(f"\nUsing {len(current_events)} provided events")
+            elif hasattr(self, '_stored_events') and self._stored_events is not None:
+                current_events = self._stored_events
+                if verbose:
+                    print(f"\nUsing {len(current_events)} stored events from previous artifact removal")
+            else:
+                raise ValueError("No events found. Must provide events or run remove_tms_artifact first")
+
+            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
+            interp_samples = int(round(interp_window * sfreq / 1000))
+
+            interpolated_count = 0
+            warning_count = 0
+
+            for event_idx in range(len(current_events)):
+                event_sample = current_events[event_idx, 0]
+                start = event_sample + cut_samples[0]
+                end = event_sample + cut_samples[1]
+
+                # Calculate fitting windows
+                window_start = start - interp_samples
+                window_end = end + interp_samples
+
+                if window_start < 0 or window_end >= data.shape[1]:
+                    warning_count += 1
+                    continue
+
+                # Get time points for fitting
+                x = np.arange(window_end - window_start + 1)
+                x_fit = np.concatenate([
+                    x[:interp_samples],
+                    x[-interp_samples:]
+                ])
+
+                # Center x values at 0
+                x_fit = x_fit - x_fit[0]
+                if len(x) <= 2 * interp_samples:
+                    if verbose:
+                        print(f"Warning: Window too small for interpolation at sample {event_sample}")
+                    warning_count += 1
+                    continue
+
+                x_interp = x[interp_samples:-interp_samples] - x_fit[0]
+
+                # Interpolate each channel
+                for ch in range(data.shape[0]):
+                    y_full = data[ch, window_start:window_end + 1]
+                    y_fit = np.concatenate([
+                        y_full[:interp_samples],
+                        y_full[-interp_samples:]
+                    ])
+
+                    p = np.polyfit(x_fit, y_fit, 3)
+                    data[ch, start:end + 1] = np.polyval(p, x_interp)
+
+                interpolated_count += 1
+
+            if verbose:
+                print(f"\nSuccessfully interpolated {interpolated_count} events")
+                if warning_count > 0:
+                    print(f"Encountered {warning_count} warnings during interpolation")
+                print("TMS artifact interpolation complete")
+
+            raw_out._data = data
+            self.raw = raw_out
+
+    def mne_fix_tms_artifact(self,
+                             window: Tuple[float, float] = (-0.002, 0.015),
+                             mode: str = 'window') -> None:
+        """
+        Interpolate the TMS artifact using MNE's fix_stim_artifact function.
+
+        Parameters
+        ----------
+        window : tuple
+            Time window around TMS pulse to interpolate (start, end) in seconds
+        mode : str
+            Interpolation mode ('linear', 'cubic', or 'hann')
+        """
+        if self.raw is None:
+            raise ValueError("Must create raw before interpolating TMS artifact")
+
+        events, event_id = mne.events_from_annotations(self.raw)
+
+        try:
+            self.raw = mne.preprocessing.fix_stim_artifact(
+                self.raw,
+                events=events,
+                event_id=event_id,
+                tmin=window[0],
+                tmax=window[1],
+                mode=mode
+            )
+            print(f"Applied TMS artifact interpolation with mode '{mode}'")
+        except Exception as e:
+            print(f"Error in TMS artifact interpolation: {str(e)}")
+
+
+######################### EPOCHS AND REJECTION ################### (story of my life)
+
+    def create_epochs(self,
+                      tmin: float = -0.5,
+                      tmax: float = 1,
+                      baseline: Optional[Tuple[float, float]] = None,
+                      amplitude_threshold: float = None,
+                      events: Optional[np.ndarray] = None,
+                      event_id: Optional[Dict] = None) -> None:
         """
         Create epochs from the continuous data with amplitude rejection criteria.
-        
+
         Parameters
         ----------
         tmin : float
@@ -239,109 +770,129 @@ class TMSEEGPreprocessor:
         tmax : float
             End time of epoch in seconds
         baseline : tuple or None
-            Baseline period (start, end) in seconds. None for no baseline correction
-       # amplitude_threshold : float
-       #     Threshold for rejecting epochs based on peak-to-peak amplitude in µV.
-        #    Default is 300 µV.
+            Baseline period (start, end) in seconds
+        amplitude_threshold : float
+            Threshold for rejecting epochs based on peak-to-peak amplitude in µV
+        events : array, optional
+            Events to create epochs from
+        event_id : dict, optional
+            Event IDs to use
         """
-        # Convert µV to V for MNE
-        #reject = dict(eeg=amplitude_threshold * 1e-6)
-                
-        self.events, self.event_id = mne.events_from_annotations(self.raw)
-        
-        self.epochs = mne.Epochs(self.raw, 
-                            self.events, 
-                            event_id=self.event_id,
-                            tmin=tmin, 
-                            tmax=tmax, 
-                            baseline=baseline,
-                            #reject=reject,
-                            reject_by_annotation=True,
-                            detrend=0,
-                            preload=True,
-                            verbose=True)
-        
-        print(f"Created {len(self.epochs)} epochs")
-       # if len(self.events) > len(self.epochs):
-        #    n_rejected = len(self.events) - len(self.epochs)
-         #   print(f"Rejected {n_rejected} epochs based on {amplitude_threshold}µV amplitude threshold")
-       # self.preproc_stats['n_orig_events'] = len(self.events)
-       # self.preproc_stats['n_final_events'] = len(self.epochs)
+        # If no events provided, try to find them
+        if events is None:
+            print("\nNo events provided, attempting to find events...")
+            try:
+                # First try STI 014
+                if 'STI 014' in self.raw.ch_names:
+                    events = mne.find_events(self.raw, stim_channel='STI 014')
+                    if len(events) > 0:
+                        print(f"Found {len(events)} events from STI 014 channel")
+                        # Create event_id if not provided
+                        if event_id is None:
+                            unique_events = np.unique(events[:, 2])
+                            event_id = {str(code): code for code in unique_events}
 
+                # If no events found, try other common stim channels
+                if events is None or len(events) == 0:
+                    common_stim_channels = ['STIM', 'STI101', 'trigger', 'STI 001']
+                    for ch in common_stim_channels:
+                        if ch in self.raw.ch_names:
+                            print(f"Trying channel {ch}...")
+                            events = mne.find_events(self.raw, stim_channel=ch)
+                            if len(events) > 0:
+                                print(f"Found {len(events)} events from {ch} channel")
+                                if event_id is None:
+                                    unique_events = np.unique(events[:, 2])
+                                    event_id = {str(code): code for code in unique_events}
+                                break
 
-    def _get_events(self):
+                # If still no events, try annotations
+                if events is None or len(events) == 0:
+                    if len(self.raw.annotations) > 0:
+                        print("Trying to get events from annotations...")
+                        events, event_id = mne.events_from_annotations(self.raw)
+                        if len(events) > 0:
+                            print(f"Found {len(events)} events from annotations")
+
+            except Exception as e:
+                print(f"Error finding events: {str(e)}")
+
+        # Verify we have events
+        if events is None or len(events) == 0:
+            raise ValueError("No events found in the data. Cannot create epochs.")
+
+        # Verify we have event_id
+        if event_id is None:
+            print("No event_id provided, creating from unique event codes...")
+            unique_events = np.unique(events[:, 2])
+            event_id = {str(code): code for code in unique_events}
+
+        print(f"\nCreating epochs with:")
+        print(f"Number of events: {len(events)}")
+        print(f"Event IDs: {event_id}")
+        print(f"Time window: {tmin} to {tmax} seconds")
+        if baseline:
+            print(f"Baseline period: {baseline}")
+
+        # Store events and event_id
+        self.events = events
+        self.event_id = event_id
+
+        if amplitude_threshold is not None:
+            print(f"Amplitude rejection threshold: {amplitude_threshold}")
+            reject = dict(eeg=amplitude_threshold)
+            reject_tmin = 0.15
+            reject_tmax = 0.3
+
+        else:
+            reject = None
+            reject_tmin = None
+            reject_tmax = None
+
+        # Create epochs
+        self.epochs = mne.Epochs(
+            self.raw,
+            events=self.events,
+            event_id=self.event_id,
+            tmin=tmin,
+            tmax=tmax,
+            baseline=baseline,
+            reject_by_annotation=True,
+            detrend=0,
+            preload=True,
+            reject=reject,
+            reject_tmin=reject_tmin,
+            reject_tmax=reject_tmax,
+            verbose=True
+        )
+
+        print(f"\nCreated {len(self.epochs)} epochs")
+
+        # Store preprocessing stats
+        self.preproc_stats['n_orig_events'] = len(events)
+        self.preproc_stats['n_final_events'] = len(self.epochs)
+
+    def _get_events(self, raw_eve):
         """Get events from epochs or raw data."""
         if self.epochs is not None:
             return self.epochs.events
         elif hasattr(self, 'raw'):
-            return mne.find_events(self.raw, stim_channel='STI 014')
+            return mne.find_events(raw_eve, stim_channel='STI 014')
         return None
 
-    def _get_event_ids(self):
+    def _get_event_ids(self, raw_eve):
         """Get event IDs from epochs or raw data."""
         if self.epochs is not None:
             return self.epochs.event_id
         elif hasattr(self, 'raw'):
-            _, event_id = mne.events_from_annotations(self.raw, event_id='auto')
+            _, event_id = mne.events_from_annotations(raw_eve, event_id='auto')
             return event_id
         return None
-    
-    def clean_muscle_artifacts(self,
-                         muscle_window: Tuple[float, float] = (0.005, 0.05),
-                         threshold_factor: float = 5.0,
-                         n_components: int = 2,
-                         verbose: bool = True) -> None:
-        """
-        Clean TMS-evoked muscle artifacts using tensor decomposition.
-        
-        Parameters
-        ----------
-        muscle_window : tuple
-            Time window for detecting muscle artifacts in seconds [start, end]
-        threshold_factor : float
-            Threshold for artifact detection
-        n_components : int
-            Number of components to use in tensor decomposition
-        verbose : bool
-            Whether to print progress information
-        """
-        if self.epochs is None:
-            raise ValueError("Must create epochs before cleaning muscle artifacts")
-            
-        # Create cleaner instance
-        cleaner = TMSArtifactCleaner(self.epochs, verbose=verbose)
-        
-        # Detect artifacts
-        artifact_info = cleaner.detect_muscle_artifacts(
-            muscle_window=muscle_window,
-            threshold_factor=threshold_factor,
-            verbose=verbose
-        )
-        
-        if verbose:
-            print("\nArtifact detection results:")
-            print(f"Found {artifact_info['muscle']['stats']['n_detected']} artifacts")
-            print(f"Detection rate: {artifact_info['muscle']['stats']['detection_rate']*100:.1f}%")
-        
-        # Clean artifacts
-        cleaned_epochs = cleaner.clean_muscle_artifacts(
-            n_components=n_components,
-            verbose=verbose
-        )
-        
-        # Update epochs with cleaned data
-        self.epochs = cleaned_epochs
-        
-        # Apply baseline correction again
-        #self.apply_baseline_correction()
-        
-        if verbose:
-            print("\nMuscle artifact cleaning complete")
 
-    def remove_bad_channels(self, threshold: int = 2) -> None:
+    def remove_bad_channels(self, interpolate: bool = False, threshold: int = 2) -> None:
         """
         Remove and interpolate bad channels using FASTER algorithm.
-        
+
         Parameters
         ----------
         threshold : float
@@ -349,37 +900,47 @@ class TMSEEGPreprocessor:
         """
         if self.epochs is None:
             raise ValueError("Must create epochs before removing bad channels")
-            
+
         bad_channels = find_bad_channels(self.epochs, thres=threshold)
-        
+
         if bad_channels:
             print(f"Detected bad channels: {bad_channels}")
             self.epochs.info['bads'] = list(set(self.epochs.info['bads']).union(set(bad_channels)))
-            
+
             try:
                 # First try normal interpolation
-                self.epochs.interpolate_bads(reset_bads=True)
-                print("Interpolated bad channels")
-                
-            except ValueError as e:
-                print(f"Warning: Standard interpolation failed: {str(e)}")
-                print("Attempting alternative interpolation method...")
-                
-                try:
-                    # Try setting montage again with default positions
-                    temp_montage = mne.channels.make_standard_montage('easycap-M10') ## standard_1020 was tried before not sure if it makes u huge difference
-                    self.epochs.set_montage(temp_montage, match_case=False, on_missing='warn')
-                    
+                if interpolate:
                     # Try interpolation again
                     self.epochs.interpolate_bads(reset_bads=True)
                     print("Successfully interpolated bad channels using default montage")
-                    
+                else:
+                    self.epochs.drop_channels(self.epochs.info['bads'])
+                self.epochs.interpolate_bads(reset_bads=True)
+                print("Interpolated bad channels")
+
+            except ValueError as e:
+                print(f"Warning: Standard interpolation failed: {str(e)}")
+                print("Attempting alternative interpolation method...")
+
+                try:
+                    # Try setting montage again with default positions
+                    temp_montage = mne.channels.make_standard_montage(
+                        'easycap-M10')  ## standard_1020 was tried before not sure if it makes u huge difference
+                    self.epochs.set_montage(temp_montage, match_case=False, on_missing='warn')
+
+                    if interpolate:
+                    # Try interpolation again
+                        self.epochs.interpolate_bads(reset_bads=True)
+                        print("Successfully interpolated bad channels using default montage")
+                    else:
+                        self.epochs.drop_channels(self.epochs.info['bads'])
+
                 except Exception as e2:
                     print(f"Warning: Alternative interpolation also failed: {str(e2)}")
                     print("Dropping bad channels instead of interpolating")
                     self.epochs.drop_channels(bad_channels)
                     print(f"Dropped channels: {bad_channels}")
-            
+
             self.preproc_stats['bad_channels'] = bad_channels
         else:
             print("No bad channels detected")
@@ -387,7 +948,7 @@ class TMSEEGPreprocessor:
     def remove_bad_epochs(self, threshold: int = 3) -> None:
         """
         Remove bad epochs using FASTER algorithm.
-        
+
         Parameters
         ----------
         threshold : float
@@ -395,9 +956,9 @@ class TMSEEGPreprocessor:
         """
         if self.epochs is None:
             raise ValueError("Must create epochs before removing bad epochs")
-            
+
         bad_epochs = find_bad_epochs(self.epochs, thres=threshold)
-        
+
         if bad_epochs:
             print(f"Dropping {len(bad_epochs)} bad epochs")
             self.epochs.drop(bad_epochs)
@@ -405,191 +966,33 @@ class TMSEEGPreprocessor:
         else:
             print("No bad epochs detected")
 
-    def remove_tms_artifact(self, 
-                        cut_times_tms: Tuple[float, float] = (-2, 10), 
-                        replace_times: Optional[Tuple[float, float]] = None,
-                        verbose: bool = True) -> None:
-        """
-        Remove TMS artifacts following TESA implementation.
-        
-        Parameters
-        ----------
-        cut_times_tms : tuple
-            Time window to cut around TMS pulse in ms [start, end]
-            Default is [-2, 10] following TESA
-        replace_times : tuple, optional
-            Time window for calculating average to replace removed data in ms [start, end]
-            If None (default), data will be replaced with 0s
-        """
-        raw_out = self.raw.copy()
-        data = raw_out.get_data()
-        sfreq = raw_out.info['sfreq']
-        
-        # Store original info about cut (like TESA's EEG.tmscut)
-        if not hasattr(self, 'tmscut'):
-            self.tmscut = []
-        
-        tmscut_info = {
-            'cut_times_tms': cut_times_tms,
-            'replace_times': replace_times,
-            'sfreq': sfreq,
-            'interpolated': 'no'
-        }
-        
-        cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-        
-        # Get TMS annotations
-        tms_annotations = [ann for ann in raw_out.annotations 
-                        if ann['description'] == 'Stimulation']
-        
-        print(f"\nFound {len(tms_annotations)} TMS events to process")
-        print(f"Removing artifact in window {cut_times_tms} ms")
-
-        processed_count = 0
-        skipped_count = 0
-        
-        for ann in tms_annotations:
-            event_sample = int(ann['onset'] * sfreq)
-            start = event_sample + cut_samples[0]
-            end = event_sample + cut_samples[1]
-            
-            if start < 0 or end >= data.shape[1]:
-                skipped_count += 1
-                continue
-                
-            if replace_times is None:
-                data[:, start:end] = 0
-            else:
-                # Calculate average from replace_times window
-                replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
-                baseline_start = event_sample + replace_samples[0]
-                baseline_end = event_sample + replace_samples[1]
-                if baseline_start >= 0 and baseline_end < data.shape[1]:
-                    baseline_mean = np.mean(data[:, baseline_start:baseline_end], axis=1)
-                    data[:, start:end] = baseline_mean[:, np.newaxis]
-            processed_count += 1
-        
-        print(f"Successfully removed artifacts from {processed_count} events")
-        if skipped_count > 0:
-            print(f"Skipped {skipped_count} events due to window constraints")
-        
-        raw_out._data = data
-        raw_out.set_annotations(raw_out.annotations)
-        self.raw = raw_out
-        self.tmscut.append(tmscut_info)
-
-    def interpolate_tms_artifact(self, 
-                            method: str = 'cubic',
-                            interp_window: float = 1.0,
-                            cut_times_tms: Tuple[float, float] = (-2, 10),  # Add this back
-                            verbose: bool = True) -> None:
-        """
-        Interpolate TMS artifacts following TESA implementation.
-        Uses polynomial interpolation rather than spline interpolation.
-        
-        Parameters
-        ----------
-        method : str
-            Interpolation method: must be 'cubic' for TESA compatibility
-        interp_window : float
-            Time window (in ms) before and after artifact for fitting cubic function
-            Default is 1.0 ms following TESA
-        cut_times_tms : tuple
-            Time window where TMS artifact was removed in ms [start, end]
-            Default is (-2, 10) following TESA
-        verbose : bool
-            Whether to print progress information
-        """
-        if not hasattr(self, 'tmscut') or not self.tmscut:
-            raise ValueError("Must run remove_tms_artifact first")
-        
-        print(f"\nStarting interpolation with {method} method")
-        print(f"Using interpolation window of {interp_window} ms")
-        print(f"Processing cut window {cut_times_tms} ms")
-
-        interpolated_count = 0
-        warning_count = 0
-            
-        raw_out = self.raw.copy()
-        data = raw_out.get_data()
-        sfreq = raw_out.info['sfreq']
-        
-        cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-        interp_samples = int(round(interp_window * sfreq / 1000))
-            
-        for tmscut in self.tmscut:
-            if tmscut['interpolated'] == 'no':
-                cut_times = tmscut['cut_times_tms']
-                cut_samples = np.round(np.array(cut_times) * sfreq / 1000).astype(int)
-                interp_samples = int(round(interp_window * sfreq / 1000))
-                
-                # Process annotations
-                tms_annotations = [ann for ann in raw_out.annotations 
-                                if ann['description'] == 'Stimulation']
-                
-                for ann in tms_annotations:
-                    event_sample = int(ann['onset'] * sfreq)
-                    start = event_sample + cut_samples[0]
-                    end = event_sample + cut_samples[1]
-                    
-                    # Calculate fitting windows
-                    window_start = start - interp_samples
-                    window_end = end + interp_samples
-                    
-                    if window_start < 0 or window_end >= data.shape[1]:
-                        warning_count += 1
-                        continue
-                    
-                    # Get time points for fitting
-                    x = np.arange(window_end - window_start + 1)
-                    x_fit = np.concatenate([
-                        x[:interp_samples],
-                        x[-interp_samples:]
-                    ])
-                    
-                    # Center x values at 0 to avoid badly conditioned warnings (TESA approach)
-                    x_fit = x_fit - x_fit[0]
-                    if len(x) <= 2 * interp_samples:
-                        print(f"Warning: Window too small for interpolation at sample {event_sample}")
-                        warning_count += 1
-                        continue
-
-                    x_interp = x[interp_samples:-interp_samples] - x_fit[0]
-
-                    # Interpolate each channel using polynomial fit
-                    for ch in range(data.shape[0]):
-                        y_full = data[ch, window_start:window_end+1]
-                        y_fit = np.concatenate([
-                            y_full[:interp_samples],
-                            y_full[-interp_samples:]
-                        ])
-                        
-                        # Using polynomial fit (like TESA) instead of spline which I used before and got worse results I think
-                        p = np.polyfit(x_fit, y_fit, 3)
-                        data[ch, start:end+1] = np.polyval(p, x_interp)
-                    
-                    interpolated_count += 1
+    ######################## TMS ARTIFACT AND EPOCHS ######################################
 
 
-                
-                tmscut['interpolated'] = 'yes'
-        
-        print(f"\nSuccessfully interpolated {interpolated_count} events")
-        if warning_count > 0:
-            print(f"Encountered {warning_count} warnings during interpolation")
-        print("TMS artifact interpolation complete")
-        raw_out._data = data
-        raw_out.set_annotations(raw_out.annotations)
-        self.raw = raw_out
+
+
+
+
+
+
+
+
+
+
+
+
+
+######################## ICA AND PARAFAC ############################
 
 
     from typing import Optional, List
     import threading
     import tkinter as tk
 
-    def run_ica(self,
+    def run_ica(self ,
                 output_dir: str,
                 session_name: str,
+                n_components: int = None,
                 method: str = "fastica",
                 tms_muscle_thresh: float = 2.0,
                 blink_thresh: float = 2.5,
@@ -602,7 +1005,7 @@ class TMSEEGPreprocessor:
                 topo_zscore_threshold: float = 3.5,  # Changed name
                 topo_peak_threshold: float = 3,  # Added
                 topo_focal_threshold: float = 0.2,
-                ica_callback: Optional[Callable] = None) -> None:
+                ica_callback: Optional[Callable] = None,) -> None:
         """
         Run first ICA decomposition with TESA artifact detection.
         Works with both Raw and Epochs data.
@@ -615,6 +1018,8 @@ class TMSEEGPreprocessor:
             Name of the current session
         method : str
             ICA method ('fastica' or 'infomax')
+        n_components : int
+            Number of components to use
         tms_muscle_thresh : float
             Threshold for TMS-muscle artifact detection
         blink_thresh : float
@@ -644,9 +1049,15 @@ class TMSEEGPreprocessor:
             self.raw_pre_ica = self.raw.copy()
             is_epochs = False
 
+        if n_components is None:
+            n_channels = len(self.epochs.ch_names)
+            n_epochs = len(self.epochs)
+            n_components = min(n_channels - 1, n_epochs - 1)
+
         # Fit ICA
         print("\nFitting ICA...")
         self.ica = ICA(
+            n_components=n_components,
             max_iter="auto",
             method=method,
             random_state=42
@@ -775,6 +1186,7 @@ class TMSEEGPreprocessor:
 
     def run_second_ica(self,
                        method: str = "infomax",
+                       n_components: int = None,
                        blink_thresh: float = 2.5,
                        lat_eye_thresh: float = 2.0,
                        muscle_thresh: float = 0.6,
@@ -794,6 +1206,8 @@ class TMSEEGPreprocessor:
         ----------
         method : str
             ICA method ('fastica' or 'infomax')
+        n_components : int
+            Number of components to use
         exclude_labels : list of str
             Labels of components to exclude if using ICLabel
         blink_thresh : float
@@ -822,13 +1236,18 @@ class TMSEEGPreprocessor:
         if inst is None:
             raise ValueError("No data available for ICA")
 
+        if n_components is None:
+            n_channels = len(self.epochs.ch_names)
+            n_epochs = len(self.epochs)
+            n_components = min(n_channels - 1, n_epochs - 1)
+
         print("\nPreparing for second ICA...")
         if is_epochs:
             self.set_average_reference()
 
         # Initialize and fit ICA
         fit_params = dict(extended=True) if method == "infomax" else None
-        self.ica2 = ICA(max_iter="auto", method=method, random_state=42, fit_params=fit_params)
+        self.ica2 = ICA(max_iter="auto", n_components=n_components, method=method, random_state=42, fit_params=fit_params)
         self.ica2.fit(inst)
         print("Second ICA fit complete")
 
@@ -1297,6 +1716,69 @@ class TMSEEGPreprocessor:
 
         return noise_components, scores
 
+    def clean_muscle_artifacts(self,
+                               muscle_window: Tuple[float, float] = (0.005, 0.05),
+                               threshold_factor: float = 5.0,
+                               n_components: int = 2,
+                               verbose: bool = True) -> None:
+        """
+        Clean TMS-evoked muscle artifacts using tensor decomposition.
+
+        Parameters
+        ----------
+        muscle_window : tuple
+            Time window for detecting muscle artifacts in seconds [start, end]
+        threshold_factor : float
+            Threshold for artifact detection
+        n_components : int
+            Number of components to use in tensor decomposition
+        verbose : bool
+            Whether to print progress information
+        """
+        if self.epochs is None:
+            raise ValueError("Must create epochs before cleaning muscle artifacts")
+
+        # Create cleaner instance
+        cleaner = TMSArtifactCleaner(self.epochs, verbose=verbose)
+
+        # Detect artifacts
+        artifact_info = cleaner.detect_muscle_artifacts(
+            muscle_window=muscle_window,
+            threshold_factor=threshold_factor,
+            verbose=verbose
+        )
+
+        if verbose:
+            print("\nArtifact detection results:")
+            print(f"Found {artifact_info['muscle']['stats']['n_detected']} artifacts")
+            print(f"Detection rate: {artifact_info['muscle']['stats']['detection_rate'] * 100:.1f}%")
+
+        # Clean artifacts
+        cleaned_epochs = cleaner.clean_muscle_artifacts(
+            n_components=n_components,
+            verbose=verbose
+        )
+
+        # Update epochs with cleaned data
+        self.epochs = cleaned_epochs
+
+        # Apply baseline correction again
+        # self.apply_baseline_correction()
+
+        if verbose:
+            print("\nMuscle artifact cleaning complete")
+
+    ######################## ICA AND PARAFAC ############################
+
+
+
+
+
+
+
+
+
+    ######################## FILTERS ############################
 
     def filter_raw(self, l_freq=0.1, h_freq=250, notch_freq=50, notch_width=2):
         """
@@ -1366,6 +1848,7 @@ class TMSEEGPreprocessor:
 
         print("Filtering complete")
         self.raw = filtered_raw
+
 
     def mne_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
         """
@@ -1497,7 +1980,7 @@ class TMSEEGPreprocessor:
             raise
 
 
-    def scipy_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):
+    def scipy_filter_epochs(self, l_freq=None, h_freq=45, notch_freq=None, notch_width=2):
         """
         Filter epoched data using a zero-phase Butterworth filter with improved stability.
 
@@ -1545,13 +2028,13 @@ class TMSEEGPreprocessor:
             sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
             data = sosfiltfilt(sos_low, data, axis=-1)
             print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Multiple notch filters for harmonics
-            for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
-                # Using iirnotch for sharper notch characteristics
-                b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
-                data = filtfilt(b, a, data, axis=-1)
-            print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
+            if notch_freq is not None:
+                # Multiple notch filters for harmonics
+                for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
+                    # Using iirnotch for sharper notch characteristics
+                    b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
+                    data = filtfilt(b, a, data, axis=-1)
+                print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
 
             # Scale back
             #data = data / scale_factor
@@ -1564,6 +2047,16 @@ class TMSEEGPreprocessor:
         print("Filtering complete")
         self.epochs = filtered_epochs
 
+    ######################## FILTERS ##############################
+
+
+
+
+
+
+
+
+    ################# SOME FINAL STEPS #####################
 
     def set_average_reference(self):
         '''
@@ -1614,66 +2107,6 @@ class TMSEEGPreprocessor:
     }
 
 
-    def plot_evoked_response(self, picks: Optional[str] = None,
-                            ylim: Optional[Dict] = None,
-                            xlim: Optional[Tuple[float, float]] = (-0.1, 0.3),
-                            title: str = 'Evoked Response',
-                            show: bool = True) -> None:
-        """
-        Plot averaged evoked response with butterfly plot and global field power.
-        
-        Parameters
-        ----------
-        picks : str or list
-            Channels to include in plot
-        ylim : dict
-            Y-axis limits for different channel types
-        xlim : tuple
-            X-axis limits in seconds (start_time, end_time)
-        title : str
-            Title for the plot
-        show : bool
-            Whether to show the plot immediately
-        """
-        if self.epochs is None:
-            raise ValueError("Must create epochs before plotting evoked response")
-            
-        # Create evoked from epochs
-        evoked = self.epochs.average()
-        
-        # Create figure with two subplots
-        fig = plt.figure(figsize=(12, 8))
-        gs = plt.GridSpec(2, 1, height_ratios=[3, 1])
-        
-        # Butterfly plot
-        ax1 = fig.add_subplot(gs[0])
-        evoked.plot(picks=picks, axes=ax1, ylim=ylim, xlim=xlim, show=False)
-        ax1.set_title(f'{title} - Butterfly Plot')
-        
-        # GFP plot
-        ax2 = fig.add_subplot(gs[1])
-        gfp = np.std(evoked.data, axis=0) * 1e6  # Convert to μV
-        times = evoked.times
-        ax2.plot(times, gfp, 'b-', linewidth=2)
-        ax2.set_xlabel('Time (s)')
-        ax2.set_ylabel('GFP (μV)')
-        ax2.set_title('Global Field Power')
-        ax2.grid(True)
-        if xlim is not None:
-            ax2.set_xlim(xlim)
-        
-        # Add vertical line at t=0
-        for ax in [ax1, ax2]:
-            ax.axvline(x=0, color='r', linestyle='--', alpha=0.5)
-            
-        plt.tight_layout()
-        
-        if show:
-            plt.show()
-        
-        return fig
-
-
     def apply_ssp(self, n_eeg=2):
 
         
@@ -1681,25 +2114,7 @@ class TMSEEGPreprocessor:
         self.epochs.add_proj(projs_epochs)
         self.epochs.apply_proj()
         
-        
-    def plot_epochs(self, ylim: Optional[Dict] = None) -> None:
-        """
-        Plot epochs with inverted y-axis.
-        
-        Parameters
-        ----------
-        ylim : dict or None
-            Y-axis limits for plotting
-        """
-        if self.epochs is None:
-            raise ValueError("No epochs available to plot")
-            
-        with mne.viz.use_browser_backend("matplotlib"):
-            fig = self.epochs.copy().plot()
-            for ax in fig.get_axes():
-                if hasattr(ax, 'invert_yaxis'):
-                    ax.invert_yaxis()
-            fig.canvas.draw()
+
 
     def apply_csd(self, lambda2=1e-5, stiffness=4, n_legendre_terms=50, verbose=True):
         """
@@ -1736,50 +2151,8 @@ class TMSEEGPreprocessor:
         self.csd_applied = True
         
         return self.epochs
-            
 
-    def fix_tms_artifact(self, 
-                           window: Tuple[float, float] = (-0.002, 0.015),
-                           mode: str = 'window') -> None:
-        """
-        Interpolate the TMS artifact using MNE's fix_stim_artifact function.
-        
-        Parameters
-        ----------
-        window : tuple
-            Time window around TMS pulse to interpolate (start, end) in seconds
-        mode : str
-            Interpolation mode ('linear', 'cubic', or 'hann')
-        """
-        if self.raw is None:
-            raise ValueError("Must create raw before interpolating TMS artifact")
-        
-        events, event_id = mne.events_from_annotations(self.raw)
-        
-        try:
-            self.raw = mne.preprocessing.fix_stim_artifact(
-                self.raw,
-                events=events,
-                event_id=event_id,
-                tmin=window[0],
-                tmax=window[1],
-                mode=mode
-            )
-            print(f"Applied TMS artifact interpolation with mode '{mode}'")
-        except Exception as e:
-            print(f"Error in TMS artifact interpolation: {str(e)}")
 
-    def initial_downsample(self):
-        """
-        Perform initial downsampling of raw data to initial_sfreq (default 1000 Hz).
-        """
-        current_sfreq = self.raw.info['sfreq']
-        if current_sfreq > self.initial_sfreq:
-            self.raw = self.raw.resample(self.initial_sfreq)
-            print(f"Initially downsampled raw data to {self.initial_sfreq} Hz")
-        else:
-            print(f"Current sfreq ({current_sfreq} Hz) <= initial target sfreq ({self.initial_sfreq} Hz); "
-                  "no initial downsampling performed")
 
     def final_downsample(self):
         """

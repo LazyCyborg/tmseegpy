@@ -201,8 +201,14 @@ class MneExportable(abc.ABC):
 
         if self.subject_info is not None:
             mne_sub_info = dict()
+            if self.subject_info['id'] is None:
+                self.subject_info['id'] = ''
             mne_sub_info['his_id'] = self.subject_info['id']
+            if self.subject_info['last_name'] is None:
+                self.subject_info['last_name'] = ''
             mne_sub_info['last_name'] = self.subject_info['last_name']
+            if self.subject_info['first_name'] is None:
+                self.subject_info['first_name'] = ''
             mne_sub_info['first_name'] = self.subject_info['first_name']
             
             # Modified birthday handling

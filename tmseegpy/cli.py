@@ -3,22 +3,9 @@
 import sys
 import threading
 from tmseegpy.run import process_subjects, setup_qt_plugin_path
-from tmseegpy.server import init_app, socketio
 import argparse
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication
-
-
-def start_server():
-    """Start the Flask server in a separate thread"""
-    app, socketio, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR = init_app(args.data_dir)
-
-    def run_server():
-        socketio.run(app, debug=False, use_reloader=False)
-
-    thread = threading.Thread(target=run_server, daemon=True)
-    thread.start()
-    return thread
 
 
 def main():
@@ -35,13 +22,6 @@ def main():
     subparsers = parser.add_subparsers(dest='command', help='Commands')
 
 
-
-    # Server command
-    server_parser = subparsers.add_parser('server', help='Run the TMSeegpy server')
-    server_parser.add_argument('--port', type=int, default=5001, help='Port to run server on')
-    server_parser.add_argument('--debug', action='store_true', help='Run in debug mode')
-    server_parser.add_argument('--data_dir', type=str, default=str(Path.cwd() / 'data'),
-                               help='Path to the data directory for the server.')
 
     process_parser = subparsers.add_parser('process', help='Process TMS-EEG data')
 
@@ -77,8 +57,15 @@ def main():
     process_parser.add_argument('--substitute_zero_events_with', type=int, default=10,
                         help='Value to substitute zero events with (default: 10)')
 
-    process_parser.add_argument('--initial_sfreq', type=float, default=1000,
-                        help='Initial downsampling frequency (default: 1000)')
+
+    process_parser.add_argument('--auto_detect_artifacts', action='store_true', default=False,
+                        help='Use automatic artifact detection instead of triggers (default: False)')
+
+    process_parser.add_argument('--artifact_threshold_std', type=float, default=10,
+                        help='Standard deviations above mean for artifact detection (default: 10)')
+
+    process_parser.add_argument('--min_artifact_distance_ms', type=float, default=50,
+                        help='Minimum distance between artifacts in ms (default: 50)')
 
     process_parser.add_argument('--final_sfreq', type=float, default=725,
                         help='Final downsampling frequency (default: 725)')
@@ -107,11 +94,14 @@ def main():
                         choices=['cubic'],
                         help='Interpolation method (TESA requires cubic)')
 
-    process_parser.add_argument('--skip_second_artifact_removal', action='store_true',
-                        help='Skip the second stage of TMS artifact removal')
+    process_parser.add_argument('--second_artifact_removal', action='store_true', default=False,
+                    help='Skip the second stage of TMS artifact removal (default: False)')
 
     process_parser.add_argument('--mne_filter_epochs', action='store_true', default=False,
                         help='Use built in filter in mne (default: False)')
+
+    process_parser.add_argument('--scipy_filter_epochs', action='store_true', default=False,
+                    help='Use custom filter from scipy (default: False)')
 
     process_parser.add_argument('--plot_raw', action='store_true',
                         help='Plot raw data (takes time) (default: False)')
@@ -119,7 +109,10 @@ def main():
     process_parser.add_argument('--filter_raw', action='store_true', default=False,
                         help='Whether to filter raw data instead of epoched (default: False)')
 
-    process_parser.add_argument('--l_freq', type=float, default=0.1,
+    process_parser.add_argument('--l_freq', type=float, default=1,
+                        help='Lower frequency for filtering (default: 1)')
+
+    process_parser.add_argument('--raw_l_freq', type=float, default=1,
                         help='Lower frequency for filtering (default: 1)')
 
     process_parser.add_argument('--h_freq', type=float, default=45,
@@ -128,17 +121,23 @@ def main():
     process_parser.add_argument('--raw_h_freq', type=float, default=250,
                         help='Upper frequency for filtering the raw eeg data (default: 250)')
 
-    process_parser.add_argument('--notch_freq', type=float, default=50,
+    process_parser.add_argument('--notch_freq', type=float, default=None,
+                        help='Notch filter frequency (default: None)')
+
+    process_parser.add_argument('--notch_width', type=float, default=None,
+                        help='Notch filter width (default: None)')
+
+    process_parser.add_argument('--raw_notch_freq', type=float, default=50,
                         help='Notch filter frequency (default: 50)')
 
-    process_parser.add_argument('--notch_width', type=float, default=2,
+    process_parser.add_argument('--raw_notch_width', type=float, default=2,
                         help='Notch filter width (default: 2)')
 
-    process_parser.add_argument('--epochs_tmin', type=float, default=-0.41,
-                        help='Start time for epochs (default: -0.41)')
+    process_parser.add_argument('--epochs_tmin', type=float, default=-0.9,
+                        help='Start time for epochs (default: -0.8)')
 
-    process_parser.add_argument('--epochs_tmax', type=float, default=0.41,
-                        help='End time for epochs (default: 0.41)')
+    process_parser.add_argument('--epochs_tmax', type=float, default=0.8,
+                        help='End time for epochs (default: 0.8)')
 
     process_parser.add_argument('--bad_channels_threshold', type=float, default=3,
                         help='Threshold (std) for removing bad channels with mne_faster (default: 3)')
@@ -191,8 +190,8 @@ def main():
     process_parser.add_argument('--no_second_ica', action='store_true', default=False,
                         help='Disable seconds ICA ´ (default: False)')
 
-    process_parser.add_argument('--second_ica_method', type=str, default='fastica',
-                        help='Second ICA method that can be infomax or fastica (default: fastica)')
+    process_parser.add_argument('--second_ica_method', type=str, default='infomax',
+                        help='Second ICA method that can be infomax or fastica (default: infomax)')
 
     process_parser.add_argument('--ica_topo', action='store_true', default=False,
                         help='Use topography-based automatic ICA component classification (default: False)')
@@ -226,6 +225,9 @@ def main():
 
     process_parser.add_argument('--save_evoked', action='store_true',
                         help='Save evoked plot with TEPs (default: False)')
+
+    process_parser.add_argument('--save_raw_data', action='store_true',
+                    help='Save initial raw eeg as .fif (default: False)')
 
     process_parser.add_argument('--analyze_teps', action='store_true', default=True,
                         help='Find TEPs that normally exist (default: True)')
@@ -310,15 +312,8 @@ def main():
     args = parser.parse_args()
 
 
-    if args.command == 'server':
-        # Run the server in the main thread
-        app, socketio, server_logger, output_capturer, UPLOAD_FOLDER, TMSEEG_DATA_DIR = init_app(args.data_dir)
-        socketio.run(app, port=args.port, debug=args.debug)
-    elif args.command == 'process':
-        # Start server in background
-        #server_thread = start_server()
 
-        # Run processing
+    if args.command == 'process':
 
         pcists = process_subjects(args)
         print(f"PCIst values: {pcists}")

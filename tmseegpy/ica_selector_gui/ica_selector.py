@@ -10,7 +10,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.gridspec import GridSpec
 from PyQt6.QtWidgets import (QWidget, QMainWindow, QVBoxLayout, QHBoxLayout,
                           QPushButton, QLabel, QFrame, QSplitter, QDialog,
-                          QMessageBox)
+                          QMessageBox, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal
 import mne
 mne.viz.set_browser_backend('qt')
@@ -465,7 +465,7 @@ class ICAComponentSelector:
             text_scroll.setWidgetResizable(True)
             text_widget = QLabel()
             text_scroll.setWidget(text_widget)
-            text_scroll.setMinimumHeight(400)  # Set minimum height for scroll area
+            text_scroll.setMinimumHeight(300)  # Set minimum height for scroll area
 
             # Generate classification summary text
             summary_text = "Classification Summary:\n\n"

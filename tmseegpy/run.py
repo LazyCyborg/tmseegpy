@@ -56,7 +56,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tmseegpy.preproc import TMSEEGPreprocessor  # absolute import
 from tmseegpy.dataloader import TMSEEGLoader
-from tmseegpy.ica_selector_gui.websocket_ica_selector import WebSocketICASelector
 
 from tmseegpy.pcist import PCIst
 from tmseegpy.preproc_vis import save_raw_data, save_epochs_data
@@ -69,59 +68,13 @@ from tmseegpy.validate_tep import (
 )
 import mne
 import time
-from .neurone_loader import Recording
+from .neurone_loader_fix import Recording
 import argparse
 import queue
 
 mne.viz.use_browser_backend("matplotlib")
 plt.rcParams['figure.figsize'] = [8, 6]
 
-
-def get_ica_callback(gui_mode=False):
-    """Get appropriate ICA callback based on mode"""
-    if gui_mode:
-        from .ica_selector_gui.websocket_ica_selector import WebSocketICASelector
-        def callback(ica_instance, inst, component_scores=None):
-            try:
-                print("Starting ICA component selection...")
-
-                # Create queues for ICA component selection
-                from queue import Queue
-                selection_queue = Queue()
-                result_queue = Queue()
-
-                # Create selector instance
-                selector = WebSocketICASelector(selection_queue, result_queue)
-
-                # Format and send component data
-                component_data = selector._get_component_data(ica_instance, inst)
-                selection_queue.put(component_data)
-
-                # Emit event to notify frontend
-                from .server.server import socketio
-                print("Emitting ica_required event...")
-                socketio.emit('ica_required', {
-                    'componentCount': len(component_data)
-                })
-
-                # Wait for result
-                print("Waiting for component selection...")
-                selected_components = selector.select_components(ica_instance, inst)
-                print(f"Received selected components: {selected_components}")
-
-                return selected_components
-
-            except Exception as e:
-                print(f"Error in ICA GUI callback: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                return []
-
-        return callback
-    else:
-        # Use existing CLI callback for command line usage
-        from .cli_ica_selector import get_cli_ica_callback
-        return get_cli_ica_callback(is_gui_mode=False)
 
 
 
@@ -277,10 +230,6 @@ def process_subjects(args, status_callback=None):
             return True
         return False
 
-    def combined_callback(msg, progress=None):
-        print(msg)  # This will go through the output capturer
-        if status_callback:
-            status_callback(msg, progress)
 
     data_dir = Path(args.data_dir)
 
@@ -321,32 +270,34 @@ def process_subjects(args, status_callback=None):
     session_info = loader.get_session_info()
 
     np.random.seed(args.random_seed)
-    baseline_start_sec = args.baseline_start / 1000.0
-    baseline_end_sec = args.baseline_end / 1000.0
 
     # Loop through the loaded raw data
     for n, raw in enumerate(raw_list):
         if check_stop():
             return []
 
-        
+        raw_eve = raw.copy()
         session_name = session_info[n]['name']
 
-        if combined_callback:
-            combined_callback(f"Starting epoched processing of Session {n}: {session_name}...", progress=0)
+        if args.save_raw_data:
+            save_raw_data(raw, args.output_dir, step_name='raw_0', session_name=session_name)
+
         print(f"\nProcessing Session {n}: {session_name}")
 
         if check_stop(): return []
 
         # Process session...
         events = None
-        # Initialize events to None
-        events = None
+
         try:
             # First try user-specified channel
             if args.stim_channel and args.stim_channel in raw.ch_names:
                 print(f"Using specified stim channel: {args.stim_channel}")
-                events = mne.find_events(raw, stim_channel=args.stim_channel)
+                original_events = mne.find_events(raw_eve, stim_channel=args.stim_channel)
+                original_event_id = {str(ev_id): ev_id for ev_id in np.unique(original_events[:, 2])}
+                print(f"Found {len(original_events)} original events")
+                print(f"Original event IDs: {original_event_id}")
+                events = original_events
             else:
                 # Look for events in annotations
                 print("Looking for events in annotations...")
@@ -385,32 +336,13 @@ def process_subjects(args, status_callback=None):
                                     events = mne.find_events(raw, stim_channel=ch_name)
                                     break
 
-            # Check if we found any events
             if events is not None and len(events) > 0:
-                print(f"Found {len(events)} events")
-                if combined_callback:
-                    combined_callback(f"Found {len(events)} events", progress=5)
-            else:
-                print("No events found in data. Saving raw data only...")
-                output_dir = Path(args.output_dir)
-                raw_fname = output_dir / f"{session_name}_raw.fif"
-                raw.save(raw_fname, overwrite=True)
-                continue
+                print(f"Found {len(events)} trigger-based events")
+
 
         except Exception as e:
-            print(f"Error during event detection: {str(e)}")
-            print("Saving raw data only...")
-            output_dir = Path(args.output_dir)
-            raw_fname = output_dir / f"{session_name}_raw.fif"
-            raw.save(raw_fname, overwrite=True)
-            continue
-
-        annotations = mne.annotations_from_events(
-            events=events, 
-            sfreq=raw.info['sfreq'],
-            event_desc={args.substitute_zero_events_with: 'Stimulation'}
-        )
-        raw.set_annotations(annotations)
+            print(f"Error during trigger-based event detection: {str(e)}")
+            events = None
 
         # Drop unnecessary channels
         channels_to_drop = []
@@ -419,43 +351,78 @@ def process_subjects(args, status_callback=None):
         if channels_to_drop:
             print(f"Dropping channels: {channels_to_drop}")
             raw.drop_channels(channels_to_drop)
-        if args.plot_raw:
-           save_raw_data(raw, args.output_dir, step_name='raw', session_name=session_name)
+        if args.save_raw_data:
+            save_raw_data(raw, args.output_dir, step_name='raw_1', session_name=session_name)
 
         raw_data = raw.get_data()
         print(f"Initial raw data range: [{np.min(raw_data)}, {np.max(raw_data)}]")
 
-        # Preprocessing
-        processor = TMSEEGPreprocessor(raw, initial_sfreq=args.initial_sfreq, final_sfreq=args.final_sfreq)
-        print("\nRemoving TMS artifact...")
-        if combined_callback:
-            combined_callback("Removing TMS artifact", progress=10)
-        if check_stop(): return []
-        processor.remove_tms_artifact(cut_times_tms=(args.initial_window_start, args.initial_window_end))  # Step 8
+            # Initialize processor here since we need it for artifact detection
 
-        print("\nInterpolating TMS artifact...")
-        if combined_callback:
-            combined_callback("Interpolating artifact", progress=20)
-        processor.interpolate_tms_artifact(method='cubic', 
-                                        interp_window=args.initial_interp_window,  # 1ms window for initial interpolation
-                                        cut_times_tms=(args.initial_window_start, args.initial_window_end))  # Step 9
+        from .preproc import detect_tms_artifacts
+
+        if args.auto_detect_artifacts:
+            print("\nLooking for additional artifacts...")
+            try:
+                additional_events = detect_tms_artifacts(raw,
+                    threshold_std=args.artifact_threshold_std,
+                    min_distance_ms=args.min_artifact_distance_ms,
+                    existing_events=events
+                )
+
+                if additional_events is not None:
+                    if events is None:
+                        events = additional_events
+                    else:
+                        events = np.vstack((events, additional_events))
+                        # Sort by time and remove duplicates
+                        events = events[events[:, 0].argsort()]
+                        _, unique_idx = np.unique(events[:, 0], return_index=True)
+                        events = events[unique_idx]
+                    print(f"Total events after combining: {len(events)}")
+            except Exception as e:
+                print(f"Error during automatic artifact detection: {str(e)}")
+                import traceback
+                traceback.print_exc()
+
+            if events is not None and len(events) > 0:
+                annot_array = mne.Annotations(
+                    onset=events[:, 0] / raw.info['sfreq'],
+                    duration=np.zeros(len(events)),
+                    description=['Stimulation'] * len(events)
+                )
+                raw.set_annotations(annot_array)  # This will overwrite any existing annotations
+                print(f"Created annotations for {len(events)} events")
+                print(f"First few event times: {events[:5, 0] / raw.info['sfreq']}")
+                print(f"First few annotation onsets: {raw.annotations.onset[:5]}")
+
+        processor = TMSEEGPreprocessor(raw)
+        if check_stop(): return []
+        processor.fix_tms_artifact(events=processor.events)  # Step 8
+
+       # print("\nInterpolating TMS artifact...")
+       # processor.interpolate_tms_artifact(method='cubic',
+                                       # interp_window=args.initial_interp_window,  # 1ms window for initial interpolation
+                                       # cut_times_tms=(args.initial_window_start, args.initial_window_end))  # Step 9
 
         if args.save_preproc:
-            save_raw_data(raw, args.output_dir, step_name='raw_i', session_name=session_name)
-        #processor.fix_tms_artifact(window=(args.fix_artifact_window_start, args.fix_artifact_window_end))
+            save_raw_data(raw, args.output_dir, step_name='raw_2', session_name=session_name)
+
         filtering_done = False
         if args.filter_raw:
             print(f"\nFiltering raw eeg data with lowpass {args.raw_h_freq} Hz...")
             if check_stop(): return []
-            processor.filter_raw(l_freq=None, h_freq=args.raw_h_freq, notch_freq=args.notch_freq, notch_width=args.notch_width)
-
+            processor.filter_raw(l_freq=args.raw_l_freq, h_freq=args.raw_h_freq, notch_freq=args.raw_notch_freq, notch_width=args.raw_notch_width)
 
 
         #if args.save_preproc:
           #  save_raw_data(raw, args.output_dir, step_name='raw_f',)
 
+        events = mne.find_events(raw, stim_channel=args.stim_channel)
+
         print("\nCreating epochs...")
-        processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None, amplitude_threshold=args.amplitude_threshold)
+        processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None, amplitude_threshold=args.amplitude_threshold,
+                                events=events)
         epochs = processor.epochs
 
         epochs_data = epochs.get_data()
@@ -465,16 +432,14 @@ def process_subjects(args, status_callback=None):
             save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='0_epochs')
 
         print("\nRemoving bad channels...")
-        if combined_callback:
-            combined_callback("Removing bad channels", progress=30)
+
         processor.remove_bad_channels(threshold=args.bad_channels_threshold)
 
         if args.save_preproc:
             save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='1_epochs_no_bad_channels')
 
         print("\nRemoving bad epochs...")
-        if combined_callback:
-            combined_callback("Removing bad epochs", progress=40)
+
         processor.remove_bad_epochs(threshold=args.bad_epochs_threshold)
         if args.save_preproc:
             save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='2_epochs_bad_no_epoch')
@@ -484,16 +449,10 @@ def process_subjects(args, status_callback=None):
 
         if not args.no_first_ica:
             print("\nRunning first ICA...")
-            if combined_callback:
-                combined_callback("Running first ICA", progress=50)
             if check_stop(): return []
 
         #plot_components = False
 
-        if args.first_ica_manual:
-            # Check if we're running in GUI mode
-            gui_mode = hasattr(args, 'gui_mode') and args.gui_mode
-            first_ica_callback = get_ica_callback(gui_mode=gui_mode)
 
         # Modified first ICA call
         if not args.no_first_ica:
@@ -510,7 +469,9 @@ def process_subjects(args, status_callback=None):
                     noise_thresh=args.noise_thresh,
                     use_topo=True,
                     topo_edge_threshold=args.topo_edge_threshold,
-                    topo_focal_threshold=args.topo_focal_threshold,
+                    topo_zscore_threshold=args.topo_zscore_threshold,
+                    topo_peak_threshold=args.topo_peak_threshold,
+                    topo_focal_threshold=args.topo_focal_threshold
                 )
             elif args.first_ica_manual:
                 processor.run_ica(
@@ -523,7 +484,7 @@ def process_subjects(args, status_callback=None):
                     muscle_thresh=args.muscle_thresh,
                     noise_thresh=args.noise_thresh,
                     manual_mode=True,
-                    ica_callback=first_ica_callback
+                    ica_callback=None
                 )
             else:
                 processor.run_ica(
@@ -539,8 +500,6 @@ def process_subjects(args, status_callback=None):
 
         if args.parafac_muscle_artifacts:
             print("\nCleaning muscle artifacts with PARAFAC decomposition...")
-            if combined_callback:
-                combined_callback("Cleaning muscle artifacts with PARAFAC decomposition...", progress=55)
             if check_stop(): return []
             processor.clean_muscle_artifacts(
                 muscle_window=(args.muscle_window_start, args.muscle_window_end),
@@ -549,16 +508,12 @@ def process_subjects(args, status_callback=None):
                 verbose=True
             )
 
-        if not args.skip_second_artifact_removal:
+        if args.second_artifact_removal:
             print("\nExtending TMS artifact removal window...")
-            if combined_callback:
-                combined_callback("Extending TMS artifact removal window...", progress=60)
             if check_stop(): return []
             processor.remove_tms_artifact(cut_times_tms=(args.extended_window_start, args.extended_window_end))
 
             print("\nInterpolating extended TMS artifact...")
-            if combined_callback:
-                combined_callback("Interpolating extended TMS artifact...", progress=65)
             processor.interpolate_tms_artifact(method='cubic',
                                                interp_window=args.extended_interp_window,
                                                cut_times_tms=(args.extended_window_start, args.extended_window_end))
@@ -567,18 +522,26 @@ def process_subjects(args, status_callback=None):
                 save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='3_second_artifact_removal')
 
 
-        print("\nFiltering epoched data...")
-        if combined_callback:
-            combined_callback("Filtering epoched data...", progress=75)
+
         if check_stop(): return []
         if args.mne_filter_epochs:
+            print(f"\nFiltering epoched data with highpass {args.l_freq} Hz... and lowpass {args.h_freq} Hz... ...")
             processor.mne_filter_epochs(
                 l_freq=args.l_freq,
                 h_freq=args.h_freq,
                 notch_freq=args.notch_freq,
                 notch_width=args.notch_width,
             )
+        elif args.scipy_filter_epochs:
+            print(f"\nFiltering epoched data with highpass {args.l_freq} Hz... and lowpass {args.h_freq} Hz... ...")
+            processor.scipy_filter_epochs(
+                l_freq=args.l_freq,
+                h_freq=args.h_freq,
+                notch_freq=args.notch_freq,
+                notch_width=args.notch_width)
+
         else:
+            print(f"\nFiltering epoched data with highpass {args.l_freq} Hz... and lowpass {args.h_freq} Hz... ...")
             processor.scipy_filter_epochs(
                 l_freq=args.l_freq,
                 h_freq=args.h_freq,
@@ -591,8 +554,6 @@ def process_subjects(args, status_callback=None):
 
         if not args.no_second_ica:
             print("\nRunning second ICA...")
-            if combined_callback:
-                combined_callback("Running second ICA...", progress=85)
             if check_stop(): return []
 
             if args.ica_topo:
@@ -604,13 +565,13 @@ def process_subjects(args, status_callback=None):
                     noise_thresh=args.noise_thresh,
                     use_topo=True,
                     topo_edge_threshold=args.topo_edge_threshold,
-                    topo_focal_threshold=args.topo_focal_threshold,
+                    topo_zscore_threshold=args.topo_zscore_threshold,
+                    topo_peak_threshold=args.topo_peak_threshold,
+                    topo_focal_threshold=args.topo_focal_threshold
 
                 )
             elif args.second_ica_manual:
                 # Check if we're running in GUI mode
-                gui_mode = hasattr(args, 'gui_mode') and args.gui_mode
-                second_ica_callback = get_ica_callback(gui_mode=gui_mode)
                 processor.run_second_ica(
                     method=args.second_ica_method,
                     blink_thresh=args.blink_thresh,
@@ -618,7 +579,7 @@ def process_subjects(args, status_callback=None):
                     muscle_thresh=args.muscle_thresh,
                     noise_thresh=args.noise_thresh,
                     manual_mode=True,
-                    ica_callback=second_ica_callback
+                    ica_callback=None
                 )
             else:
                 processor.run_second_ica(
@@ -639,8 +600,6 @@ def process_subjects(args, status_callback=None):
             processor.apply_csd(lambda2=args.lambda2, stiffness=args.stiffness)
 
         print("\nPerforming final downsampling...")
-        if combined_callback:
-            combined_callback("Performing final downsampling...", progress=95)
         processor.final_downsample()
 
         if args.save_preproc:
@@ -654,8 +613,6 @@ def process_subjects(args, status_callback=None):
         if args.analyze_teps:
             try:
                 print("\nAnalyzing TEPs...")
-                if combined_callback:
-                    combined_callback("Performing final downsampling...", progress=99)
                 if check_stop(): return []
 
                 # Define our standard TEP components exactly as in TESA
@@ -839,12 +796,7 @@ def process_subjects(args, status_callback=None):
                 import traceback
                 print("Detailed error:")
                 print(traceback.format_exc())
-        
-        # Final quality check
-        # Maybe use ylim={'eeg': [-2, 2]},
-        fig = processor.plot_evoked_response(xlim=(-0.1, 0.4), title="Final Evoked Response", show=args.save_evoked)
-        fig.savefig(f"{args.output_dir}/evoked_{session_name}.png")  
-        plt.close(fig)
+
         
         recording_id = f"session_{n}"
         if not args.no_pcist:
@@ -882,8 +834,8 @@ def process_subjects(args, status_callback=None):
             args.output_dir
         )
         print(f"Research statistics saved to: {output_file}")
-    if combined_callback:
-        combined_callback("Processing complete! (wow it works)", progress=100)
+
+    print("Processing complete! (wow it works)")
     return subject_pcist_values
 
 
@@ -924,12 +876,17 @@ if __name__ == "__main__":
     parser.add_argument('--substitute_zero_events_with', type=int, default=10,
                         help='Value to substitute zero events with (default: 10)')
 
-    parser.add_argument('--initial_sfreq', type=float, default=1000,
-                        help='Initial downsampling frequency (default: 1000)')
-
     parser.add_argument('--final_sfreq', type=float, default=725,
                         help='Final downsampling frequency (default: 725)')
 
+    parser.add_argument('--auto_detect_artifacts', action='store_true', default=False,
+                        help='Use automatic artifact detection instead of triggers (default: False)')
+
+    parser.add_argument('--artifact_threshold_std', type=float, default=10,
+                        help='Standard deviations above mean for artifact detection (default: 10)')
+
+    parser.add_argument('--min_artifact_distance_ms', type=float, default=50,
+                        help='Minimum distance between artifacts in ms (default: 50)')
     # Trying to match TESA
     parser.add_argument('--initial_window_start', type=float, default=-2,
 
@@ -954,19 +911,25 @@ if __name__ == "__main__":
                         choices=['cubic'],
                         help='Interpolation method (TESA requires cubic)')
 
-    parser.add_argument('--skip_second_artifact_removal', action='store_true',
-                    help='Skip the second stage of TMS artifact removal')
+    parser.add_argument('--second_artifact_removal', action='store_true', default=False,
+                    help='Skip the second stage of TMS artifact removal (default: False)')
 
     parser.add_argument('--mne_filter_epochs', action='store_true', default=False,
                     help='Use built in filter in mne (default: False)')
 
+    parser.add_argument('--scipy_filter_epochs', action='store_true', default=False,
+                    help='Use custom filter from scipy (default: False)')
+
     parser.add_argument('--plot_raw', action='store_true',
                     help='Plot raw data (takes time) (default: False)')
 
-    parser.add_argument('--filter_raw', action='store_true', default=False,
-                        help='Whether to filter raw data instead of epoched (default: False)')
+    parser.add_argument('--filter_raw', action='store_true', default=True,
+                        help='Whether to filter raw data instead of epoched (default: True)')
 
-    parser.add_argument('--l_freq', type=float, default=0.1,
+    parser.add_argument('--l_freq', type=float, default=None,
+                        help='Lower frequency for filtering (default: None)')
+
+    parser.add_argument('--raw_l_freq', type=float, default=1,
                         help='Lower frequency for filtering (default: 1)')
 
     parser.add_argument('--h_freq', type=float, default=45,
@@ -975,17 +938,23 @@ if __name__ == "__main__":
     parser.add_argument('--raw_h_freq', type=float, default=250,
                         help='Upper frequency for filtering the raw eeg data (default: 250)')
 
-    parser.add_argument('--notch_freq', type=float, default=50,
+    parser.add_argument('--notch_freq', type=float, default=None,
+                        help='Notch filter frequency (default: None)')
+
+    parser.add_argument('--notch_width', type=float, default=None,
+                        help='Notch filter width (default: None)')
+
+    parser.add_argument('--raw_notch_freq', type=float, default=50,
                         help='Notch filter frequency (default: 50)')
 
-    parser.add_argument('--notch_width', type=float, default=2,
+    parser.add_argument('--raw_notch_width', type=float, default=2,
                         help='Notch filter width (default: 2)')
 
-    parser.add_argument('--epochs_tmin', type=float, default=-0.41,
-                        help='Start time for epochs (default: -0.41)')
+    parser.add_argument('--epochs_tmin', type=float, default=-0.8,
+                        help='Start time for epochs (default: -0.8)')
 
-    parser.add_argument('--epochs_tmax', type=float, default=0.41,
-                        help='End time for epochs (default: 0.41)')
+    parser.add_argument('--epochs_tmax', type=float, default=0.8,
+                        help='End time for epochs (default: 0.8)')
 
     parser.add_argument('--bad_channels_threshold', type=float, default=3,
                         help='Threshold (std) for removing bad channels with mne_faster (default: 3)')
@@ -1038,8 +1007,8 @@ if __name__ == "__main__":
     parser.add_argument('--no_second_ICA', action='store_true', default=False,
                     help='Disable seconds ICA ´ (default: False)')
 
-    parser.add_argument('--second_ica_method', type=str, default='fastica',
-                        help='Second ICA method that can be infomax or fastica (default: fastica)')
+    parser.add_argument('--second_ica_method', type=str, default='infomax',
+                        help='Second ICA method that can be infomax or fastica (default: infp,ax)')
 
     parser.add_argument('--ica_topo', action='store_true', default=False,
                         help='Use topography-based automatic ICA component classification (default: False)')
@@ -1073,6 +1042,9 @@ if __name__ == "__main__":
 
     parser.add_argument('--save_evoked', action='store_true',
                     help='Save evoked plot with TEPs (default: False)')
+
+    parser.add_argument('--save_raw_data', action='store_true',
+                    help='Save initial raw eeg as .fif (default: False)')
 
     parser.add_argument('--analyze_teps', action='store_true', default=True,
                 help='Find TEPs that normally exist (default: True)')

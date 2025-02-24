@@ -1,0 +1,22 @@
+# main.py
+import streamlit as st
+from app import TMSEEGApp
+
+def main():
+    # Set page config
+    st.set_page_config(
+        page_title="TMS-EEG Processing Pipeline",
+        page_icon="⚡",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    # Initialize session state for app persistence
+    if 'app' not in st.session_state:
+        st.session_state.app = TMSEEGApp()
+
+    # Run the app using the persistent instance
+    st.session_state.app.run()
+
+if __name__ == "__main__":
+    main()

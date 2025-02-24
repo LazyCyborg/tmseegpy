@@ -348,3 +348,4 @@ matplotlib>=3.9.2
 
 # GUI and visualization
 seaborn
+plotly

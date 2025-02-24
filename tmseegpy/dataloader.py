@@ -1,8 +1,8 @@
 from pathlib import Path
 import mne
 from typing import Optional, Union, Dict, List, Any
-from .neurone_loader import Recording
-from .neurone_loader.neurone import read_neurone_protocol, read_neurone_events, read_neurone_data
+from .neurone_loader_fix import Recording
+from .neurone_loader_fix.neurone import read_neurone_protocol, read_neurone_events, read_neurone_data
 
 
 class TMSEEGLoader:
@@ -178,7 +178,7 @@ class TMSEEGLoader:
             self.session_info = []
 
             for ses_file in ses_files:
-                # Get the corresponding data directory (without NeurOne- prefix)
+                # Get the corresponding data directory
                 session_dir = ses_file.parent / ses_file.stem.replace('NeurOne-', '')
 
                 try:
@@ -196,10 +196,15 @@ class TMSEEGLoader:
                             phase_number = phase['number']
                             # Read data and events for this phase
                             data = read_neurone_data(str(session_dir), session_phase=phase_number, protocol=protocol)
-                            print(f"Raw NeurOne data range: [{np.min(data)}, {np.max(data)}]")
-                            data = data * 1e-3
-                            print(f"Scaled data range (µV): [{np.min(data)}, {np.max(data)}]")
                             events_dict = read_neurone_events(str(session_dir), session_phase=phase_number)
+                            print(f"Data before scaling (mean): {np.mean(data)}")
+                            data = data * 1e-9 ## convert to volts for mne
+                            print(f"Data after scaling (mean): {np.mean(data)}")
+
+
+                            # Debug print
+                            #print(f"\nDebug - Events dict for phase {phase_number}:")
+                            #print(events_dict)
 
                             # Create stim channel from events
                             n_samples = data.shape[0]
@@ -207,23 +212,41 @@ class TMSEEGLoader:
 
                             # Add events to stim channel
                             if len(events_dict['events']) > 0:
+                                print(f"\nAdding {len(events_dict['events'])} events to stim channel")
                                 for event in events_dict['events']:
-                                    stim_channel[event['StartSampleIndex']] = self.substitute_zero_events_with
+                                    sample_idx = event['StartSampleIndex']
+                                    stim_channel[sample_idx] = self.substitute_zero_events_with
+                                    #print(f"Added event at sample {sample_idx}")
+
+                            # Debug print
+                            print(f"\nStim channel stats:")
+                            print(f"Number of non-zero values: {np.sum(stim_channel != 0)}")
+                            print(f"Unique values in stim channel: {np.unique(stim_channel)}")
 
                             # Add stim channel to data
                             data_with_stim = np.vstack([data.T, stim_channel])
                             ch_names = protocol['channels'] + ['STI 014']
                             ch_types = ['eeg'] * len(protocol['channels']) + ['stim']
 
-                            # Create raw object with stim channel
-                            raw = mne.io.RawArray(
-                                data_with_stim,
-                                info=mne.create_info(
-                                    ch_names=ch_names,
-                                    sfreq=protocol['meta']['sampling_rate'],
-                                    ch_types=ch_types
-                                )
+                            # Create info structure
+                            info = mne.create_info(
+                                ch_names=ch_names,
+                                sfreq=protocol['meta']['sampling_rate'],
+                                ch_types=ch_types
                             )
+
+                            # Create raw object
+                            raw = mne.io.RawArray(data_with_stim, info)
+
+                            # Debug: Check events in created raw object
+                            try:
+                                debug_events = mne.find_events(raw, stim_channel='STI 014')
+                                print(f"\nEvents found in raw object: {len(debug_events)}")
+                                #if len(debug_events) > 0:
+                                    #print("First few events:")
+                                    #print(debug_events[:5])
+                            except Exception as e:
+                                print(f"Debug event detection failed: {str(e)}")
 
                             phase_name = f"{session_dir.name}_phase_{phase_number}"
                             self.session_info.append({
@@ -237,9 +260,6 @@ class TMSEEGLoader:
 
                             self.raw_list.append(raw)
 
-                            if self.verbose:
-                                print(f"Loaded {phase_name}")
-
                         except Exception as e:
                             print(f"Error loading phase {phase_number}: {str(e)}")
                             continue
@@ -248,13 +268,10 @@ class TMSEEGLoader:
                     print(f"Error loading session file {ses_file}: {str(e)}")
                     continue
 
-            if not self.raw_list:
-                print(f"No data loaded from {self.data_path}")
-
             return self.raw_list
 
         except Exception as e:
-            print(f"Error loading {self.data_path}: {str(e)}")
+            print(f"Error in _load_neurone: {str(e)}")
             return []
 
     def get_session_names(self) -> List[str]:
