@@ -33,9 +33,10 @@ ENV/
 data/
 *.fif
 *.h5
-*.npy
+*.npyß
 *.npz
 *.png
+*.ipynb
 
 
 # Jupyter Notebooks
