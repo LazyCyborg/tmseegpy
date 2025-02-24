@@ -6,25 +6,6 @@ The pipeline includes steps for artifact removal, filtering, Independent Compone
 
 If you have trouble with the current dataloader and creates one that is compatible with multiple systems (maybe out of frustration) feel free to reach out to hjarneko@gmail.com. The package uses a modified version of the neurone_loader (https://github.com/heilerich/neurone_loader) to load the data from the Bittium NeurOne and convert it to an MNE-Python raw object. 
 
-### Acknowledgements
-
-This pipeline includes various processing steps from several sources:
-
-- **Artifact removal** methods written by **Silvia Casarotto**
-- **Independent Component Analysis (ICA)** adapted from **Nigel Rogasch's TESA toolbox**, which served as the main inspiration and benchmark for this code
-- **Muscle artifact removal** (using Tensorly) inspired by **Tangwiriyasakul et al., 2019**
-
-  ### Special Thanks
-
-- **Dr. Silvia Casarotto** for kindly sharing code and verifying the preprocessing output
-- **Dr. Nigel Rogasch** for sanctioning the adaptation of TESA in Python
-- **Dr. Mats Svantesson** (Linköping University Hospital) for many hours of assistance with code, signal processing, and EEG data verification
-- **Dr. Magnus Thordstein** (Linköping University Hospital) for providing access to TMS and TMS-EEG equipment for sample data collection
-- **Dr. Andrew Wold, PhD** for teaching me how to use the TMS equipment
-- **Gramfort et al.** for creating MNE-Python, which this program is built upon
-
-  This project would not have been possible to complete without the support and contributions of these individuals.
-
 
 ## Installation 
 
@@ -47,29 +28,11 @@ This pipeline includes various processing steps from several sources:
    pip install -e .
    ```
 
-## Usage
-
-The pipeline is designed to be run from the command line or through the simple GUI, processing EEG data for one or multiple subjects. The main script accepts various command-line arguments to customize the preprocessing and analysis steps.
-
-### GUI
-
-## GUI Application
-
-A graphical user interface is available in the `tmseegpy/main_gui` directory. 
-To use the GUI version:
 
 ### Download Releases
 Download the latest GUI release for your platform from:
 https://github.com/LazyCyborg/tmseegpy/releases (look for GUI releases tagged with `gui-v*`)
 
-#### Installation
-
-1. Install the TMSeegpy package:
-   - Copy the `tmseegpy` directory to your preferred location
-   - Add this location to your system's PATH
-
-2. Install the GUI:
-   - Copy the TMSeegpy GUI application to your Applications folder (Mac) or Program Files (Windows)
 
 ### GUI Application (Recommended)
 
@@ -80,8 +43,8 @@ The GUI is bundled as a standalone application using PyInstaller, meaning it can
 Run tmseegpy --help for full list of command line arguments and default values. The CLI-version is mostly built so that experienced user can run batch processing of large datasets.
 
 Note that, if run in fully automatic mode the code uses MNE-FASTER for both channel and epoch rejection and uses either an adapted version of the TESA classification algorithm of ICA-components 
-or a my own classification algorithm which classifies components based on the topography and number of peaks in the components. This means that a lot of cortical avtivity can be 
-removed and artifacts can remain which probably makes the final result unreliable due to the low SNR of of TEPs. However it might be useful as a quick first pass of a large dataset. 
+or my own classification algorithm which classifies components based on the topography and number of peaks in the components. This means that a lot of cortical avtivity can be 
+removed and artifacts can remain which probably makes the final result unreliable due to the low SNR of TEPs. However it might be useful as a quick first pass of a large dataset. 
 
 ### Example Usage
 
@@ -211,15 +174,30 @@ Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richa
 - Artifact Cleaning: Uses Tucker decomposition to clean the detected artifacts.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
 
-## Contributing
+### Acknowledgements
 
-Contributions are welcome! Please submit a pull request or open an issue to discuss your ideas.
+This pipeline includes various processing steps from several sources:
+
+- **Artifact removal** methods written by **Silvia Casarotto**
+- **Independent Component Analysis (ICA)** adapted from **Nigel Rogasch's TESA toolbox**, which served as the main inspiration and benchmark for this code
+- **Muscle artifact removal** (using Tensorly) inspired by **Tangwiriyasakul et al., 2019**
+
+  ### Special Thanks
+
+- **Dr. Silvia Casarotto** for kindly sharing code and verifying the preprocessing output
+- **Dr. Nigel Rogasch** for sanctioning the adaptation of TESA in Python
+- **Dr. Mats Svantesson** (Linköping University Hospital) for many hours of assistance with code, signal processing, and EEG data verification
+- **Dr. Magnus Thordstein** (Linköping University Hospital) for providing access to TMS and TMS-EEG equipment for sample data collection
+- **Dr. Andrew Wold, PhD** for teaching me how to use the TMS equipment
+- **Gramfort et al.** for creating MNE-Python, which this program is built upon
+
+  This project would not have been possible to complete without the support and contributions of these individuals.
 
 ## License
 
 This project is licensed under the MIT License.
 
-## Acknowledgements
+## References
 
 The PCIst implementation is based on:
 
