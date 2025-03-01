@@ -5,7 +5,6 @@ This repository contains an attempt at building some sort of pipeline for prepro
 The pipeline includes steps for artifact removal, filtering, Independent Component Analysis (ICA), muscle artifact cleaning (using Tensorly), and analysis of Perturbational Complexity Index based on State transitions (PCIst) (Comolatti et al., 2019). The analysis of PCIst is just a copy paste from https://github.com/renzocom/PCIst/blob/master/PCIst/pci_st.py which is written by Renzo Comolatti. The code is mostly adapted from a very long jupyter notebook which used mostly native MNE-Python methods which I expanded to a toolbox that I have been using in my analyses. So the code base might not be very efficient. 
 
 
-
 ## Installation (Git)
 
 1. Clone the repository:
@@ -17,12 +16,12 @@ The pipeline includes steps for artifact removal, filtering, Independent Compone
    
 2. Create a virtual environment (very recommended)
 
-For more info see: https://uoa-eresearch.github.io/eresearch-cookbook/recipe/2014/11/20/conda/
+- For more info see: https://uoa-eresearch.github.io/eresearch-cookbook/recipe/2014/11/20/conda/
 
    ```bash
-      conda env create -f environment.yml
-      conda activate tmseegpy
-   ``` 
+   conda env create -f environment.yml
+  conda activate tmseegpy
+   ```
 
 3. Install the package:
 
