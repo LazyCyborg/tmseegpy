@@ -195,7 +195,7 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 
 ### PARAFAC decomposition (which might work)
 
-This step is designed to detect and clean transcranial magnetic stimulation (TMS)-evoked muscle artifacts in EEG data using tensor decomposition techniques. It uses the tensorly library for tensor operations and mne for handling eeg data. and was inspired by the article by Tangwiriyasakul et al., 2019. 
+This step is designed to detect and remove TMS-evoked muscle artifacts in EEG data using tensor decomposition techniques. It uses the tensorly library for tensor operations and mne for handling eeg data. and was inspired by the article by Tangwiriyasakul et al., 2019. 
 
 Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richardson, M. P. (2019). Tensor decomposition of TMS-induced EEG oscillations reveals data-driven profiles of antiepileptic drug effects. Scientific Reports, 9(1). https://doi.org/10.1038/s41598-019-53565-9
 
