@@ -101,7 +101,9 @@ tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_ou
 
 3. Use the scripts:
 
-Ofcourse it is also possible to use the separate parts of the pipeline in a Jupyter Notebook or similar (I mostly run it like this for debugging, and it is probably impractical to run an entire analysis pipeline like this):
+It is also possible to use the separate parts of the pipeline in a Jupyter Notebook or similar. I mostly run it like this for debugging, and it is probably impractical to run an entire analysis pipeline like this. Additionally there might be some issues when running the ICAs in manual component selection mode.
+
+Example:
 
 ```Python
 from tmseegpy.preproc import TMSEEGPreprocessor
@@ -146,7 +148,7 @@ data/
 
 # Processing Pipeline
 
-Below is the **updated** pipeline that aligns with the **default parameters** used in the `run.py` script (and in roughly the same order). These steps are still modelled after the recommendations in:
+Below is the pipeline that I use when preprocessing sample data. These steps are still modelled after the recommendations in:
 
 > Comolatti, R., Pigorini, A., Casarotto, S., Fecchio, M., Faria, G., Sarasso, S., Rosanova, M., Gosseries, O., Boly, M., Bodart, O., Ledoux, D., Brichant, J. F., Nobili, L., Laureys, S., Tononi, G., Massimini, M., & Casali, A. G. (2019). A fast and general method to empirically estimate the complexity of brain responses to transcranial and intracranial stimulations. *Brain Stimulation, 12(5)*, 1280–1289. [https://doi.org/10.1016/j.brs.2019.05.013](https://doi.org/10.1016/j.brs.2019.05.013)
 
