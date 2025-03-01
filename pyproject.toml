@@ -84,7 +84,11 @@ tmseegpy-gui = "tmseegpy.gui_launcher:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["tmseegpy"]
+packages = [
+    "tmseegpy",
+    "tmseegpy.ica_selector_gui",
+    "tmseegpy.main_gui"
+]
 
 [tool.setuptools.package-data]
 "tmseegpy" = ["icons/*.ico", "icons/*.icns", "icons/*.png"]
