@@ -136,6 +136,10 @@ class DataLoader:
             temp_dir = None
             tmp_path = None
 
+            # For files with compound extensions like .cdt.dpa
+            if uploaded_file.name.lower().endswith(('.cdt.dpa', '.cdt.cef')):
+                file_extension = '.'.join(Path(uploaded_file.name).name.lower().split('.')[-2:])
+
             # Special handling for BrainVision files which require multiple files
             if file_extension == '.vhdr' and additional_files:
                 # Create a temporary directory for all BrainVision files
@@ -195,6 +199,14 @@ class DataLoader:
                         preload=True,
                         eog=('HEOGL', 'HEOGR', 'VEOGb'),
                         misc='auto'
+                    )
+
+                # Add Curry file format handling
+                elif file_extension in ['.cdt', '.cef', '.dat', '.dap', '.rs3', '.cdt.dpa', '.cdt.cef']:
+                    st.info("Loading Curry format file...")
+                    raw = mne.io.read_raw_curry(
+                        tmp_path,
+                        preload=True
                     )
 
                 else:

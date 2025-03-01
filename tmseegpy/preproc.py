@@ -232,7 +232,7 @@ class TMSEEGPreprocessor:
                 print(f"  {old} -> {new}")
             self.raw.rename_channels(rename_dict)
         
-        # Set montage with error handling
+        '''        # Set montage with error handling
         if isinstance(montage, str):
             try:
                 self.montage = mne.channels.make_standard_montage(montage)
@@ -267,7 +267,7 @@ class TMSEEGPreprocessor:
                 print("\nMontage set successfully with warnings for missing channels")
             except Exception as e2:
                 print(f"\nWarning: Could not set montage even with warnings: {str(e2)}")
-                print("Continuing without montage. Some functionality may be limited.")
+                print("Continuing without montage. Some functionality may be limited.")'''
         
         self.events = None
         self.event_id = None

@@ -1,4 +1,4 @@
-name: tmseeg-env
+name: tmseegpy-env
 channels:
   - conda-forge
   - defaults
@@ -12,9 +12,10 @@ dependencies:
   # Visualization
   - matplotlib=3.9.2
   - seaborn=0.13.2
+  - plotly=5.18.0
   # MNE ecosystem
-  - mne=1.8.0
-  - mne-qt-browser=0.6.3
+  - mne=1.9.0
+  - mne-qt-browser
   # Jupyter support
   - ipykernel=6.29.0
   - ipympl=0.9.3
@@ -26,6 +27,7 @@ dependencies:
   # Web components
   - flask=3.0.2
   - flask-cors=4.0.1
+  - streamlit=1.31.0
   - pip=23.3.1
   - pip:
     - tensorly==0.8.1

@@ -376,9 +376,9 @@ class TMSEEGApp:
             ("Events Created", state.events_created),
             ("TMS Removal", state.tms_removed),
             ("Epochs Created", state.epochs_created),
-            ("Channels Dropped", state.channels_dropped),
-            ("Bad Channels Removed (auto)", state.bad_channels_removed),
-            ("Bad Epochs Removed (auto)", state.bad_epochs_removed),
+            #("Channels Dropped", state.channels_dropped),
+            ("Bad Channels Removed", state.bad_channels_removed),
+            ("Bad Epochs Removed", state.bad_epochs_removed),
             ("First ICA", state.first_ica_done),
             ("PARAFAC", state.muscle_cleaned),
             ("Epochs Filtered", state.epochs_filtered),
@@ -488,6 +488,46 @@ class TMSEEGApp:
             import traceback
             st.code(traceback.format_exc())
 
+    def standardize_channel_names(self, raw):
+        """Standardize channel names to match common conventions"""
+        rename_dict = {}
+        for ch in raw.ch_names:
+            # Skip non-EEG channels
+            if any(ch.upper().startswith(x) for x in ['EMG', 'ECG', 'EOG', 'TRIG', 'STI']):
+                continue
+
+            # Common channel name standardizations
+            if ch.upper() == 'FP1':
+                rename_dict[ch] = 'Fp1'
+            elif ch.upper() == 'FP2':
+                rename_dict[ch] = 'Fp2'
+            elif ch.upper() == 'FPZ':
+                rename_dict[ch] = 'Fpz'
+            elif ch.upper() == 'FPOZ':
+                rename_dict[ch] = 'Fpz'
+            elif ch.upper() == 'POZ':
+                rename_dict[ch] = 'POz'
+            elif ch.upper() == 'PZ':
+                rename_dict[ch] = 'Pz'
+            elif ch.upper() == 'OZ':
+                rename_dict[ch] = 'Oz'
+            elif ch.upper() == 'FZ':
+                rename_dict[ch] = 'Fz'
+            elif ch.upper() == 'CZ':
+                rename_dict[ch] = 'Cz'
+            elif ch.upper() == 'FCZ':
+                rename_dict[ch] = 'FCz'
+            elif ch.upper() == 'CPZ':
+                rename_dict[ch] = 'CPz'
+            # Special case for your problematic 'IZ' channel
+            elif ch.upper() == 'IZ':
+                rename_dict[ch] = 'Iz'  # Standard name for inion electrode
+
+        if rename_dict:
+            raw.rename_channels(rename_dict)
+
+        return raw
+
     def render_load_data(self):
         """Render load data interface"""
         st.write("Load Data")
@@ -495,6 +535,7 @@ class TMSEEGApp:
         💾 **Supported Data Formats**:
         - BrainVision (.vhdr, .eeg, .vmrk)
         - NeurOne (directory containing .ses and recordings)
+        - Curry (.cdt, .cef, .dat, .dap, .rs3, .cdt.dpa, .cdt.cef)
         - Other MNE formats (.fif, .set, .edf, .bdf)
         """)
 
@@ -508,10 +549,55 @@ class TMSEEGApp:
             value=st.session_state.processing_state.session_name
         )
 
+        # Montage selection - Add this section
+        st.subheader("Montage and Channel Configuration")
+
+        # List of available montages
+        montage_options = [
+            'standard_1005', 'standard_1020', 'standard_alphabetic',
+            'standard_postfixed', 'standard_prefixed', 'standard_primed',
+            'biosemi16', 'biosemi32', 'biosemi64', 'biosemi128', 'biosemi160',
+            'easycap-M1', 'easycap-M10', 'easycap-M43',
+            'GSN-HydroCel-32', 'GSN-HydroCel-64_1.0', 'GSN-HydroCel-129',
+            'mgh60', 'mgh70'
+        ]
+
+        selected_montage = st.selectbox(
+            "EEG Montage",
+            options=montage_options,
+            index=montage_options.index('standard_1020'),
+            help="Select the montage that matches your EEG cap setup"
+        )
+
+        # Channel renaming option
+        auto_rename_channels = st.checkbox(
+            "Auto-rename channels to match standard nomenclature",
+            value=True,
+            help="Automatically rename channel names to match standard naming conventions"
+        )
+
+        # Warning about channel numbers
+        ch_warning_msg = """
+        ⚠️ **Important**: Make sure your montage matches your actual electrode count.
+        If using 32 channels, select a 32-channel montage (e.g., biosemi32).
+        If using 64 channels, select a 64-channel montage (e.g., biosemi64).
+        """
+        st.info(ch_warning_msg)
+
+        # Set missing channel handling
+        missing_channel_option = st.radio(
+            "Handling of missing channels",
+            options=["Error", "Warn", "Ignore"],
+            index=1,
+            help="How to handle channels in your data that aren't in the selected montage",
+            horizontal=True
+        )
+        missing_channel_handling = missing_channel_option.lower()
+
         # Data format selection
         data_format = st.radio(
             "Select Data Format",
-            options=['NeurOne', 'BrainVision', 'Other MNE Formats'],
+            options=['NeurOne', 'BrainVision', 'Curry', 'Other MNE Formats'],
             horizontal=True,
             index=1
         )
@@ -527,6 +613,17 @@ class TMSEEGApp:
                     if raw_list and metadata_df is not None:
                         # Store the first raw object
                         raw = raw_list[0]
+
+                        # Apply channel renaming and montage
+                        if auto_rename_channels:
+                            raw = self.standardize_channel_names(raw)
+
+                        # Apply selected montage
+                        try:
+                            montage = mne.channels.make_standard_montage(selected_montage)
+                            raw.set_montage(montage, on_missing=missing_channel_handling)
+                        except Exception as e:
+                            st.warning(f"Montage application warning: {str(e)}")
 
                         # Initialize processor with the loaded raw data
                         self.processor = TMSEEGPreprocessor(raw)
@@ -555,7 +652,7 @@ class TMSEEGApp:
                     st.error(f"Error loading NeurOne data: {str(e)}")
 
         elif data_format == 'BrainVision':
-            # For BrainVision, allow the user to specify a directory with the files
+            # BrainVision loading code remains unchanged
             st.info("For BrainVision files, please enter the directory containing the .vhdr, .eeg, and .vmrk files.")
 
             brainvision_dir = st.text_input("BrainVision Directory Path")
@@ -599,6 +696,17 @@ class TMSEEGApp:
                                         misc='auto'
                                     )
 
+                                    # Apply channel renaming and montage
+                                    if auto_rename_channels:
+                                        raw = self.standardize_channel_names(raw)
+
+                                    # Apply selected montage
+                                    try:
+                                        montage = mne.channels.make_standard_montage(selected_montage)
+                                        raw.set_montage(montage, on_missing=missing_channel_handling)
+                                    except Exception as e:
+                                        st.warning(f"Montage application warning: {str(e)}")
+
                                     # Initialize processor with the loaded raw data
                                     self.processor = TMSEEGPreprocessor(raw)
 
@@ -618,9 +726,75 @@ class TMSEEGApp:
             elif brainvision_dir:
                 st.error(f"Directory does not exist: {brainvision_dir}")
 
+        elif data_format == 'Curry':
+            # Curry file loading section
+            st.info("""
+            For Curry files, please enter the directory containing Curry data files.
+
+            Typically you should select the main data file (usually a .cdt or .rs3 file).
+            Associated files (.dap, .cef, etc.) in the same directory will be automatically detected.
+            """)
+
+            curry_dir = st.text_input("Curry Data Directory Path")
+
+            if curry_dir and os.path.isdir(curry_dir):
+                # Look for main Curry data files (.cdt, .rs3) in the directory
+                curry_main_files = [f for f in os.listdir(curry_dir) if
+                                    any(f.lower().endswith(ext) for ext in
+                                        ['.cdt', '.rs3', '.dat', '.dap', '.cdt.dpa', '.cdt.cef'])]
+
+                if not curry_main_files:
+                    st.warning("No Curry data files found in the specified directory.")
+                else:
+                    # Let user select which file to load
+                    selected_curry = st.selectbox("Select Curry dataset to load:", curry_main_files)
+
+                    if selected_curry:
+                        curry_path = os.path.join(curry_dir, selected_curry)
+
+                        # Allow loading
+                        if st.button("Load Curry Data"):
+                            try:
+                                raw = mne.io.read_raw_curry(
+                                    curry_path,
+                                    preload=True
+                                )
+
+                                # Apply channel renaming and montage
+                                if auto_rename_channels:
+                                    raw = self.standardize_channel_names(raw)
+
+                                # Apply selected montage
+                                try:
+                                    montage = mne.channels.make_standard_montage(selected_montage)
+                                    raw.set_montage(montage, on_missing=missing_channel_handling)
+                                except Exception as e:
+                                    st.warning(f"Montage application warning: {str(e)}")
+
+                                # Initialize processor with the loaded raw data
+                                self.processor = TMSEEGPreprocessor(raw)
+
+                                # Update session state
+                                st.session_state.processing_state.raw = raw
+                                st.session_state.processing_state.data_loaded = True
+                                st.session_state.processing_state.output_dir = output_dir
+                                st.session_state.processing_state.session_name = session_name
+
+                                st.success(f"Curry data loaded successfully from {curry_path}!")
+                                st.rerun()
+
+                            except Exception as e:
+                                st.error(f"Error loading Curry data: {str(e)}")
+                                import traceback
+                                st.code(traceback.format_exc())
+            elif curry_dir:
+                st.error(f"Directory does not exist: {curry_dir}")
+
         else:  # Other MNE Formats
-            # Standard MNE formats (non-BrainVision)
-            other_formats = [ext for ext in self.data_loader.supported_formats['MNE'] if ext != '.vhdr']
+            # Update the list of supported formats
+            curry_exts = ['.cdt', '.cef', '.dat', '.dap', '.rs3', '.cdt.dpa', '.cdt.cef']
+            other_formats = [ext for ext in self.data_loader.supported_formats['MNE']
+                             if ext != '.vhdr' and ext not in curry_exts]
 
             uploaded_file = st.file_uploader(
                 "Upload EEG data file",
@@ -630,6 +804,17 @@ class TMSEEGApp:
             if uploaded_file is not None:
                 try:
                     raw = self.data_loader.load_mne_data(uploaded_file)
+
+                    # Apply channel renaming and montage
+                    if auto_rename_channels:
+                        raw = self.standardize_channel_names(raw)
+
+                    # Apply selected montage
+                    try:
+                        montage = mne.channels.make_standard_montage(selected_montage)
+                        raw.set_montage(montage, on_missing=missing_channel_handling)
+                    except Exception as e:
+                        st.warning(f"Montage application warning: {str(e)}")
 
                     if raw is not None:
                         # Initialize processor with the loaded raw data
@@ -735,7 +920,7 @@ class TMSEEGApp:
                     return
 
             # Run event creation
-            if st.button("Create Events"):
+            if st.button("Create Events", key="create_events_button"):
                 try:
                     with st.spinner("Creating events..."):
                         if event_method == 'Threshold':
@@ -996,7 +1181,7 @@ class TMSEEGApp:
         with col1:
             l_freq = st.number_input("Low cutoff (Hz)", value=1.0, step=0.1)
         with col2:
-            h_freq = st.number_input("High cutoff (Hz)", value=45.0, step=0.1)
+            h_freq = st.number_input("High cutoff (Hz)", value=250.0, step=0.1)
         with col3:
             notch_freqs_input = st.text_input(
                 "Notch frequencies",
@@ -1026,7 +1211,7 @@ class TMSEEGApp:
                 st.error("Please enter three numbers: start stop step")
             notch_freqs = []
 
-        if st.button("Apply Filter"):
+        if st.button("Apply Filter", key="apply_filter_button"):
             try:
                 if self.processor is None:
                     self.processor = TMSEEGPreprocessor(st.session_state.processing_state.raw)
@@ -1134,7 +1319,7 @@ class TMSEEGApp:
                 window_start = st.number_input(
                     "Window Start (ms)",
                     value=-2,
-                    min_value=-10,
+                    min_value=-20,
                     max_value=0,
                     help="Start time of the removal window relative to TMS pulse"
                 )
@@ -1142,7 +1327,7 @@ class TMSEEGApp:
                 smooth_window_start = st.number_input(
                     "Smooth Window Start (ms)",
                     value=-2,
-                    min_value=-10,
+                    min_value=-20,
                     max_value=0,
                     help="Start time of the smoothing window relative to TMS pulse"
                 )
@@ -1273,94 +1458,212 @@ class TMSEEGApp:
         if st.session_state.processing_state.tms_removed:
             st.info("✅ TMS artifact removal has been completed")
 
-
+    # Updates for bad_channel_rejection method in TMSEEGApp class
 
     def render_bad_channel_rejection(self):
-        """Render bad channel rejection interface"""
-        st.write("Bad Channel Rejection Settings")
+        """Render bad channel rejection interface with manual rejection option"""
+        st.write("Bad Channel Rejection")
 
-        # Store original data for comparison
-        if 'original_channels' not in st.session_state:
-            st.session_state.original_channels = (
-                st.session_state.processing_state.epochs.ch_names.copy()
-                if st.session_state.processing_state.epochs_created
-                else st.session_state.processing_state.raw.ch_names.copy()
+        if not st.session_state.processing_state.epochs_created:
+            st.warning("Please create epochs first (you can still plot the raw data and remove channels manually but MNE-FASTER requires epochs for automatic bad channel rejection")
+            return
+
+        if self.processor is None:
+            if not self.initialize_processor():
+                st.error("Could not initialize processor")
+                return
+
+        # Store original data for comparison and recovery if needed
+        if 'original_channels' not in st.session_state and st.session_state.processing_state.epochs_created:
+            st.session_state.original_channels = st.session_state.processing_state.epochs.ch_names.copy()
+
+        # Track dropped channels
+        if 'dropped_channels' not in st.session_state:
+            st.session_state.dropped_channels = []
+
+        # Create tabs for automatic and manual rejection
+        auto_tab, manual_tab = st.tabs(["Automatic Rejection", "Manual Rejection"])
+
+        with auto_tab:
+            # Automatic rejection (existing code)
+            with st.expander("Detection Settings", expanded=True):
+                threshold = st.number_input(
+                    "Detection threshold (Z-score)",
+                    value=3.0,
+                    min_value=1.0,
+                    max_value=10.0,
+                    help="Z-score threshold for bad channel detection",
+                    key="bad_channels_threshold"
+                )
+
+                # Checkbox for interpolation
+                interpolate = st.checkbox(
+                    "Interpolate bad channels",
+                    value=False,
+                    help="If checked, bad channels will be interpolated instead of dropped using spline interpolation",
+                    key="bad_channels_interpolate"
+                )
+
+            if st.button("Run Automatic Rejection", key="run_auto_rejection_bad_epochs"):
+                try:
+                    with st.spinner("Detecting and removing bad channels..."):
+                        # Store channels before removal
+                        channels_before = self.processor.epochs.ch_names.copy()
+
+                        # Remove bad channels
+                        self.processor.remove_bad_channels(
+                            threshold=threshold, interpolate=interpolate)
+
+                        # Update session state
+                        st.session_state.processing_state.epochs = self.processor.epochs
+                        st.session_state.processing_state.bad_channels_removed = True
+
+                        # Track newly dropped channels
+                        new_dropped = set(channels_before) - set(self.processor.epochs.ch_names)
+                        st.session_state.dropped_channels.extend(list(new_dropped))
+
+                        # Show results
+                        st.success("Bad channel detection completed!")
+                        if new_dropped:
+                            st.write(f"Dropped channels: {list(new_dropped)}")
+
+                        # Display channel statistics
+                        st.subheader("Channel Statistics")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric(
+                                "Original Channels",
+                                len(channels_before)
+                            )
+                        with col3:
+                            st.metric(
+                                "Remaining Channels",
+                                len(self.processor.epochs.ch_names)
+                            )
+
+                        # Store the step completion
+                        st.session_state.processing_state.selected_steps['reject_bad_channels'] = True
+                        st.session_state.processing_state.bad_channels_removed = True
+
+                except Exception as e:
+                    st.error(f"Error removing bad channels: {str(e)}")
+                    st.error("Detailed error information:")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+        with manual_tab:
+            st.subheader("Manual Channel Rejection")
+
+            # Button to open data viewer
+            if st.button("View Data for Channel Selection", key="view_data_channels"):
+                if hasattr(self.processor, 'raw') and self.processor.raw is not None:
+                    self.data_viewer.view_raw(self.processor.raw)
+                elif hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
+                    self.data_viewer.view_epochs(self.processor.epochs)
+                else:
+                    st.warning("No data available to view")
+
+            # Get current channels
+            if hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
+                available_channels = self.processor.epochs.ch_names
+            elif hasattr(self.processor, 'raw') and self.processor.raw is not None:
+                available_channels = self.processor.raw.ch_names
+            else:
+                available_channels = []
+
+            # Multi-select for manual channel rejection
+            selected_channels = st.multiselect(
+                "Select channels to reject",
+                options=available_channels,
+                key="manual_channels_to_reject"
             )
 
-        # Advanced settings
-        with st.expander("Detection Settings", expanded=True):
-            threshold = st.number_input(
-                "Detection threshold (Z-score)",
-                value=3.0,
-                min_value=1.0,
-                max_value=10.0,
-                help="Z-score threshold for bad channel detection",
-                key="bad_channels_threshold"
+            # Add interpolation option
+            interpolate_channels = st.checkbox(
+                "Interpolate channels instead of dropping them",
+                value=True,
+                help="If checked, bad channels will be interpolated using data from neighboring channels"
             )
 
-            # Checkbox for interpolation
-            interpolate = st.checkbox(
-                "Interpolate bad channels",
-                value=False,  # default value
-                help="If checked, bad channels will be interpolated instead of dropped using spline interpolation",
-                key="bad_channels_interpolate"
-            )
+            # Display previously dropped channels
+            if st.session_state.dropped_channels:
+                st.info(f"Previously dropped channels: {st.session_state.dropped_channels}")
 
+            # Button to apply manual rejection
+            button_text = "Interpolate Selected Channels" if interpolate_channels else "Drop Selected Channels"
+            if st.button(button_text):
+                if not selected_channels:
+                    st.warning("No channels selected")
+                else:
+                    try:
+                        with st.spinner(
+                                f"{'Interpolating' if interpolate_channels else 'Dropping'} selected channels..."):
+                            # Process epochs if available
+                            if hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
+                                if interpolate_channels:
+                                    # Mark channels as bad
+                                    self.processor.epochs.info['bads'].extend(selected_channels)
 
+                                    # Interpolate bad channels
+                                    self.processor.epochs.interpolate_bads(reset_bads=False)
 
+                                    action_text = "interpolated"
+                                else:
+                                    # Drop channels
+                                    self.processor.epochs.drop_channels(selected_channels)
+                                    action_text = "dropped"
 
-        if st.button("Remove Bad Channels"):
-            try:
-                if self.processor is None:
-                    self.processor = TMSEEGPreprocessor(st.session_state.processing_state.raw)
+                                # Update session state
+                                st.session_state.processing_state.epochs = self.processor.epochs
+                                st.session_state.processing_state.bad_channels_removed = True
 
-                with st.spinner("Detecting and removing bad channels..."):
-                    # Store channels before removal
-                    channels_before = self.processor.epochs.ch_names.copy()
+                                # Track affected channels
+                                st.session_state.dropped_channels.extend(selected_channels)
 
-                    # Remove bad channels
-                    self.processor.remove_bad_channels(
-                        threshold=threshold, interpolate=interpolate)
+                                st.success(f"Successfully {action_text} {len(selected_channels)} channels")
+                                st.write(f"Affected channels: {selected_channels}")
 
-                    # Update session state
-                    st.session_state.processing_state.epochs = self.processor.epochs
-                    st.session_state.processing_state.bad_channels_removed = True
+                            # Process raw if epochs not available
+                            elif hasattr(self.processor, 'raw') and self.processor.raw is not None:
+                                if interpolate_channels:
+                                    # Mark channels as bad
+                                    self.processor.raw.info['bads'].extend(selected_channels)
 
-                    # Show results
-                    st.success("Bad channel detection completed!")
+                                    # Interpolate bad channels
+                                    self.processor.raw.interpolate_bads(reset_bads=False)
 
-                    # Display channel statistics
-                    st.subheader("Channel Statistics")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric(
-                            "Original Channels",
-                            len(channels_before)
-                        )
-                    with col3:
-                        st.metric(
-                            "Remaining Channels",
-                            len(self.processor.epochs.ch_names)
-                        )
+                                    action_text = "interpolated"
+                                else:
+                                    # Drop channels
+                                    self.processor.raw.drop_channels(selected_channels)
+                                    action_text = "dropped"
 
-                    # Store the step completion
-                    st.session_state.processing_state.selected_steps['bad_channel_rejection'] = True
-                    st.session_state.processing_state.selected_steps['reject_bad_channels'] = True
-                    st.session_state.processing_state.bad_channels_removed = True
+                                # Update session state
+                                st.session_state.processing_state.raw = self.processor.raw
+                                st.session_state.processing_state.channels_dropped = True
 
-            except Exception as e:
-                st.error(f"Error removing bad channels: {str(e)}")
-                st.error("Detailed error information:")
-                import traceback
-                st.code(traceback.format_exc())
+                                # Track affected channels
+                                st.session_state.dropped_channels.extend(selected_channels)
 
-        # Show status if bad channels have been removed
-        if st.session_state.processing_state.bad_channels_removed:
-            st.info("✅ Bad channel rejection has been completed")
+                                st.success(f"Successfully {action_text} {len(selected_channels)} channels")
+                                st.write(f"Affected channels: {selected_channels}")
+                            else:
+                                st.error("No data available for channel processing")
+
+                    except Exception as e:
+                        st.error(f"Error processing channels: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
+            # Show status if bad channels have been removed
+            if st.session_state.processing_state.bad_channels_removed:
+                st.info("✅ Bad channel rejection has been completed")
+
+    # Updates for bad_epoch_rejection method in TMSEEGApp class
 
     def render_bad_epoch_rejection(self):
-        """Render bad epoch rejection interface"""
-        st.write("Bad Epoch Rejection Settings")
+        """Render bad epoch rejection interface with manual rejection option"""
+        st.write("Bad Epoch Rejection")
 
         # Check if epochs exist
         if not st.session_state.processing_state.epochs_created:
@@ -1375,88 +1678,145 @@ class TMSEEGApp:
         if 'original_epochs_count' not in st.session_state and st.session_state.processing_state.epochs is not None:
             st.session_state.original_epochs_count = len(st.session_state.processing_state.epochs)
 
-        # Advanced settings
-        with st.expander("Rejection Settings", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                epoch_threshold = st.number_input(
-                    "Threshold (std) for MNE-FASTER",
-                    value=3.0,
-                    help="Reject epochs exceeding this threshold"
-                )
+        # Track dropped epochs
+        if 'dropped_epochs' not in st.session_state:
+            st.session_state.dropped_epochs = []
 
-            reject_by_annotation = st.checkbox(
-                "Reject by annotation",
-                value=False,
-                help="Reject epochs overlapping with annotations"
-            )
+        # Create tabs for automatic and manual rejection
+        auto_tab, manual_tab = st.tabs(["Automatic Rejection", "Manual Rejection"])
 
-        if st.button("Remove Bad Epochs"):
-            try:
-                if self.processor is None:
-                    self.processor = TMSEEGPreprocessor(st.session_state.processing_state.raw)
-
-                with st.spinner("Detecting and removing bad epochs..."):
-                    # Store epochs count before rejection
-                    epochs_before = len(self.processor.epochs)
-
-                    # Remove bad epochs
-                    self.processor.remove_bad_epochs(
-                        threshold=epoch_threshold
+        with auto_tab:
+            # Advanced settings
+            with st.expander("Rejection Settings", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    epoch_threshold = st.number_input(
+                        "Threshold (std) for MNE-FASTER",
+                        value=3.0,
+                        help="Reject epochs exceeding this threshold"
                     )
 
-                    # Update session state
-                    st.session_state.processing_state.epochs = self.processor.epochs
-                    st.session_state.processing_state.bad_epochs_removed = True
+                reject_by_annotation = st.checkbox(
+                    "Reject by annotation",
+                    value=False,
+                    help="Reject epochs overlapping with annotations"
+                )
 
-                    # Calculate rejection statistics
-                    epochs_after = len(self.processor.epochs)
-                    rejected_epochs = epochs_before - epochs_after
-                    rejection_percentage = (rejected_epochs / epochs_before) * 100
+            if st.button("Run Automatic Rejection"):
+                try:
+                    with st.spinner("Detecting and removing bad epochs..."):
+                        # Store epochs count before rejection
+                        epochs_before = len(self.processor.epochs)
 
-                    # Display results
-                    st.success("Bad epoch rejection completed!")
-
-                    # Show epoch statistics
-                    st.subheader("Epoch Statistics")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric(
-                            "Original Epochs",
-                            epochs_before
-                        )
-                    with col2:
-                        st.metric(
-                            "Rejected Epochs",
-                            rejected_epochs,
-                            delta=f"-{rejected_epochs}"
-                        )
-                    with col3:
-                        st.metric(
-                            "Remaining Epochs",
-                            epochs_after,
-                            delta=f"-{rejection_percentage:.1f}%"
+                        # Remove bad epochs
+                        self.processor.remove_bad_epochs(
+                            threshold=epoch_threshold
                         )
 
-                    # Visualization options
-                    st.subheader("Average Evoked Response after epoch and channel rejection")
-                    fig = self.processor.epochs.average().plot(show=False)
-                    st.pyplot(fig)
+                        # Update session state
+                        st.session_state.processing_state.epochs = self.processor.epochs
+                        st.session_state.processing_state.bad_epochs_removed = True
 
-                    # Show epoch data summary
-                    st.subheader("Data Summary")
-                    epoch_data = self.processor.epochs.get_data()
-                    st.write(f"Data range: [{np.min(epoch_data):.2f}, {np.max(epoch_data):.2f}] µV")
-                    st.write(f"Mean amplitude: {np.mean(np.abs(epoch_data)):.2f} µV")
+                        # Calculate rejection statistics
+                        epochs_after = len(self.processor.epochs)
+                        rejected_epochs = epochs_before - epochs_after
+                        rejection_percentage = (rejected_epochs / epochs_before) * 100
 
-                    # Store the step completion
-                    st.session_state.processing_state.selected_steps['bad_epoch_rejection'] = True
+                        # Keep track of which epochs were dropped (approximate - we just know how many)
+                        st.session_state.dropped_epochs.append(f"{rejected_epochs} epochs from automatic rejection")
 
-            except Exception as e:
-                st.error(f"Error removing bad epochs: {str(e)}")
-                st.error("Detailed error information:")
-                import traceback
-                st.code(traceback.format_exc())
+                        # Display results
+                        st.success("Bad epoch rejection completed!")
+
+                        # Show epoch statistics
+                        st.subheader("Epoch Statistics")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric(
+                                "Original Epochs",
+                                epochs_before
+                            )
+                        with col2:
+                            st.metric(
+                                "Rejected Epochs",
+                                rejected_epochs,
+                                delta=f"-{rejected_epochs}"
+                            )
+                        with col3:
+                            st.metric(
+                                "Remaining Epochs",
+                                epochs_after,
+                                delta=f"-{rejection_percentage:.1f}%"
+                            )
+
+                        # Store the step completion
+                        st.session_state.processing_state.selected_steps['bad_epoch_rejection'] = True
+
+                except Exception as e:
+                    st.error(f"Error removing bad epochs: {str(e)}")
+                    st.error("Detailed error information:")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+        with manual_tab:
+            st.subheader("Manual Epoch Rejection")
+
+            # Button to open data viewer
+            if st.button("View Epochs for Selection", key="view_epochs_manual"):
+                if hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
+                    self.data_viewer.view_epochs(self.processor.epochs)
+                else:
+                    st.warning("No epochs available to view")
+
+            # Get current epoch count
+            if hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
+                num_epochs = len(self.processor.epochs)
+
+                # Multi-select for manual epoch rejection
+                selected_epochs = st.multiselect(
+                    "Select epochs to reject (by index)",
+                    options=list(range(num_epochs)),
+                    key="manual_epochs_to_reject"
+                )
+
+                # Display previously dropped epochs
+                if st.session_state.dropped_epochs:
+                    st.info(f"Previously dropped: {', '.join(st.session_state.dropped_epochs)}")
+
+                # Button to apply manual rejection
+                if st.button("Drop Selected Epochs"):
+                    if not selected_epochs:
+                        st.warning("No epochs selected")
+                    else:
+                        try:
+                            with st.spinner("Dropping selected epochs..."):
+                                # Drop the selected epochs
+                                self.processor.epochs.drop(selected_epochs)
+
+                                # Update session state
+                                st.session_state.processing_state.epochs = self.processor.epochs
+                                st.session_state.processing_state.bad_epochs_removed = True
+
+                                # Track dropped epochs
+                                st.session_state.dropped_epochs.append(
+                                    f"{len(selected_epochs)} epochs (indices: {selected_epochs})")
+
+                                st.success(f"Successfully dropped {len(selected_epochs)} epochs")
+                                st.write(f"Dropped epoch indices: {selected_epochs}")
+
+                                # Show updated statistics
+                                st.metric(
+                                    "Remaining Epochs",
+                                    len(self.processor.epochs),
+                                    delta=f"-{len(selected_epochs)}"
+                                )
+
+                        except Exception as e:
+                            st.error(f"Error dropping epochs: {str(e)}")
+                            import traceback
+                            st.code(traceback.format_exc())
+            else:
+                st.warning("No epochs available for rejection")
 
         # Show status if bad epochs have been removed
         if st.session_state.processing_state.bad_epochs_removed:
@@ -1467,6 +1827,11 @@ class TMSEEGApp:
         import traceback
 
         st.write("First ICA Settings")
+
+        st.info("""
+        Under "Data Visualization" above you can display the ICA sources as in mne.ica.plot_sources(). 
+        It is RECOMMENDED to use this when selecting components since it allows you to right click on a 
+        component to the left and see the corresponding FFT and topography""")
 
         # Initialize ICA state if not exists
         if 'ica_state' not in st.session_state:
@@ -1489,6 +1854,16 @@ class TMSEEGApp:
         if 'pre_ica_epochs' not in st.session_state and st.session_state.processing_state.epochs is not None:
             st.session_state.pre_ica_epochs = st.session_state.processing_state.epochs.copy()
 
+        # Calculate number of components automatically: good channels - 1
+        total_channels = len(self.processor.epochs.ch_names)
+        bad_channels = len(self.processor.epochs.info['bads'])
+        good_channels = total_channels - bad_channels
+        n_components = good_channels - 1
+
+        # Display information about component calculation
+        st.info(f"First ICA will use {n_components} components (good channels - 1)")
+        st.write(f"Total channels: {total_channels}, Bad channels: {bad_channels}, Good channels: {good_channels}")
+
         # Advanced ICA settings
         with st.expander("ICA Configuration", expanded=True):
             col1, col2 = st.columns(2)
@@ -1499,13 +1874,7 @@ class TMSEEGApp:
                     index=0,
                     help="Algorithm used for ICA computation"
                 )
-                n_components = st.slider(
-                    "Number of components",
-                    min_value=0,
-                    max_value=len(st.session_state.processing_state.epochs.ch_names),
-                    value=min(len(st.session_state.processing_state.epochs.ch_names), 20),
-                    help="Number of ICA components to compute (0 = automatic)"
-                )
+                # Note: n_components slider is removed and replaced with automatic calculation
             with col2:
                 random_state = st.number_input(
                     "Random state",
@@ -1602,10 +1971,10 @@ class TMSEEGApp:
                     self.processor = TMSEEGPreprocessor(st.session_state.processing_state.raw)
 
                 with st.spinner("Running ICA..."):
-                    # Initialize ICA
+                    # Initialize ICA with automatically calculated number of components
                     ica = mne.preprocessing.ICA(
                         method=ica_method,
-                        n_components=n_components if n_components > 0 else None,
+                        n_components=n_components,  # Now using the fixed value
                         random_state=random_state,
                         max_iter=max_iter
                     )
@@ -1635,7 +2004,7 @@ class TMSEEGApp:
                             output_dir=st.session_state.processing_state.output_dir,
                             session_name=st.session_state.processing_state.session_name,
                             method=ica_method,
-                            n_components=n_components if n_components > 0 else None,
+                            n_components=n_components,  # Now using the fixed value
                             use_topo=True,
                             topo_edge_threshold=topo_edge_threshold,
                             topo_zscore_threshold=topo_zscore_threshold,
@@ -1657,13 +2026,12 @@ class TMSEEGApp:
                         }
                         st.rerun()  # Force rerun to display results
 
-
                     else:  # Automatic (Standard)
                         self.processor.run_ica(
                             output_dir=st.session_state.processing_state.output_dir,
                             session_name=st.session_state.processing_state.session_name,
                             method=ica_method,
-                            n_components=n_components if n_components > 0 else None,
+                            n_components=n_components,  # Now using the fixed value
                             tms_muscle_thresh=tms_muscle_thresh,
                             blink_thresh=blink_thresh,
                             muscle_thresh=muscle_thresh,
@@ -1708,6 +2076,11 @@ class TMSEEGApp:
         from scipy import signal
 
         st.write("Second ICA Settings")
+
+        st.info("""
+        Under "Data Visulaization" above you can display the ICA sources as in mne.ica.plot_sources(). 
+        It is RECOMMENDED to use this when selecting components since it allows you to right click on a 
+        component to the left and see the corresponding FFT and topography""")
 
         # Initialize second ICA state if not exists
         if 'second_ica_state' not in st.session_state:
@@ -1972,26 +2345,6 @@ class TMSEEGApp:
         ica = results['ica_object']
 
         try:
-            # Calculate and plot PSD using matplotlib's pwelch
-            st.subheader("Power Spectral Density")
-            data = sources.get_data()
-
-            psd_fig, psd_ax = plt.subplots(figsize=(12, 6))
-
-            for comp_idx in range(n_components):
-                comp_data = data[:, comp_idx, :]
-                freqs, psd = signal.welch(comp_data.flatten(), fs=sources.info['sfreq'],
-                                          nperseg=256)  # Adjust nperseg as needed
-                psd_db = 10 * np.log10(psd)
-                psd_ax.plot(freqs, psd_db, label=f'IC{comp_idx:02d}', alpha=0.7, linewidth=1)
-
-            psd_ax.set_xlabel('Frequency (Hz)')
-            psd_ax.set_ylabel('Power Spectral Density (dB/Hz)')
-            psd_ax.set_title('Power Spectral Density of ICA Components')
-            psd_ax.legend(fontsize='small', loc='upper right')
-            psd_ax.grid(True, alpha=0.3)
-            st.pyplot(psd_fig)
-            plt.close(psd_fig)
 
             # Plot topomaps using matplotlib
             st.subheader("Component Topographies")
@@ -2039,20 +2392,46 @@ class TMSEEGApp:
             st.pyplot(fig)
             plt.close(fig)
 
-            # Component selection
+            # Component selection section - MODIFIED
             selected_key = f"{ica_key}_selected_components"
             if selected_key not in st.session_state:
                 st.session_state[selected_key] = []
 
-            selected_components = st.multiselect(
-                "Select components to exclude",
-                options=list(range(n_components)),
-                default=st.session_state[selected_key],
-                key=f"{ica_key}_components_multiselect"  # Unique key for each ICA stage
-            )
-            st.session_state[selected_key] = selected_components
+            # Display current selections
+            current_selections = st.session_state[selected_key]
+            if current_selections:
+                st.write(f"Currently selected components for exclusion: {', '.join(map(str, current_selections))}")
+            else:
+                st.write("No components currently selected")
 
+            # Temporarily store selections without triggering reruns
+            temp_key = f"{ica_key}_temp_selections"
+            if temp_key not in st.session_state:
+                st.session_state[temp_key] = []
+
+            # Use a form to prevent automatic reruns - this is key
+            with st.form(key=f"{ica_key}_selection_form"):
+                # Component selection UI
+                component_options = [f"Component {i}" for i in range(n_components)]
+                selected_options = st.multiselect(
+                    "Select components to exclude",
+                    options=component_options,
+                    default=[component_options[i] for i in current_selections if i < len(component_options)]
+                )
+
+                # Only process when form is submitted
+                submit_button = st.form_submit_button("Update Selection")
+
+            # Process form submission (this runs only after explicit submission)
+            if submit_button:
+                # Convert selection back to component indices
+                selected_indices = [int(option.split()[1]) for option in selected_options]
+                st.session_state[selected_key] = selected_indices
+                st.write(f"Selection updated: {', '.join(map(str, selected_indices))}")
+
+            # Apply button (outside the form)
             if st.button(f"Apply Selected Components ({ica_key})"):
+                selected_components = st.session_state[selected_key]
                 ica.exclude = selected_components
                 ica.apply(self.processor.epochs)
                 st.success(f"Successfully excluded components: {selected_components}")
@@ -2300,13 +2679,6 @@ class TMSEEGApp:
         try:
             st.subheader("Epoch Filtering Settings")
 
-            # Filter method selection
-            filter_method = st.radio(
-                "Filter Method",
-                options=['MNE', 'SciPy'],
-                horizontal=True,
-                help="MNE uses FIR filter, SciPy uses IIR filter"
-            )
 
             # Filter settings
             col1, col2 = st.columns(2)
@@ -2340,15 +2712,6 @@ class TMSEEGApp:
                     help="Low-pass filter cutoff frequency. Set to 0 to disable."
                 )
 
-                notch_width = st.number_input(
-                    "Notch width (Hz)",
-                    value=2.0,
-                    min_value=0.1,
-                    max_value=10.0,
-                    step=0.1,
-                    help="Width of the notch filter"
-                )
-
             # Advanced settings
             with st.expander("Advanced Settings"):
 
@@ -2368,20 +2731,20 @@ class TMSEEGApp:
                 try:
                     with st.spinner("Applying filters..."):
                         # Apply filtering based on selected method
-                        if filter_method == 'MNE':
-                            self.processor.mne_filter_epochs(
-                                l_freq=l_freq if l_freq > 0 else None,
-                                h_freq=h_freq if h_freq > 0 else None,
-                                notch_freq=notch_freq if notch_freq > 0 else None,
-                                notch_width=notch_width,
-                            )
-                        else:  # SciPy
-                            self.processor.scipy_filter_epochs(
-                                l_freq=l_freq if l_freq > 0 else None,
-                                h_freq=h_freq if h_freq > 0 else None,
-                                notch_freq=notch_freq if notch_freq > 0 else None,
-                                notch_width=notch_width
-                            )
+
+                        self.processor.epochs.filter(
+                            l_freq=l_freq if l_freq > 0 else None,
+                            h_freq=h_freq if h_freq > 0 else None,
+                            method='iir',
+                            iir_params=dict(
+                                order=3,
+                                ftype='butter',
+                                phase='zero-double',
+                                btype='bandpass'
+                            ),
+                            verbose=True
+                        )
+
 
                         # Update session state
                         st.session_state.processing_state.epochs = self.processor.epochs
