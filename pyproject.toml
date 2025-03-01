@@ -87,7 +87,8 @@ include-package-data = true
 packages = [
     "tmseegpy",
     "tmseegpy.ica_selector_gui",
-    "tmseegpy.main_gui"
+    "tmseegpy.main_gui",
+    "tmseegpy.neurone_loader_fix"
 ]
 
 [tool.setuptools.package-data]
