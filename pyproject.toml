@@ -80,6 +80,7 @@ Homepage = "https://github.com/LazyCyborg/tmseegpy"
 
 [project.scripts]
 tmseegpy = "tmseegpy:run_cli"
+tmseegpy-gui = "tmseegpy.gui_launcher:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -87,4 +88,4 @@ packages = ["tmseegpy"]
 
 [tool.setuptools.package-data]
 "tmseegpy" = ["icons/*.ico", "icons/*.icns", "icons/*.png"]
-"" = ["icons/*.ico", "icons/*.icns", "icons/*.png"]
+"*" = ["icons/*.ico", "icons/*.icns", "icons/*.png"]
