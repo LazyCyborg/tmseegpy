@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tmseegpy"
-version = "0.2.0"
+version = "0.2.1"
 description = "A pipeline for preprocessing and analyzing TMS-EEG data with a GUI developed using Streamlit"
 authors = [
     {name = "LazyCyborg", email = "hjarneko@gmail.com"}
