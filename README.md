@@ -93,7 +93,7 @@ To enable PARAFAC muscle artifact removal :
 tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --parafac_muscle_artifacts
 ```
 
-To enable saving of eeg data in .fif format during preprocessing for quality checks (plots will be saved in a steps directory):
+To enable saving of eeg data in .fif format during preprocessing for quality checks (files will be saved in a steps directory):
 
 ```bash
 tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir --save_preproc
