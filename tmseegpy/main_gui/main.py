@@ -5,7 +5,7 @@ from app import TMSEEGApp
 def main():
     # Set page config
     st.set_page_config(
-        page_title="TMS-EEG Processing Pipeline",
+        page_title="HePoTEP",
         page_icon="⚡",
         layout="wide",
         initial_sidebar_state="expanded",

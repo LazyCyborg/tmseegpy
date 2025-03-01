@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tmseegpy"
-version = "0.1.8"
-description = "A pipeline for preprocessing and analyzing TMS-EEG data"
+version = "0.2.0"
+description = "A pipeline for preprocessing and analyzing TMS-EEG data with a GUI developed using Streamlit"
 authors = [
     {name = "LazyCyborg", email = "hjarneko@gmail.com"}
 ]
@@ -25,7 +25,7 @@ dependencies = [
     "pandas>=2.0.0",  # Added for data handling
 
     # MNE and extensions
-    "mne>=1.8.0",
+    "mne>=1.9.0",
     "mne-faster>=1.2",
     "mne-qt-browser",
 
@@ -84,3 +84,7 @@ tmseegpy = "tmseegpy:run_cli"
 [tool.setuptools]
 include-package-data = true
 packages = ["tmseegpy"]
+
+[tool.setuptools.package-data]
+"tmseegpy" = ["icons/*.ico", "icons/*.icns", "icons/*.png"]
+"" = ["icons/*.ico", "icons/*.icns", "icons/*.png"]

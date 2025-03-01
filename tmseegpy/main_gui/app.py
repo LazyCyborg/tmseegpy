@@ -46,7 +46,8 @@ class ProcessingState:
     second_ica_done: bool = False
     ssp_applied: bool = False
     downsampled: bool = False
-    tep_analyzed: bool = False
+    tep_analyzed: bool = False,
+    data_saved: bool = False
 
     # Selected steps tracking
     selected_steps: Dict[str, bool] = field(default_factory=lambda: {
@@ -62,7 +63,9 @@ class ProcessingState:
         'second_ica': False,
         'ssp': False,
         'downsample': False,
-        'tep_analysis': False
+        'tep_analysis': False,
+        'save_data': False
+
     })
 
 
@@ -326,6 +329,17 @@ class TMSEEGApp:
                 st.warning("⏳ Pending")
             self.render_tep_analysis()
 
+        with tabs[13]:
+            cols = st.columns(1)
+            if st.session_state.processing_state.data_saved:
+                st.success("✅ Completed")
+            elif 'save_data' in st.session_state.processing_state.selected_steps and \
+                    st.session_state.processing_state.selected_steps['save_data']:
+                st.success("✅ Completed")
+            else:
+                st.warning("⏳ Pending")
+            self.render_save_data()
+
         # Add run button at the bottom
         st.markdown("---")
         '''
@@ -384,7 +398,8 @@ class TMSEEGApp:
             ("Epochs Filtered", state.epochs_filtered),
             ("Second ICA", state.second_ica_done),
             ("SSP Applied", state.ssp_applied),
-            ("Downsampled", state.downsampled)
+            ("Downsampled", state.downsampled),
+            ("Data Saved", state.data_saved)
         ]
 
         for label, status in status_items:
@@ -403,7 +418,7 @@ class TMSEEGApp:
         - View Epochs: Inspect individual epochs (available after epoch creation)
         """)
 
-        with st.expander("Credits and Acknowledgements", expanded=False):
+        with st.expander("⭐️Credits and Acknowledgements from the Author", expanded=False):
             st.markdown("""
             ### Acknowledgements
 
@@ -423,6 +438,9 @@ class TMSEEGApp:
             - **Gramfort et al.** for creating MNE-Python, which this program is built upon
 
             This project would not have been possible to complete without the support and contributions of these individuals.
+            
+            Author:
+            Alexander Engelmark 
             """)
         try:
             # Add sidebar for global settings and status
@@ -831,6 +849,151 @@ class TMSEEGApp:
 
                 except Exception as e:
                     st.error(f"Error loading data: {str(e)}")
+
+    def render_save_data(self):
+        """Render interface for saving processed data"""
+        st.write("Save Processed Data")
+
+        if not st.session_state.processing_state.data_loaded:
+            st.warning("Please load and process data before saving")
+            return
+
+        # Get output directory and session name from session state
+        output_dir = st.session_state.processing_state.output_dir
+        session_name = st.session_state.processing_state.session_name
+
+        # Display current output settings
+        st.info(f"Current output directory: {output_dir}")
+        st.info(f"Current session name: {session_name}")
+
+        # Option to update output directory
+        new_output_dir = st.text_input(
+            "Update output directory (optional)",
+            value=output_dir
+        )
+
+        # Option to update session name
+        new_session_name = st.text_input(
+            "Update session name (optional)",
+            value=session_name
+        )
+
+        # Update session state if changed
+        if new_output_dir != output_dir or new_session_name != session_name:
+            st.session_state.processing_state.output_dir = new_output_dir
+            st.session_state.processing_state.session_name = new_session_name
+            output_dir = new_output_dir
+            session_name = new_session_name
+            st.success("Output settings updated")
+
+        # Create the full output path
+        import os
+        full_output_path = os.path.join(output_dir, session_name)
+
+        # Check what can be saved based on processing state
+        can_save_raw = st.session_state.processing_state.raw is not None
+        can_save_epochs = st.session_state.processing_state.epochs is not None
+        can_save_evoked = can_save_epochs  # If we have epochs, we can compute evoked
+
+        # Create checkboxes for selecting what to save
+        st.subheader("Select Data to Save")
+
+        save_raw = st.checkbox("Save preprocessed raw data", value=can_save_raw, disabled=not can_save_raw)
+        save_epochs = st.checkbox("Save preprocessed epochs", value=can_save_epochs, disabled=not can_save_epochs)
+        save_evoked = st.checkbox("Save evoked response", value=can_save_evoked, disabled=not can_save_evoked)
+
+        # File format options
+        st.subheader("File Format Options")
+
+        raw_format = st.selectbox(
+            "Raw data format",
+            options=["FIF (.fif)", "European Data Format (.edf)", "BrainVision (.vhdr)"],
+            index=0,
+            disabled=not save_raw
+        )
+
+        epochs_format = st.selectbox(
+            "Epochs format",
+            options=["FIF (.fif)"],
+            index=0,
+            disabled=not save_epochs
+        )
+
+        evoked_format = st.selectbox(
+            "Evoked format",
+            options=["FIF (.fif)", "CSV (.csv)"],
+            index=0,
+            disabled=not save_evoked
+        )
+
+        # Save button
+        if st.button("Save Data"):
+            try:
+                # Create output directory if it doesn't exist
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Counter for saved files
+                saved_count = 0
+
+                # Save raw data if selected
+                if save_raw and can_save_raw:
+                    if raw_format == "FIF (.fif)":
+                        raw_fname = os.path.join(output_dir, f"{session_name}_raw.fif")
+                        st.session_state.processing_state.raw.save(raw_fname, overwrite=True)
+                    elif raw_format == "European Data Format (.edf)":
+                        raw_fname = os.path.join(output_dir, f"{session_name}_raw.edf")
+                        st.session_state.processing_state.raw.export(raw_fname, fmt='edf', overwrite=True)
+                    elif raw_format == "BrainVision (.vhdr)":
+                        raw_fname = os.path.join(output_dir, f"{session_name}_raw.vhdr")
+                        st.session_state.processing_state.raw.export(raw_fname, fmt='brainvision', overwrite=True)
+
+                    st.success(f"Raw data saved to {raw_fname}")
+                    saved_count += 1
+
+                # Save epochs if selected
+                if save_epochs and can_save_epochs:
+                    epochs_fname = os.path.join(output_dir, f"{session_name}_epo.fif")
+                    st.session_state.processing_state.epochs.save(epochs_fname, overwrite=True)
+                    st.success(f"Epochs saved to {epochs_fname}")
+                    saved_count += 1
+
+                # Save evoked if selected
+                if save_evoked and can_save_evoked:
+                    # Compute evoked from epochs
+                    evoked = st.session_state.processing_state.epochs.average()
+
+                    if evoked_format == "FIF (.fif)":
+                        evoked_fname = os.path.join(output_dir, f"{session_name}_ave.fif")
+                        evoked.save(evoked_fname, overwrite=True)
+                    elif evoked_format == "CSV (.csv)":
+                        evoked_fname = os.path.join(output_dir, f"{session_name}_ave.csv")
+                        # Convert to pandas DataFrame and save as CSV
+                        import pandas as pd
+                        data_dict = {
+                            'time': evoked.times
+                        }
+                        for i, ch_name in enumerate(evoked.ch_names):
+                            data_dict[ch_name] = evoked.data[i]
+                        df = pd.DataFrame(data_dict)
+                        df.to_csv(evoked_fname, index=False)
+
+                    st.success(f"Evoked response saved to {evoked_fname}")
+                    saved_count += 1
+
+                # Final success message
+                if saved_count > 0:
+                    st.success(f"Successfully saved {saved_count} file(s) to {output_dir}")
+                    # Update the session state to mark save as completed
+                    st.session_state.processing_state.data_saved = True
+                    st.session_state.processing_state.selected_steps['save_data'] = True
+                else:
+                    st.warning("No data was selected for saving")
+
+            except Exception as e:
+                st.error(f"Error saving data: {str(e)}")
+                st.error("Detailed error information:")
+                import traceback
+                st.code(traceback.format_exc())
 
     def render_create_events(self):
         """Render event creation interface"""
