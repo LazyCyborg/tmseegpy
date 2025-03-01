@@ -212,7 +212,7 @@ Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richa
 - **Dr. Nigel Rogasch** for sanctioning the adaptation of TESA in Python
 - **Dr. Mats Svantesson** (Linköping University Hospital) for many hours of assistance with code, signal processing, and EEG data verification
 - **Dr. Magnus Thordstein** (Linköping University Hospital) for providing access to TMS and TMS-EEG equipment for sample data collection
-- **Dr. Andrew Wold ** for teaching me how to use the TMS equipment
+- **Dr. Andrew Wold** for teaching me how to use the TMS equipment
 - **Gramfort et al.** for creating MNE-Python, which this program is built upon
 - **The creator of this repository https://github.com/heilerich/neurone_loader for creating the NeurOne loader**
 
