@@ -20,7 +20,7 @@ The pipeline includes steps for artifact removal, filtering, Independent Compone
 
    ```bash
    conda env create -f environment.yml
-  conda activate tmseegpy
+  conda activate tmseegpy-env
    ```
 
 3. Install the package:
