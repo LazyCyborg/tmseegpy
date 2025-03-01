@@ -418,7 +418,7 @@ class TMSEEGApp:
         - View Epochs: Inspect individual epochs (available after epoch creation)
         """)
 
-        with st.expander("⭐️Credits and Acknowledgements from the Author", expanded=False):
+        with st.expander("⭐️ Credits and Acknowledgements from the Author", expanded=False):
             st.markdown("""
             ### Acknowledgements
 
@@ -440,7 +440,8 @@ class TMSEEGApp:
             This project would not have been possible to complete without the support and contributions of these individuals.
             
             Author:
-            Alexander Engelmark 
+            Alexander Engelmark
+            Medical student and TMS-EEG enthusiast
             """)
         try:
             # Add sidebar for global settings and status

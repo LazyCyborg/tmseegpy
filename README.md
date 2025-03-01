@@ -197,7 +197,7 @@ Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richa
 - Reconstruction: Uses Tucker decomposition to remove the detected artifacts by reconstructing the epoched data.
 - Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
 
-### Special Thanks
+### Special Thanks to:
 
 - **Dr. Silvia Casarotto** for kindly sharing code and verifying the preprocessing output
 - **Dr. Renzo Comolatti for sharing the code for PCIst calculation**
