@@ -57,6 +57,8 @@ Run the following command to create a desktop shortcut:
 
    ```bash
   python -m tmseegpy.gui_launcher --create-shortcut
+  
+  chmod +x ~/Desktop/TMSeegPy.command
    ```
 
 
@@ -177,20 +179,19 @@ Below is the pipeline **I use**, after iterating a lot and verifying that the fi
 1. Load data  
 2. Find/create events
 3. Drop unused channels (e.g., EMG)
-4. Remove TMS artifact using baseline data (window: -5 - 2ms)
-5. Filter raw EEG data (high-pass 1 Hz, low-pass: 250 Hz and notch filter 50 Hz)
+4. Remove TMS artefact using baseline data (window: -5 - 2ms)
+5. Filter raw EEG data (high-pass 0.1 Hz, low-pass: 250 Hz)
 6. **Create epochs** (-0.8 to 0.8)  
 7. **Average reference**  
 8. **Remove bad channels** (manual or threshold=3)  
 9. **Remove bad epochs** (manual or threshold=3)
 10. **First ICA** (FastICA)  
 11. **(Optional and very experimental) PARAFAC decomposition**
-12. **(Optional) Second ICA** (Infomax)  
-13. **(Optional) SSP**
-14. Filter epoched data (low-pass 45 Hz)
-15. **Downsampling** (725 Hz)  
-16. **TEP plotting**
-17. **PCIst**  
+12. **Filter epoched data (high-pass 1 hz, low-pass 45 Hz and notch filter 50 Hz)**
+13. **Second ICA** (Infomax)
+14. **Downsampling** (725 Hz)  
+15. **TEP plotting**
+16. **PCIst**  
 
 
 ### PARAFAC decomposition (which might work)

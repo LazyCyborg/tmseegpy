@@ -1,33 +1,15 @@
 # preproc.py
 
-#### Debug mne_filter epochs after PARAFAC which might not work
 from typing import List, Optional, Callable, Dict, Union, Tuple, Any, TypeVar
-import warnings
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import threading
-import queue
 from scipy import stats, signal
-from scipy.interpolate import interp1d
-from scipy.stats import zscore
-from scipy.spatial.distance import pdist, squareform
-from scipy import optimize
 
 # MNE imports
 import mne
 from mne.preprocessing import compute_proj_ecg, compute_proj_eog, compute_current_source_density, ICA
-from mne import (compute_raw_covariance,
-                read_source_spaces,
-                setup_source_space,
-                make_bem_model,
-                make_bem_solution,
-                make_forward_solution,
-                read_trans,
-                read_bem_solution)
-from mne.io.constants import FIFF
 
-# I currently disabled ica_label functionality since it is not used but the references to it are only commented out
 from mne.preprocessing import ICA
 
 # Required for FASTER bad channel/epoch detection 
@@ -231,43 +213,7 @@ class TMSEEGPreprocessor:
             for old, new in rename_dict.items():
                 print(f"  {old} -> {new}")
             self.raw.rename_channels(rename_dict)
-        
-        '''        # Set montage with error handling
-        if isinstance(montage, str):
-            try:
-                self.montage = mne.channels.make_standard_montage(montage)
-                print(f"Using montage: {montage} which seemed to work?")
-            except ValueError as e:
-                print(f"Warning: Could not create montage '{montage}': {str(e)}")
-                print("Falling back to easycap-M10 montage")
-                self.montage = mne.channels.make_standard_montage('standard_1020')
-        else:
-            self.montage = montage
-        
-        try:
-            # First try to set montage normally
-            self.raw.set_montage(self.montage)
-        except ValueError as e:
-            print(f"\nWarning: Could not set montage directly: {str(e)}")
-            
-            # Get the channel types
-            ch_types = {ch: self.raw.get_channel_types(picks=ch)[0] for ch in self.raw.ch_names}
-            
-            # Identify non-EEG channels
-            non_eeg = [ch for ch, type_ in ch_types.items() if type_ not in ['eeg', 'unknown']]
-            if non_eeg:
-                print(f"\nFound non-EEG channels: {non_eeg}")
-                print("Setting their types explicitly...")
-                for ch in non_eeg:
-                    self.raw.set_channel_types({ch: 'misc'})
-            
-            # Try setting montage again with on_missing='warn'
-            try:
-                self.raw.set_montage(self.montage, on_missing='warn')
-                print("\nMontage set successfully with warnings for missing channels")
-            except Exception as e2:
-                print(f"\nWarning: Could not set montage even with warnings: {str(e2)}")
-                print("Continuing without montage. Some functionality may be limited.")'''
+
         
         self.events = None
         self.event_id = None
@@ -290,8 +236,6 @@ class TMSEEGPreprocessor:
             'original_sfreq': 0,
             'interpolated_times': [],
         }
-
-
 
 
 
@@ -416,308 +360,6 @@ class TMSEEGPreprocessor:
 
         self.raw = raw_out
 
-    def remove_tms_artifact(self,
-                            cut_times_tms: Tuple[float, float] = (-2, 10),
-                            replace_times: Optional[Tuple[float, float]] = None,
-                            events: Optional[np.ndarray] = None,
-                            event_id: Optional[Dict] = None,
-                            verbose: bool = True) -> None:
-        """
-        Remove TMS artifacts from all marked events.
-
-        Parameters
-        ----------
-        cut_times_tms : tuple
-            Start and end time of cut window in milliseconds
-        replace_times : tuple, optional
-            Time window for baseline calculation if replacing with mean
-        events : array, optional
-            Custom events array (n_events × 3). If None, tries to find events
-        event_id : dict, optional
-            Dictionary mapping event names to event codes
-        verbose : bool
-            Whether to print progress information
-        """
-        # Check if we're working with epochs
-        if hasattr(self, 'epochs') and self.epochs is not None:
-            if verbose:
-                print("\nRemoving TMS artifacts from epochs...")
-
-            # Get data from epochs
-            data = self.epochs.get_data()
-            sfreq = self.epochs.info['sfreq']
-
-            # Convert cut times from ms to samples
-            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-
-            # Calculate sample points relative to epoch start
-            start_sample = int(self.epochs.tmin * sfreq) + cut_samples[0]
-            end_sample = int(self.epochs.tmin * sfreq) + cut_samples[1]
-
-            # Ensure we're within epoch boundaries
-            if start_sample < 0:
-                print(f"Warning: Start time {cut_times_tms[0]}ms is before epoch start. Adjusting...")
-                start_sample = 0
-            if end_sample >= data.shape[2]:
-                print(f"Warning: End time {cut_times_tms[1]}ms is after epoch end. Adjusting...")
-                end_sample = data.shape[2] - 1
-
-            # Remove artifact from each epoch
-            for epoch_idx in range(data.shape[0]):
-                if replace_times is None:
-                    data[epoch_idx, :, start_sample:end_sample] = 0
-                else:
-                    # Handle replacement if specified
-                    replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
-                    baseline_start = int(self.epochs.tmin * sfreq) + replace_samples[0]
-                    baseline_end = int(self.epochs.tmin * sfreq) + replace_samples[1]
-
-                    if baseline_start >= 0 and baseline_end < data.shape[2]:
-                        baseline_mean = np.mean(data[epoch_idx, :, baseline_start:baseline_end], axis=1)
-                        data[epoch_idx, :, start_sample:end_sample] = baseline_mean[:, np.newaxis]
-
-            # Update epochs data
-            self.epochs._data = data
-
-        else:
-            raw_out = self.raw.copy()
-            data = raw_out.get_data()
-            sfreq = raw_out.info['sfreq']
-
-            if not hasattr(self, 'tmscut'):
-                self.tmscut = []
-
-            tmscut_info = {
-                'cut_times_tms': cut_times_tms,
-                'replace_times': replace_times,
-                'sfreq': sfreq,
-                'interpolated': 'no'
-            }
-
-            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-
-            # Use provided events or try to find them
-            if events is None:
-                # First try to get events from stim channel
-                if 'STI 014' in raw_out.ch_names:
-                    try:
-                        events = mne.find_events(raw_out, stim_channel='STI 014')
-                        if verbose:
-                            print(f"\nFound {len(events)} events from STI 014 channel")
-                        # Create event_id from unique event codes if not provided
-                        if event_id is None:
-                            unique_events = np.unique(events[:, 2])
-                            event_id = {str(code): code for code in unique_events}
-                            if verbose:
-                                print(f"Event IDs: {list(event_id.values())}")
-                    except Exception as e:
-                        if verbose:
-                            print(f"Error finding events from STI 014: {str(e)}")
-
-                # If no events found from stim channel, try annotations
-                if events is None or len(events) == 0:
-                    try:
-                        events, event_id = mne.events_from_annotations(raw_out)
-                        if verbose:
-                            print(f"\nFound {len(events)} events from annotations")
-                    except Exception as e:
-                        if verbose:
-                            print(f"Error finding events from annotations: {str(e)}")
-
-            if events is None or len(events) == 0:
-                raise ValueError("No events found or provided. Cannot remove artifacts.")
-
-            # Store events and event_id for later use
-            self._stored_events = events.copy()
-            self._stored_event_id = event_id
-            self.events = events.copy()
-            self.event_id = event_id
-
-            if verbose:
-                print(f"\nFound {len(events)} events to process")
-                print(f"Removing artifact in window {cut_times_tms} ms")
-
-            processed_count = 0
-            skipped_count = 0
-
-            # Sort events by time to ensure consistent processing
-            events = events[events[:, 0].argsort()]
-
-            for event_idx in range(len(events)):
-                event_sample = events[event_idx, 0]
-                start = event_sample + cut_samples[0]
-                end = event_sample + cut_samples[1]
-
-                if start < 0 or end >= data.shape[1]:
-                    skipped_count += 1
-                    continue
-
-                if replace_times is None:
-                    data[:, start:end] = 0
-                else:
-                    replace_samples = np.round(np.array(replace_times) * sfreq / 1000).astype(int)
-                    baseline_start = event_sample + replace_samples[0]
-                    baseline_end = event_sample + replace_samples[1]
-                    if baseline_start >= 0 and baseline_end < data.shape[1]:
-                        baseline_mean = np.mean(data[:, baseline_start:baseline_end], axis=1)
-                        data[:, start:end] = baseline_mean[:, np.newaxis]
-                processed_count += 1
-
-            if verbose:
-                print(f"Successfully removed artifacts from {processed_count} events")
-                if skipped_count > 0:
-                    print(f"Skipped {skipped_count} events due to window constraints")
-
-            raw_out._data = data
-            self.raw = raw_out
-            self.tmscut.append(tmscut_info)
-
-    def interpolate_tms_artifact(self,
-                                 method: str = 'cubic',
-                                 interp_window: float = 1.0,
-                                 cut_times_tms: Tuple[float, float] = (-2, 10),
-                                 events: Optional[np.ndarray] = None,
-                                 event_id: Optional[Dict] = None,
-                                 verbose: bool = True) -> None:
-        """
-        Interpolate TMS artifacts for all marked events.
-
-        Parameters
-        ----------
-        method : str
-            Interpolation method ('cubic')
-        interp_window : float
-            Window size for interpolation in ms
-        cut_times_tms : tuple
-            Start and end time of cut window in milliseconds
-        events : array, optional
-            Custom events array (n_events × 3). If None, uses stored events
-        event_id : dict, optional
-            Dictionary mapping event names to event codes
-        verbose : bool
-            Whether to print progress information
-        """
-        if hasattr(self, 'epochs') and self.epochs is not None:
-            data = self.epochs.get_data()
-            sfreq = self.epochs.info['sfreq']
-
-            # Get the last cut times from tmscut
-            if not hasattr(self, 'tmscut') or not self.tmscut:
-                raise ValueError("Must run remove_tms_artifact first")
-
-            cut_times_tms = self.tmscut[-1]['cut_times_tms']
-
-            # Convert to samples
-            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-            interp_samples = int(round(interp_window * sfreq / 1000))
-
-            # Calculate sample points relative to epoch start
-            start_sample = int(self.epochs.tmin * sfreq) + cut_samples[0]
-            end_sample = int(self.epochs.tmin * sfreq) + cut_samples[1]
-
-            # Interpolate each epoch
-            for epoch_idx in range(data.shape[0]):
-                window_start = start_sample - interp_samples
-                window_end = end_sample + interp_samples
-
-                if window_start >= 0 and window_end < data.shape[2]:
-                    x = np.arange(window_end - window_start + 1)
-                    x_fit = np.concatenate([x[:interp_samples], x[-interp_samples:]])
-                    x_fit = x_fit - x_fit[0]
-                    x_interp = x[interp_samples:-interp_samples] - x_fit[0]
-
-                    for ch in range(data.shape[1]):
-                        y_full = data[epoch_idx, ch, window_start:window_end + 1]
-                        y_fit = np.concatenate([y_full[:interp_samples], y_full[-interp_samples:]])
-
-                        if method == 'cubic':
-                            p = np.polyfit(x_fit, y_fit, 3)
-                            data[epoch_idx, ch, start_sample:end_sample + 1] = np.polyval(p, x_interp)
-
-            self.epochs._data = data
-
-        else:
-            if not hasattr(self, 'tmscut') or not self.tmscut:
-                raise ValueError("Must run remove_tms_artifact first")
-
-            if verbose:
-                print(f"\nStarting interpolation with {method} method")
-                print(f"Using interpolation window of {interp_window} ms")
-                print(f"Processing cut window {cut_times_tms} ms")
-
-            raw_out = self.raw.copy()
-            data = raw_out.get_data()
-            sfreq = raw_out.info['sfreq']
-
-            # Use provided events, stored events, or try to find events
-            if events is not None:
-                current_events = events
-                if verbose:
-                    print(f"\nUsing {len(current_events)} provided events")
-            elif hasattr(self, '_stored_events') and self._stored_events is not None:
-                current_events = self._stored_events
-                if verbose:
-                    print(f"\nUsing {len(current_events)} stored events from previous artifact removal")
-            else:
-                raise ValueError("No events found. Must provide events or run remove_tms_artifact first")
-
-            cut_samples = np.round(np.array(cut_times_tms) * sfreq / 1000).astype(int)
-            interp_samples = int(round(interp_window * sfreq / 1000))
-
-            interpolated_count = 0
-            warning_count = 0
-
-            for event_idx in range(len(current_events)):
-                event_sample = current_events[event_idx, 0]
-                start = event_sample + cut_samples[0]
-                end = event_sample + cut_samples[1]
-
-                # Calculate fitting windows
-                window_start = start - interp_samples
-                window_end = end + interp_samples
-
-                if window_start < 0 or window_end >= data.shape[1]:
-                    warning_count += 1
-                    continue
-
-                # Get time points for fitting
-                x = np.arange(window_end - window_start + 1)
-                x_fit = np.concatenate([
-                    x[:interp_samples],
-                    x[-interp_samples:]
-                ])
-
-                # Center x values at 0
-                x_fit = x_fit - x_fit[0]
-                if len(x) <= 2 * interp_samples:
-                    if verbose:
-                        print(f"Warning: Window too small for interpolation at sample {event_sample}")
-                    warning_count += 1
-                    continue
-
-                x_interp = x[interp_samples:-interp_samples] - x_fit[0]
-
-                # Interpolate each channel
-                for ch in range(data.shape[0]):
-                    y_full = data[ch, window_start:window_end + 1]
-                    y_fit = np.concatenate([
-                        y_full[:interp_samples],
-                        y_full[-interp_samples:]
-                    ])
-
-                    p = np.polyfit(x_fit, y_fit, 3)
-                    data[ch, start:end + 1] = np.polyval(p, x_interp)
-
-                interpolated_count += 1
-
-            if verbose:
-                print(f"\nSuccessfully interpolated {interpolated_count} events")
-                if warning_count > 0:
-                    print(f"Encountered {warning_count} warnings during interpolation")
-                print("TMS artifact interpolation complete")
-
-            raw_out._data = data
-            self.raw = raw_out
 
     def mne_fix_tms_artifact(self,
                              window: Tuple[float, float] = (-0.002, 0.015),
@@ -911,12 +553,10 @@ class TMSEEGPreprocessor:
                 # First try normal interpolation
                 if interpolate:
                     # Try interpolation again
-                    self.epochs.interpolate_bads(reset_bads=True)
+                    self.epochs.interpolate_bads(reset_bads=False)
                     print("Successfully interpolated bad channels using default montage")
                 else:
                     self.epochs.drop_channels(self.epochs.info['bads'])
-                self.epochs.interpolate_bads(reset_bads=True)
-                print("Interpolated bad channels")
 
             except ValueError as e:
                 print(f"Warning: Standard interpolation failed: {str(e)}")
@@ -930,7 +570,7 @@ class TMSEEGPreprocessor:
 
                     if interpolate:
                     # Try interpolation again
-                        self.epochs.interpolate_bads(reset_bads=True)
+                        self.epochs.interpolate_bads(reset_bads=False)
                         print("Successfully interpolated bad channels using default montage")
                     else:
                         self.epochs.drop_channels(self.epochs.info['bads'])
@@ -986,28 +626,23 @@ class TMSEEGPreprocessor:
 
 
     from typing import Optional, List
-    import threading
-    import tkinter as tk
 
-    def run_ica(self ,
+    def run_ica(self,
                 output_dir: str,
                 session_name: str,
                 n_components: int = None,
                 method: str = "fastica",
-                tms_muscle_thresh: float = 2.0,
-                blink_thresh: float = 2.5,
-                lat_eye_thresh: float = 2.0,
-                muscle_thresh: float = 0.6,
-                noise_thresh: float = 4.0,
-                manual_mode: bool = False,
-                use_topo: bool = False,
+                select_with_nn: bool = False,
+                select_with_topo: bool = False,
+                use_nn: bool = True,
+                use_topo: bool = True,
                 topo_edge_threshold: float = 0.15,
-                topo_zscore_threshold: float = 3.5,  # Changed name
-                topo_peak_threshold: float = 3,  # Added
+                topo_zscore_threshold: float = 3.5,
+                topo_peak_threshold: float = 3,
                 topo_focal_threshold: float = 0.2,
-                ica_callback: Optional[Callable] = None,) -> None:
+                ica_callback: Optional[Callable] = None) -> None:
         """
-        Run first ICA decomposition with TESA artifact detection.
+        Run first ICA decomposition with artifact detection.
         Works with both Raw and Epochs data.
 
         Parameters
@@ -1020,24 +655,18 @@ class TMSEEGPreprocessor:
             ICA method ('fastica' or 'infomax')
         n_components : int
             Number of components to use
-        tms_muscle_thresh : float
-            Threshold for TMS-muscle artifact detection
-        blink_thresh : float
-            Threshold for blink detection
-        lat_eye_thresh : float
-            Threshold for lateral eye movement detection
-        muscle_thresh : float
-            Threshold for muscle artifact detection
-        noise_thresh : float
-            Threshold for noise detection
-        plot_components : bool
-            Whether to plot ICA components
-        manual_mode : bool
-            Whether to use manual component selection
-        ica_callback : callable, optional
-            Callback function for GUI-based component selection
+        select_with_nn : bool
+            Whether to automatically select components using neural network classification
+        select_with_topo : bool
+            Whether to automatically select components using topography-based classification
+        use_nn : bool
+            Whether to run neural network classification (defaults to True)
         use_topo : bool
-            Whether to use topography-based component selection
+            Whether to run topography-based classification (defaults to True)
+        topo_edge_threshold, topo_zscore_threshold, topo_peak_threshold, topo_focal_threshold : float
+            Parameters for topography-based component selection
+        ica_callback : callable, optional
+            Not used, kept for backwards compatibility
         """
         # Store copy of data before ICA
         if hasattr(self, 'epochs') and self.epochs is not None:
@@ -1050,9 +679,14 @@ class TMSEEGPreprocessor:
             is_epochs = False
 
         if n_components is None:
-            n_channels = len(self.epochs.ch_names)
-            n_epochs = len(self.epochs)
-            n_components = min(n_channels - 1, n_epochs - 1)
+            # Set default number of components
+            if is_epochs:
+                n_channels = len(self.epochs.ch_names)
+                n_epochs = len(self.epochs)
+                n_components = min(n_channels - 1, n_epochs - 1)
+            else:
+                n_channels = len(self.raw.ch_names)
+                n_components = n_channels - 1
 
         # Fit ICA
         print("\nFitting ICA...")
@@ -1065,117 +699,93 @@ class TMSEEGPreprocessor:
         self.ica.fit(inst)
         print("ICA fit complete")
 
-        if use_topo:
-            print("\nUsing topography-based component classification...")
-            from .ica_topo_classifier import ICATopographyClassifier
+        # Initialize storage for classification results
+        self.ica_nn_results = None
+        self.ica_topo_results = None
+        self.selected_first_ica_components = []
 
-            classifier = ICATopographyClassifier(self.ica, inst)
-            classifier.edge_dist_threshold = topo_edge_threshold
-            classifier.zscore_threshold = topo_zscore_threshold
-            classifier.peak_count_threshold = topo_peak_threshold
-            classifier.focal_area_threshold = topo_focal_threshold
+        nn_suggested_exclude = []
+        topo_suggested_exclude = []
 
-            results = classifier.classify_all_components()
-            suggested_exclude = [idx for idx, res in results.items()
-                                 if res['classification'] in ['artifact', 'noise']]
+        # Run neural network classification
+        if use_nn:
+            from .ica_nn_classifier import ICAComponentClassifier, plot_ica_classification, plot_classification_summary
 
-            if suggested_exclude:
-                print(f"\nExcluding {len(suggested_exclude)} components based on topography")
-                self.ica.apply(inst, exclude=suggested_exclude)
-                self.selected_first_ica_components = suggested_exclude
-                self.preproc_stats['muscle_components'] = suggested_exclude
-            else:
-                print("\nNo components selected for exclusion by topography analysis")
-                self.preproc_stats['muscle_components'] = []
-
-        elif manual_mode:
-            self.first_ica_manual = True
-            print("\nStarting manual component selection...")
-            print("A new window will open for component selection.")
-
+            print("\nRunning neural network-based component classification...")
             try:
-                # Run all TESA artifact detection methods
-                print("\nRunning TESA artifact detection...")
-                artifact_results = self.detect_all_artifacts(
-                    tms_muscle_thresh=tms_muscle_thresh,
-                    blink_thresh=blink_thresh,
-                    lat_eye_thresh=lat_eye_thresh,
-                    muscle_freq_thresh=muscle_thresh,
-                    noise_thresh=noise_thresh,
-                    verbose=True
-                )
+                # Initialize classifier
+                classifier = ICAComponentClassifier()
 
-                # Calculate component scores for GUI
-                component_scores = {
-                    'blink': artifact_results['blink']['scores']['z_scores'],
-                    'lat_eye': artifact_results['lateral_eye']['scores']['z_scores'],
-                    'muscle': artifact_results['muscle']['scores']['power_ratios'],
-                    'noise': artifact_results['noise']['scores']['max_z_scores']
-                }
+                # Classify components
+                self.ica_nn_results = classifier.classify_ica(self.ica, inst)
 
-                # Add TMS-muscle scores if using epoched data
-                if is_epochs:
-                    component_scores['tms_muscle'] = artifact_results['tms_muscle']['scores']['ratios']
+                # Get component classifications
+                nn_classifications = self.ica_nn_results['classifications']
+                nn_suggested_exclude = self.ica_nn_results['exclude']
 
-                # Print suggested components
-                suggested_exclude = []
-                for key in artifact_results:
-                    if key == 'tms_muscle' and not is_epochs:
-                        continue
-                    suggested_exclude.extend(artifact_results[key]['components'])
-                suggested_exclude = list(set(suggested_exclude))
+                # Print results
+                print(f"\nClassified {len(nn_classifications)} components using neural network:")
+                for comp_idx, comp_class in nn_classifications.items():
+                    prob = self.ica_nn_results['details'][comp_idx]['probability']
+                    print(f"  Component {comp_idx}: {comp_class} ({prob:.2f})")
 
-                if suggested_exclude:
-                    print(f"\nSuggested components for removal: {suggested_exclude}")
-                    print("(Based on TESA artifact detection)")
+                # Save visualizations
+                fig_nn = plot_ica_classification(self.ica, inst, self.ica_nn_results)
+                fig_nn.savefig(os.path.join(output_dir, f"{session_name}_nn_classification.png"))
+                plt.close(fig_nn)
+
+                fig_summary = plot_classification_summary(self.ica_nn_results)
+                fig_summary.savefig(os.path.join(output_dir, f"{session_name}_nn_summary.png"))
+                plt.close(fig_summary)
 
             except Exception as e:
-                print(f"\nWarning: Error in component analysis: {str(e)}")
-                print("Continuing with manual selection without automatic scores")
-                component_scores = None
+                print(f"\nWarning: Error in neural network classification: {str(e)}")
+                print("Neural network classification will not be available")
 
-            if ica_callback is not None:
-                # Use the provided callback for GUI-based selection
-                selected_components = ica_callback(self.ica, inst, component_scores)
+        # Run topography-based classification
+        if use_topo:
+            from .ica_topo_classifier import ICATopographyClassifier
 
-                if selected_components:
-                    print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
-                    self.ica.apply(inst, exclude=selected_components)
-                    self.selected_first_ica_components = selected_components
-                    self.preproc_stats['muscle_components'] = selected_components
-                else:
-                    print("\nNo components selected for exclusion")
-                    self.preproc_stats['muscle_components'] = []
-            else:
-                print("\nWarning: Manual mode selected but no callback provided")
-                self.preproc_stats['muscle_components'] = []
+            print("\nRunning topography-based component classification...")
+            try:
+                classifier = ICATopographyClassifier(self.ica, inst)
+                classifier.edge_dist_threshold = topo_edge_threshold
+                classifier.zscore_threshold = topo_zscore_threshold
+                classifier.peak_count_threshold = topo_peak_threshold
+                classifier.focal_area_threshold = topo_focal_threshold
+
+                self.ica_topo_results = classifier.classify_all_components()
+                topo_suggested_exclude = [idx for idx, res in self.ica_topo_results.items()
+                                          if res['classification'] in ['artifact', 'noise']]
+
+                # Print results
+                print(f"\nClassified components using topography analysis:")
+                for idx, res in self.ica_topo_results.items():
+                    print(f"  Component {idx}: {res['classification']}")
+
+            except Exception as e:
+                print(f"\nWarning: Error in topography-based classification: {str(e)}")
+                print("Topography classification will not be available")
+
+        # Handle component selection based on parameters
+        if select_with_nn and nn_suggested_exclude:
+            print(
+                f"\nAutomatically excluding {len(nn_suggested_exclude)} components based on neural network classification")
+            self.ica.apply(inst, exclude=nn_suggested_exclude)
+            self.selected_first_ica_components = nn_suggested_exclude
+            self.preproc_stats['muscle_components'] = nn_suggested_exclude
+
+        elif select_with_topo and topo_suggested_exclude:
+            print(f"\nAutomatically excluding {len(topo_suggested_exclude)} components based on topography")
+            self.ica.apply(inst, exclude=topo_suggested_exclude)
+            self.selected_first_ica_components = topo_suggested_exclude
+            self.preproc_stats['muscle_components'] = topo_suggested_exclude
 
         else:
-            # Automatic detection using TESA methods
-            artifact_results = self.detect_all_artifacts(
-                tms_muscle_thresh=tms_muscle_thresh,
-                blink_thresh=blink_thresh,
-                lat_eye_thresh=lat_eye_thresh,
-                muscle_freq_thresh=muscle_thresh,
-                noise_thresh=noise_thresh,
-                verbose=True
-            )
-
-            # Combine all detected components
-            exclude_components = []
-            for key in artifact_results:
-                if key == 'tms_muscle' and not is_epochs:
-                    continue  # Skip TMS-muscle components for raw data
-                exclude_components.extend(artifact_results[key]['components'])
-            exclude_components = list(set(exclude_components))  # Remove duplicates
-
-            if exclude_components:
-                print(f"\nExcluding {len(exclude_components)} components: {exclude_components}")
-                self.ica.apply(inst, exclude=exclude_components)
-                self.preproc_stats['muscle_components'] = exclude_components
-            else:
-                print("\nNo components detected to exclude")
-                self.preproc_stats['muscle_components'] = []
+            # No components selected for exclusion if no automatic selection is enabled
+            print("\nNo components selected for exclusion")
+            self.selected_first_ica_components = []
+            self.preproc_stats['muscle_components'] = []
 
         # Update the appropriate data instance
         if is_epochs:
@@ -1183,23 +793,15 @@ class TMSEEGPreprocessor:
         else:
             self.raw = inst
 
-
     def run_second_ica(self,
                        method: str = "infomax",
                        n_components: int = None,
-                       blink_thresh: float = 2.5,
-                       lat_eye_thresh: float = 2.0,
-                       muscle_thresh: float = 0.6,
-                       noise_thresh: float = 4.0,
-                       manual_mode: bool = False,
-                       use_topo: bool = False,
-                       topo_edge_threshold: float = 0.15,
-                       topo_zscore_threshold: float = 3.5,  # Changed name
-                       topo_peak_threshold: float = 3,  # Added
-                       topo_focal_threshold: float = 0.2,
+                       select_with_iclabel: bool = False,
+                       use_icalabel: bool = True,
+                       icalabel_exclude_labels: List[str] = None,
                        ica_callback: Optional[Callable] = None) -> None:
         """
-        Run second ICA with both TESA and ICLabel detection methods.
+        Run second ICA with ICLabel detection.
         Works with both Raw and Epochs data.
 
         Parameters
@@ -1208,22 +810,14 @@ class TMSEEGPreprocessor:
             ICA method ('fastica' or 'infomax')
         n_components : int
             Number of components to use
-        exclude_labels : list of str
-            Labels of components to exclude if using ICLabel
-        blink_thresh : float
-            Threshold for blink detection
-        lat_eye_thresh : float
-            Threshold for lateral eye movement detection
-        muscle_thresh : float
-            Threshold for muscle artifact detection
-        noise_thresh : float
-            Threshold for noise detection
-        manual_mode : bool
-            Whether to use manual component selection
+        select_with_iclabel : bool
+            Whether to automatically select components using ICA label classification
+        use_icalabel : bool
+            Whether to run ICA label classification (defaults to True)
+        icalabel_exclude_labels : list of str
+            List of ICA labels to exclude (if None, excludes all except "brain" and "other")
         ica_callback : callable, optional
-            Callback function for GUI-based component selection
-        use_topo : bool
-            Whether to use topography-based component selection
+            Not used, kept for backwards compatibility
         """
         # Determine if we're working with epochs or raw data
         if hasattr(self, 'epochs') and self.epochs is not None:
@@ -1237,9 +831,13 @@ class TMSEEGPreprocessor:
             raise ValueError("No data available for ICA")
 
         if n_components is None:
-            n_channels = len(self.epochs.ch_names)
-            n_epochs = len(self.epochs)
-            n_components = min(n_channels - 1, n_epochs - 1)
+            if is_epochs:
+                n_channels = len(self.epochs.ch_names)
+                n_epochs = len(self.epochs)
+                n_components = min(n_channels - 1, n_epochs - 1)
+            else:
+                n_channels = len(self.raw.ch_names)
+                n_components = n_channels - 1
 
         print("\nPreparing for second ICA...")
         if is_epochs:
@@ -1247,125 +845,49 @@ class TMSEEGPreprocessor:
 
         # Initialize and fit ICA
         fit_params = dict(extended=True) if method == "infomax" else None
-        self.ica2 = ICA(max_iter="auto", n_components=n_components, method=method, random_state=42, fit_params=fit_params)
+        self.ica2 = ICA(max_iter="auto", n_components=n_components, method=method, random_state=42,
+                        fit_params=fit_params)
         self.ica2.fit(inst)
         print("Second ICA fit complete")
 
-        if use_topo:
-            print("\nUsing topography-based component classification...")
-            from .ica_topo_classifier import ICATopographyClassifier
+        # Initialize storage for classification results
+        self.ica_label_results = None
+        self.selected_second_ica_components = []
+        exclude_idx = []
 
-            # Update classifier parameters
-            classifier = ICATopographyClassifier(self.ica2, inst)  # Note: Changed to ica2
-            classifier.edge_dist_threshold = topo_edge_threshold
-            classifier.zscore_threshold = topo_zscore_threshold
-            classifier.peak_count_threshold = topo_peak_threshold
-            classifier.focal_area_threshold = topo_focal_threshold
+        # Run ICA label classification
+        if use_icalabel:
+            from mne_icalabel import label_components
 
-            results = classifier.classify_all_components()
-            suggested_exclude = [idx for idx, res in results.items()
-                                 if res['classification'] in ['artifact', 'noise']]
-
-            if suggested_exclude:
-                print(f"\nExcluding {len(suggested_exclude)} components based on topography")
-                self.ica2.apply(inst, exclude=suggested_exclude)  # Fix: Use self.ica2
-                self.selected_second_ica_components = suggested_exclude  # Fix: Use second ICA stats
-                self.preproc_stats['excluded_ica_components'] = suggested_exclude
-            else:
-                print("\nNo components selected for exclusion by topography analysis")
-                self.preproc_stats['muscle_components'] = []
-
-        elif manual_mode:
-            self.second_ica_manual = True
-            print("\nStarting manual component selection for second ICA...")
-
+            print("\nRunning ICA label classification for second ICA...")
             try:
-                # Run TESA artifact detection (excluding TMS-muscle for continuous data)
-                print("\nRunning TESA artifact detection...")
-                artifact_results = self.detect_all_artifacts(
-                    blink_thresh=blink_thresh,
-                    lat_eye_thresh=lat_eye_thresh,
-                    muscle_freq_thresh=muscle_thresh,
-                    noise_thresh=noise_thresh,
-                    verbose=True
-                )
+                # Set default exclude labels if not provided
+                self.ica_label_results= label_components(inst, self.ica2, method="iclabel")
+                for i, l in enumerate(self.ica_label_results["labels"]):
+                    print(f"ICA components {i}: {l}")
+                # Run ICA label classification
 
-                # Calculate component scores
-                component_scores = {
-                    'blink': artifact_results['blink']['scores']['z_scores'],
-                    'lat_eye': artifact_results['lateral_eye']['scores']['z_scores'],
-                    'muscle': artifact_results['muscle']['scores']['power_ratios'],
-                    'noise': artifact_results['noise']['scores']['max_z_scores']
-                }
+                labels= self.ica_label_results["labels"]
+                exclude_idx = [idx for idx, label in enumerate(labels) if label not in ["brain", "other"]]
+                print(f"Excluding these ICA components in pre: {exclude_idx}")
 
-                # Add TMS-muscle scores if using epoched data
-                if is_epochs:
-                    component_scores['tms_muscle'] = artifact_results['tms_muscle']['scores']['ratios']
-
-                # Print suggested components
-                suggested_exclude = []
-                for key in artifact_results:
-                    if key == 'tms_muscle' and not is_epochs:
-                        continue
-                    suggested_exclude.extend(artifact_results[key]['components'])
-                suggested_exclude = list(set(suggested_exclude))
-
-                if suggested_exclude:
-                    print(f"\nSuggested components for removal: {suggested_exclude}")
-                    print("(Based on TESA artifact detection)")
 
             except Exception as e:
-                print(f"\nWarning: Error in component analysis: {str(e)}")
-                component_scores = None
+                print(f"\nError in ICA label classification: {str(e)}")
+                print("ICA label classification will not be available")
 
-            if ica_callback is not None:
-                # Use the provided callback for GUI-based selection
-                selected_components = ica_callback(self.ica2, inst, component_scores)
-
-                if selected_components:
-                    print(f"\nExcluding {len(selected_components)} manually selected components: {selected_components}")
-                    self.ica2.apply(inst, exclude=selected_components)
-                    self.selected_second_ica_components = selected_components
-                    self.preproc_stats['excluded_ica_components'] = selected_components
-                else:
-                    print("\nNo components selected for exclusion")
-                    self.preproc_stats['excluded_ica_components'] = []
-            else:
-                print("\nWarning: Manual mode selected but no callback provided")
-                self.preproc_stats['excluded_ica_components'] = []
-
+        # Handle component selection based on parameters
+        if select_with_iclabel and exclude_idx:
+            print(
+                f"\nAutomatically excluding {len(exclude_idx)} components based on ICA label classification: {exclude_idx}")
+            self.ica2.apply(inst, exclude=exclude_idx)
+            self.selected_second_ica_components = exclude_idx
+            self.preproc_stats['excluded_ica_components'] = exclude_idx
         else:
-            # Automatic detection using TESA methods
-            try:
-                artifact_results = self.detect_all_artifacts(
-                    blink_thresh=blink_thresh,
-                    lat_eye_thresh=lat_eye_thresh,
-                    muscle_freq_thresh=muscle_thresh,
-                    noise_thresh=noise_thresh,
-                    verbose=True,
-                    ica_instance=self.ica2,
-                )
-
-                # Combine detected components
-                exclude_idx = []
-                for key in artifact_results:
-                    if key == 'tms_muscle' and not is_epochs:
-                        continue
-                    exclude_idx.extend(artifact_results[key]['components'])
-                exclude_idx = list(set(exclude_idx))
-
-                if exclude_idx:
-                    print(f"\nExcluding {len(exclude_idx)} components: {exclude_idx}")
-                    self.ica2.apply(inst, exclude=exclude_idx)
-                    self.preproc_stats['excluded_ica_components'] = exclude_idx
-                else:
-                    print("\nNo components excluded")
-                    self.preproc_stats['excluded_ica_components'] = []
-
-            except Exception as e:
-                print(f"Warning: Error in automatic component detection: {str(e)}")
-                print("No components will be automatically excluded")
-                self.preproc_stats['excluded_ica_components'] = []
+            # No components selected for exclusion if automatic selection is not enabled
+            print("\nNo components selected for exclusion")
+            self.selected_second_ica_components = []
+            self.preproc_stats['excluded_ica_components'] = []
 
         # Update the appropriate data instance
         if is_epochs:
@@ -1375,346 +897,6 @@ class TMSEEGPreprocessor:
 
         print('Second ICA complete')
 
-
-    def detect_all_artifacts(self,
-                             tms_muscle_window=(11, 30),
-                             tms_muscle_thresh=2,
-                             blink_thresh=2.5,
-                             lat_eye_thresh=2.0,
-                             muscle_freq_window=(30, 100),
-                             muscle_freq_thresh=1.0,
-                             noise_thresh=6.0,
-                             verbose=True,
-                             ica_instance=None) -> Dict:
-        """
-        Detect all artifact types following TESA's implementation.
-        Works with both Raw and Epochs data.
-
-        Parameters
-        ----------
-        tms_muscle_window : tuple
-            Time window (ms) for detecting TMS-evoked muscle activity
-        tms_muscle_thresh : float
-            Threshold for TMS-evoked muscle components
-        blink_thresh : float
-            Threshold for blink components
-        lat_eye_thresh : float
-            Threshold for lateral eye movement components
-        muscle_freq_window : tuple
-            Frequency window (Hz) for detecting persistent muscle activity
-        muscle_freq_thresh : float
-            Threshold for persistent muscle components
-        noise_thresh : float
-            Threshold for electrode noise components
-        verbose : bool
-            Whether to print verbose output
-        ica_instance : mne.preprocessing.ICA, optional
-            Specific ICA instance to use. If None, uses self.ica
-
-        Returns
-        -------
-        dict
-            Dictionary containing detected components and their scores
-        """
-        # Use provided ICA instance or default to self.ica
-        ica = ica_instance if ica_instance is not None else self.ica
-
-        if not hasattr(self, 'ica'):
-            raise ValueError("Must run ICA before detecting components")
-
-        # Initialize results dictionary
-        results = {
-            'tms_muscle': {'components': [], 'scores': {}},
-            'blink': {'components': [], 'scores': {}},
-            'lateral_eye': {'components': [], 'scores': {}},
-            'muscle': {'components': [], 'scores': {}},
-            'noise': {'components': [], 'scores': {}}
-        }
-
-        # Use provided ICA instance or default to self.ica
-        ica = ica_instance if ica_instance is not None else self.ica
-
-        # Get ICA weights
-        weights = ica.get_components()
-        n_components = ica.n_components_
-
-        # Get ICA components (sources)
-        if hasattr(self, 'epochs') and self.epochs is not None:
-            inst = self.epochs
-            components = ica.get_sources(inst)
-            is_epochs = True
-        else:
-            inst = self.raw
-            components = ica.get_sources(inst)
-            is_epochs = False
-
-        # 1. Detect TMS-evoked muscle artifacts (if using epoched data)
-        if is_epochs:
-            muscle_comps, muscle_scores = self._detect_tms_muscle(
-                components, tms_muscle_window, tms_muscle_thresh)
-            results['tms_muscle']['components'] = muscle_comps
-            results['tms_muscle']['scores'] = muscle_scores
-
-            if verbose:
-                print(f"\nFound {len(muscle_comps)} TMS-muscle components")
-
-        # 2. Detect eye blink artifacts
-        blink_comps, blink_scores = self._detect_blinks(
-            weights, inst, blink_thresh)
-        results['blink']['components'] = blink_comps
-        results['blink']['scores'] = blink_scores
-
-        if verbose:
-            print(f"Found {len(blink_comps)} blink components")
-
-        # 3. Detect lateral eye movement artifacts
-        lat_eye_comps, lat_eye_scores = self._detect_lateral_eye(
-            weights, inst, lat_eye_thresh)
-        results['lateral_eye']['components'] = lat_eye_comps
-        results['lateral_eye']['scores'] = lat_eye_scores
-
-        if verbose:
-            print(f"Found {len(lat_eye_comps)} lateral eye movement components")
-
-        # 4. Detect persistent muscle artifacts
-        muscle_comps, muscle_scores = self._detect_muscle_frequency(
-            components, inst.info['sfreq'], muscle_freq_window, muscle_freq_thresh)
-        results['muscle']['components'] = muscle_comps
-        results['muscle']['scores'] = muscle_scores
-
-        if verbose:
-            print(f"Found {len(muscle_comps)} persistent muscle components")
-
-        # 5. Detect electrode noise
-        noise_comps, noise_scores = self._detect_electrode_noise(
-            weights, noise_thresh)
-        results['noise']['components'] = noise_comps
-        results['noise']['scores'] = noise_scores
-
-        if verbose:
-            print(f"Found {len(noise_comps)} noisy electrode components")
-
-        return results
-
-    def _detect_tms_muscle(self, components, window=(11, 30), thresh=2.0):
-        """
-        Detect TMS-evoked muscle artifacts following Equation 3.
-        Only works with epoched data.
-        """
-        if not hasattr(self, 'epochs'):
-            return [], {'ratios': [], 'window_means': [], 'total_means': []}
-
-        # Get time window indices
-        sfreq = self.epochs.info['sfreq']
-        window_samples = np.array([np.abs(self.epochs.times - w / 1000).argmin()
-                                   for w in window])
-
-        # Initialize outputs
-        muscle_components = []
-        scores = {'ratios': [], 'window_means': [], 'total_means': []}
-
-        # Process each component
-        for comp_idx in range(self.ica.n_components_):
-            # Get component time course averaged across trials
-            comp_data = np.mean(components.get_data()[:, comp_idx, :], axis=0)
-
-            # Take absolute values
-            comp_abs = np.abs(comp_data)
-
-            # Calculate means following TESA formula
-            window_length = window_samples[1] - window_samples[0]
-            window_mean = (1 / window_length) * np.sum(
-                comp_abs[window_samples[0]:window_samples[1]])
-            total_mean = (1 / len(comp_abs)) * np.sum(comp_abs)
-
-            # Calculate ratio
-            muscle_ratio = window_mean / total_mean
-
-            # Store scores
-            scores['ratios'].append(muscle_ratio)
-            scores['window_means'].append(window_mean)
-            scores['total_means'].append(total_mean)
-
-            # Classify component
-            if muscle_ratio >= thresh:
-                muscle_components.append(comp_idx)
-
-        return muscle_components, scores
-
-    def _detect_blinks(self, weights, inst, thresh=2.5):
-        """
-        Detect eye blink artifacts following Equation 4.
-        Works with both Raw and Epochs data.
-
-        Parameters
-        ----------
-        weights : array
-            ICA weight matrix
-        inst : Raw or Epochs
-            MNE Raw or Epochs instance
-        thresh : float
-            Z-score threshold for blink detection
-        """
-        # Get electrode indices for Fp1 and Fp2
-        fp_channels = ['Fp1', 'Fp2']
-        fp_idx = [inst.ch_names.index(ch) for ch in fp_channels
-                  if ch in inst.ch_names]
-
-        if not fp_idx:
-            print("Warning: Could not find Fp1/Fp2 channels for blink detection")
-            return [], {'z_scores': []}
-
-        # Initialize outputs
-        blink_components = []
-        scores = {'z_scores': []}
-
-        # Calculate z-scores for weights
-        w_mean = np.mean(weights, axis=0)
-        w_std = np.std(weights, axis=0)
-
-        for comp_idx in range(weights.shape[1]):
-            # Get average z-score for Fp1/Fp2
-            fp_z_scores = [(weights[fp, comp_idx] - w_mean[comp_idx]) / w_std[comp_idx]
-                           for fp in fp_idx]
-            mean_z = np.abs(np.mean(fp_z_scores))
-
-            scores['z_scores'].append(mean_z)
-
-            # Classify component
-            if mean_z > thresh:
-                blink_components.append(comp_idx)
-
-        return blink_components, scores
-
-    def _detect_lateral_eye(self, weights, inst, thresh=2.0):
-        """
-        Detect lateral eye movement artifacts following Equations 5 & 6.
-        Works with both Raw and Epochs data.
-
-        Parameters
-        ----------
-        weights : array
-            ICA weight matrix
-        inst : Raw or Epochs
-            MNE Raw or Epochs instance
-        thresh : float
-            Z-score threshold for lateral eye movement detection
-        """
-        # Get electrode indices for F7 and F8
-        lat_channels = ['F7', 'F8']
-        lat_idx = [inst.ch_names.index(ch) for ch in lat_channels
-                   if ch in inst.ch_names]
-
-        if len(lat_idx) < 2:
-            print("Warning: Could not find F7/F8 channels for lateral eye detection")
-            return [], {'z_scores': []}
-
-        # Initialize outputs
-        lat_eye_components = []
-        scores = {'z_scores': []}
-
-        # Calculate z-scores for weights
-        w_mean = np.mean(weights, axis=0)
-        w_std = np.std(weights, axis=0)
-
-        for comp_idx in range(weights.shape[1]):
-            # Get z-scores for F7/F8
-            z_scores = [(weights[ch, comp_idx] - w_mean[comp_idx]) / w_std[comp_idx]
-                        for ch in lat_idx]
-
-            scores['z_scores'].append(z_scores)
-
-            # Check for opposite polarity exceeding threshold
-            if ((z_scores[0] > thresh and z_scores[1] < -thresh) or
-                    (z_scores[0] < -thresh and z_scores[1] > thresh)):
-                lat_eye_components.append(comp_idx)
-
-        return lat_eye_components, scores
-
-    def _detect_muscle_frequency(self, components, sfreq, freq_window=(30, 100), thresh=0.6):
-        """
-        Detect persistent muscle artifacts following Equation 7.
-        Works with both Raw and Epochs data.
-
-        Parameters
-        ----------
-        components : array
-            ICA component data
-        sfreq : float
-            Sampling frequency
-        freq_window : tuple
-            Frequency window (Hz) for muscle activity detection
-        thresh : float
-            Threshold for muscle component detection
-        """
-        from scipy.signal import welch
-
-        # Initialize outputs
-        muscle_components = []
-        scores = {'power_ratios': []}
-
-        # Get component data
-        if isinstance(components, mne.BaseEpochs):
-            comp_data = components.get_data()
-        else:  # Raw data
-            comp_data = components.get_data()
-            # Reshape to match epochs format [n_epochs=1, n_components, n_times]
-            comp_data = comp_data.reshape(1, *comp_data.shape)
-
-        # Calculate frequency representation for each component
-        for comp_idx in range(self.ica.n_components_):
-            # Calculate power spectrum
-            freqs, psd = welch(comp_data[:, comp_idx, :], fs=sfreq)
-
-            # Get indices for frequency window
-            freq_idx = np.where((freqs >= freq_window[0]) &
-                                (freqs <= freq_window[1]))[0]
-
-            # Calculate power ratio
-            window_power = np.mean(psd[:, freq_idx])
-            total_power = np.mean(psd)
-            power_ratio = window_power / total_power
-
-            scores['power_ratios'].append(power_ratio)
-
-            # Classify component
-            if power_ratio > thresh:
-                muscle_components.append(comp_idx)
-
-        return muscle_components, scores
-
-    def _detect_electrode_noise(self, weights, thresh=4.0):
-        """
-        Detect electrode noise following Equation 8.
-        Works with both Raw and Epochs data as it only uses ICA weights.
-
-        Parameters
-        ----------
-        weights : array
-            ICA weight matrix
-        thresh : float
-            Z-score threshold for noise detection
-        """
-        # Initialize outputs
-        noise_components = []
-        scores = {'max_z_scores': []}
-
-        # Calculate z-scores for weights
-        w_mean = np.mean(weights, axis=0)
-        w_std = np.std(weights, axis=0)
-
-        for comp_idx in range(weights.shape[1]):
-            # Calculate z-scores for all electrodes
-            z_scores = (weights[:, comp_idx] - w_mean[comp_idx]) / w_std[comp_idx]
-            max_abs_z = np.max(np.abs(z_scores))
-
-            scores['max_z_scores'].append(max_abs_z)
-
-            # Classify component
-            if max_abs_z > thresh:
-                noise_components.append(comp_idx)
-
-        return noise_components, scores
 
     def clean_muscle_artifacts(self,
                                muscle_window: Tuple[float, float] = (0.005, 0.05),
@@ -1780,7 +962,7 @@ class TMSEEGPreprocessor:
 
     ######################## FILTERS ############################
 
-    def filter_raw(self, l_freq=0.1, h_freq=250, notch_freq=50, notch_width=2):
+    def filter_raw(self, l_freq=0.1, h_freq=250):
         """
         Filter raw data using a zero-phase Butterworth filter with improved stability.
 
@@ -1790,64 +972,23 @@ class TMSEEGPreprocessor:
             Lower frequency cutoff for bandpass filter (default: 0.1 Hz)
         h_freq : float
             Upper frequency cutoff for bandpass filter (default: 45 Hz)
-        notch_freq : float or None
-            Frequency for notch filter (default: 50 Hz)
-        notch_width : float
-            Width of notch filter (default: 2 Hz)
         """
-        from scipy.signal import butter, sosfiltfilt, filtfilt, iirnotch
-        import numpy as np
-
-        print(f"Applying SciPy filters to raw data with frequency {l_freq}Hz and frequency {h_freq}Hz")
-
-        # Create a copy of the raw data
-        filtered_raw = self.raw.copy()
-
-        # Get data and scale it up for better numerical precision
-        data = filtered_raw.get_data()
-        print(f"Data range before scaling: [{np.min(data)}, {np.max(data)}]")
-        #scale_factor = 1e6  # Convert to microvolts
-        #data = data * scale_factor
-
-        print(f"Data shape: {data.shape}")
-        print(f"Scaled data range: [{np.min(data)}, {np.max(data)}] µV")
-
-        # Ensure data is float64
-        data = data.astype(np.float64)
-
-        sfreq = filtered_raw.info['sfreq']
-        nyquist = sfreq / 2
-
+        print("\nFiltering raw data using a zero-phase Butterworth filter")
         try:
-            if l_freq is not None:
-                # High-pass filter
-                sos_high = butter(3, l_freq / nyquist, btype='high', output='sos')
-                data = sosfiltfilt(sos_high, data, axis=-1)
-                print(f"After high-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Low-pass filter
-            sos_low = butter(5, h_freq / nyquist, btype='low', output='sos')
-            data = sosfiltfilt(sos_low, data, axis=-1)
-            print(f"After low-pass - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            if notch_freq is not None:
-                # Multiple notch filters for harmonics
-                for freq in [notch_freq, notch_freq * 2]:  # 50 Hz and 100 Hz
-                    # Using iirnotch for sharper notch characteristics
-                    b, a = iirnotch(freq / nyquist, 35)  # Q=35 for very narrow notch
-                    data = filtfilt(b, a, data, axis=-1)
-                print(f"After notch - Data range: [{np.min(data)}, {np.max(data)}] µV")
-
-            # Scale back
-            #data = data / scale_factor
-            filtered_raw._data = data
+            self.raw.filter(l_freq=l_freq,
+                  h_freq=h_freq,
+                  method = 'iir',
+                  iir_params = dict(order=3,
+                                    ftype='butter',
+                                    phase='zero-double',
+                                    btype='bandpass'),
+                  verbose=True)
 
         except Exception as e:
             print(f"Error during filtering: {str(e)}")
             raise
 
         print("Filtering complete")
-        self.raw = filtered_raw
 
 
     def mne_filter_epochs(self, l_freq=0.1, h_freq=45, notch_freq=50, notch_width=2):

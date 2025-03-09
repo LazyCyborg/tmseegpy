@@ -5,17 +5,10 @@ import threading
 from tmseegpy.run import process_subjects, setup_qt_plugin_path
 import argparse
 from pathlib import Path
-from PyQt6.QtWidgets import QApplication
-
 
 def main():
     """Main entry point for tmseegpy"""
     # Setup Qt plugin path first
-    setup_qt_plugin_path()
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='TMSeegpy: TMS-EEG Processing Pipeline')
@@ -38,6 +31,9 @@ def main():
 
     process_parser.add_argument('--no_preproc_output', action='store_true', default=False,
                         help='Skip saving preprocessed epochs (default: False)')
+
+    process_parser.add_argument('--montage_name', type=str, default='easycap-M1',
+                    help='Name of the montage from MNE Pythons builtin montages. Use mne.channels.get_builtin_montages() to display all (default: easycap-M1)')
 
     process_parser.add_argument('--no_pcist', action='store_true', default=False,
                         help='Skip PCIst calculation and only preprocess (default: False)')
@@ -70,33 +66,6 @@ def main():
     process_parser.add_argument('--final_sfreq', type=float, default=725,
                         help='Final downsampling frequency (default: 725)')
 
-    # Trying to match TESA
-    process_parser.add_argument('--initial_window_start', type=float, default=-2,
-
-                        help='Initial TMS artifact window start (TESA default: -2)')
-
-    process_parser.add_argument('--initial_window_end', type=float, default=10,
-                        help='Initial TMS artifact window end (TESA default: 10)')
-
-    process_parser.add_argument('--extended_window_start', type=float, default=-2,
-                        help='Extended TMS artifact window start (TESA default: -2)')
-
-    process_parser.add_argument('--extended_window_end', type=float, default=15,
-                        help='Extended TMS artifact window end (TESA default: 15)')
-
-    process_parser.add_argument('--initial_interp_window', type=float, default=1.0,
-                        help='Initial interpolation window (TESA default: 1.0)')
-
-    process_parser.add_argument('--extended_interp_window', type=float, default=5.0,
-                        help='Extended interpolation window (TESA default: 5.0)')
-
-    process_parser.add_argument('--interpolation_method', type=str, default='cubic',
-                        choices=['cubic'],
-                        help='Interpolation method (TESA requires cubic)')
-
-    process_parser.add_argument('--second_artifact_removal', action='store_true', default=False,
-                    help='Skip the second stage of TMS artifact removal (default: False)')
-
     process_parser.add_argument('--mne_filter_epochs', action='store_true', default=False,
                         help='Use built in filter in mne (default: False)')
 
@@ -106,8 +75,8 @@ def main():
     process_parser.add_argument('--plot_raw', action='store_true',
                         help='Plot raw data (takes time) (default: False)')
 
-    process_parser.add_argument('--filter_raw', action='store_true', default=False,
-                        help='Whether to filter raw data instead of epoched (default: False)')
+    process_parser.add_argument('--filter_raw', action='store_true', default=True,
+                        help='Whether to filter raw data instead of epoched (default: True)')
 
     process_parser.add_argument('--l_freq', type=float, default=1,
                         help='Lower frequency for filtering (default: 1)')
@@ -127,12 +96,6 @@ def main():
     process_parser.add_argument('--notch_width', type=float, default=None,
                         help='Notch filter width (default: None)')
 
-    process_parser.add_argument('--raw_notch_freq', type=float, default=50,
-                        help='Notch filter frequency (default: 50)')
-
-    process_parser.add_argument('--raw_notch_width', type=float, default=2,
-                        help='Notch filter width (default: 2)')
-
     process_parser.add_argument('--epochs_tmin', type=float, default=-0.9,
                         help='Start time for epochs (default: -0.8)')
 
@@ -148,20 +111,13 @@ def main():
     process_parser.add_argument('--ica_method', type=str, default='fastica',
                         help='ICA method (default: fastica)')
 
-    process_parser.add_argument('--blink_thresh', type=float, default=2.5,
-                        help='Threshold for blink detection (default: 2.5)')
+    process_parser.add_argument('--use_icalabel', action='store_true', default=False,
+                        help='Use ICA label for second ICA component classification (default: False)')
 
-    process_parser.add_argument('--lat_eye_thresh', type=float, default=2.0,
-                        help='Threshold for lateral eye movement detection (default: 2.0)')
+    process_parser.add_argument('--icalabel_exclude_labels', type=str, nargs='+',
+                        default=["eye", "heart", "muscle", "line_noise", "channel_noise", "unknown"],
+                        help='Labels to exclude in ICA label classification (default: all except brain and other)')
 
-    process_parser.add_argument('--noise_thresh', type=float, default=6.0,
-                        help='Threshold for noise detection (default: 4.0)')
-
-    process_parser.add_argument('--tms_muscle_thresh', type=float, default=2.0,
-                        help='Threshold for TMS muscle artifact (default: 2.0)')
-
-    process_parser.add_argument('--muscle_thresh', type=float, default=1.0,
-                        help='Threshold for ongoing muscle contamination (default: 0.6)')
 
     process_parser.add_argument('--parafac_muscle_artifacts', action='store_true', default=False,
                         help='Enable muscle artifact cleaning (default: False)')
@@ -193,9 +149,6 @@ def main():
     process_parser.add_argument('--second_ica_method', type=str, default='infomax',
                         help='Second ICA method that can be infomax or fastica (default: infomax)')
 
-    process_parser.add_argument('--ica_topo', action='store_true', default=False,
-                        help='Use topography-based automatic ICA component classification (default: False)')
-
     process_parser.add_argument('--topo_edge_threshold', type=float, default=0.15,
                                 help='Distance threshold for edge detection in topography classifier (default: 0.15)')
 
@@ -207,6 +160,21 @@ def main():
 
     process_parser.add_argument('--topo_focal_threshold', type=float, default=0.2,
                                 help='Threshold for focal area detection (default: 0.2)')
+
+    process_parser.add_argument('--no_select_with_nn', action='store_true', default=False,
+                                help='Disable automatic neural network component selection (enabled by default)')
+
+    process_parser.add_argument('--select_with_topo', action='store_true', default=False,
+                        help='Automatically select components using topography-based classification (default: False)')
+
+    process_parser.add_argument('--nn_model_path', type=str, default=None,
+                        help='Path to neural network model file (default: use built-in)')
+
+    process_parser.add_argument('--nn_encoder_path', type=str, default=None,
+                        help='Path to label encoder file (default: use built-in)')
+
+    process_parser.add_argument('--nn_probability_threshold', type=float, default=0.05,
+                        help='Probability threshold for component exclusion (default: 0.05)')
 
     process_parser.add_argument('--apply_ssp', action='store_true',
                         help='Apply SSP (default: False)')

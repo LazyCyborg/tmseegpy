@@ -26,10 +26,7 @@ else:
     plt.rcParams['figure.figsize'] = [8, 6]
 
 # Now import all components
-from .ica_selector_gui.ica_selector import (
-    ICAComponentSelector,
-    ICAComponentSelectorContinuous
-)
+
 from .clean import *
 from .pcist import *
 from .preproc import *
@@ -37,18 +34,14 @@ from .preproc_vis import *
 from .run import *
 from .validate_tep import *
 from .dataloader import *
-from .cli_ica_selector import CLIICASelector, get_cli_ica_callback
 from .cli import main as cli_main
 from .ica_topo_classifier import ICATopographyClassifier
+from .ica_nn_classifier import *
 
-__version__ = "0.1.8"
+__version__ = "0.2.1"
 
 __all__ = [
     'cli_main',
-    'ICAComponentSelector',
-    'ICAComponentSelectorContinuous',
-    'CLIICASelector',
-    'get_cli_ica_callback',
     'ICATopographyClassifier'
 ]
 

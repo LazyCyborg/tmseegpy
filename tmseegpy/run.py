@@ -269,7 +269,7 @@ def process_subjects(args, status_callback=None):
     raw_list = loader.load_data()
     session_info = loader.get_session_info()
 
-    np.random.seed(args.random_seed)
+    np.random.seed(42)
 
     # Loop through the loaded raw data
     for n, raw in enumerate(raw_list):
@@ -358,6 +358,10 @@ def process_subjects(args, status_callback=None):
         print(f"Initial raw data range: [{np.min(raw_data)}, {np.max(raw_data)}]")
 
             # Initialize processor here since we need it for artifact detection
+        montage = mne.channels.make_standard_montage(args.montage_name)
+        raw.set_montage(montage)
+
+        print(f"Set montage: {args.montage_name}")
 
         from .preproc import detect_tms_artifacts
 
@@ -408,11 +412,10 @@ def process_subjects(args, status_callback=None):
         if args.save_preproc:
             save_raw_data(raw, args.output_dir, step_name='raw_2', session_name=session_name)
 
-        filtering_done = False
         if args.filter_raw:
-            print(f"\nFiltering raw eeg data with lowpass {args.raw_h_freq} Hz...")
+            print(f"\nFiltering raw eeg data with lowpass {args.raw_h_freq} Hz... and highpass {args.raw_l_freq}")
             if check_stop(): return []
-            processor.filter_raw(l_freq=args.raw_l_freq, h_freq=args.raw_h_freq, notch_freq=args.raw_notch_freq, notch_width=args.raw_notch_width)
+            processor.filter_raw(l_freq=args.raw_l_freq, h_freq=args.raw_h_freq)
 
 
         #if args.save_preproc:
@@ -451,52 +454,28 @@ def process_subjects(args, status_callback=None):
             print("\nRunning first ICA...")
             if check_stop(): return []
 
-        #plot_components = False
-
-
-        # Modified first ICA call
-        if not args.no_first_ica:
-            if args.ica_topo:
-                # Use topography-based classification
-                processor.run_ica(
-                    output_dir=args.output_dir,
-                    session_name=session_name,
-                    method=args.ica_method,
-                    tms_muscle_thresh=args.tms_muscle_thresh,
-                    blink_thresh=args.blink_thresh,
-                    lat_eye_thresh=args.lat_eye_thresh,
-                    muscle_thresh=args.muscle_thresh,
-                    noise_thresh=args.noise_thresh,
-                    use_topo=True,
-                    topo_edge_threshold=args.topo_edge_threshold,
-                    topo_zscore_threshold=args.topo_zscore_threshold,
-                    topo_peak_threshold=args.topo_peak_threshold,
-                    topo_focal_threshold=args.topo_focal_threshold
-                )
-            elif args.first_ica_manual:
-                processor.run_ica(
-                    output_dir=args.output_dir,
-                    session_name=session_name,
-                    method=args.ica_method,
-                    tms_muscle_thresh=args.tms_muscle_thresh,
-                    blink_thresh=args.blink_thresh,
-                    lat_eye_thresh=args.lat_eye_thresh,
-                    muscle_thresh=args.muscle_thresh,
-                    noise_thresh=args.noise_thresh,
-                    manual_mode=True,
-                    ica_callback=None
-                )
+            if not args.no_select_with_nn:
+                select_with_nn = True
             else:
-                processor.run_ica(
-                    output_dir=args.output_dir,
-                    session_name=session_name,
-                    method=args.ica_method,
-                    tms_muscle_thresh=args.tms_muscle_thresh,
-                    manual_mode=False
-                )
+                select_with_nn = False
 
-        if args.save_preproc:
-            save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='2a_ica1')
+            # Run ICA with automatic classifications only
+            processor.run_ica(
+                output_dir=args.output_dir,
+                session_name=session_name,
+                method=args.ica_method,
+                select_with_nn=select_with_nn,
+                select_with_topo=args.select_with_topo,
+                use_nn=True,  # Always run neural network classification
+                use_topo=True,  # Always run topography classification
+                topo_edge_threshold=args.topo_edge_threshold,
+                topo_zscore_threshold=args.topo_zscore_threshold,
+                topo_peak_threshold=args.topo_peak_threshold,
+                topo_focal_threshold=args.topo_focal_threshold
+            )
+
+            if args.save_preproc:
+                save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='2a_ica1')
 
         if args.parafac_muscle_artifacts:
             print("\nCleaning muscle artifacts with PARAFAC decomposition...")
@@ -507,19 +486,6 @@ def process_subjects(args, status_callback=None):
                 n_components=args.n_components,
                 verbose=True
             )
-
-        if args.second_artifact_removal:
-            print("\nExtending TMS artifact removal window...")
-            if check_stop(): return []
-            processor.remove_tms_artifact(cut_times_tms=(args.extended_window_start, args.extended_window_end))
-
-            print("\nInterpolating extended TMS artifact...")
-            processor.interpolate_tms_artifact(method='cubic',
-                                               interp_window=args.extended_interp_window,
-                                               cut_times_tms=(args.extended_window_start, args.extended_window_end))
-
-            if args.save_preproc:
-                save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='3_second_artifact_removal')
 
 
 
@@ -556,36 +522,15 @@ def process_subjects(args, status_callback=None):
             print("\nRunning second ICA...")
             if check_stop(): return []
 
-            if args.ica_topo:
-                processor.run_second_ica(
-                    method=args.second_ica_method,
-                    blink_thresh=args.blink_thresh,
-                    lat_eye_thresh=args.lat_eye_thresh,
-                    muscle_thresh=args.muscle_thresh,
-                    noise_thresh=args.noise_thresh,
-                    use_topo=True,
-                    topo_edge_threshold=args.topo_edge_threshold,
-                    topo_zscore_threshold=args.topo_zscore_threshold,
-                    topo_peak_threshold=args.topo_peak_threshold,
-                    topo_focal_threshold=args.topo_focal_threshold
+            processor.run_second_ica(
+                method=args.second_ica_method,
+                select_with_iclabel=True,
+                use_icalabel=True,  # Always run ICA label classification
+                icalabel_exclude_labels=args.icalabel_exclude_labels
+            )
 
-                )
-            elif args.second_ica_manual:
-                # Check if we're running in GUI mode
-                processor.run_second_ica(
-                    method=args.second_ica_method,
-                    blink_thresh=args.blink_thresh,
-                    lat_eye_thresh=args.lat_eye_thresh,
-                    muscle_thresh=args.muscle_thresh,
-                    noise_thresh=args.noise_thresh,
-                    manual_mode=True,
-                    ica_callback=None
-                )
-            else:
-                processor.run_second_ica(
-                    method=args.second_ica_method,
-                    manual_mode=False
-                )
+            if args.save_preproc:
+                save_epochs_data(processor.epochs, args.output_dir, session_name=session_name, step_name='4b_ica2')
 
         if args.apply_ssp:    
             print("\nApplying SSP...")
@@ -857,6 +802,8 @@ if __name__ == "__main__":
     parser.add_argument('--no_preproc_output', action='store_true', default=False,
                     help='Skip saving preprocessed epochs (default: False)')
 
+    parser.add_argument('--montage_name', type=str, default='easycap-M1',
+                    help='Name of the montage from MNE Pythons builtin montages. Use mne.channels.get_builtin_montages() to display all (default: easycap-M1)')
 
     parser.add_argument('--no_pcist', action='store_true', default=False,
                     help='Skip PCIst calculation and only preprocess (default: False)')
@@ -869,9 +816,6 @@ if __name__ == "__main__":
 
     parser.add_argument('--save_preproc', action='store_true', default=False,
                     help='Save plots between preprocessing steps (default: False)')
-
-    parser.add_argument('--random_seed', type=int, default=42,
-                        help='Random seed for reproducibility (default: 42)')
 
     parser.add_argument('--substitute_zero_events_with', type=int, default=10,
                         help='Value to substitute zero events with (default: 10)')
@@ -891,25 +835,6 @@ if __name__ == "__main__":
     parser.add_argument('--initial_window_start', type=float, default=-2,
 
                     help='Initial TMS artifact window start (TESA default: -2)')
-
-    parser.add_argument('--initial_window_end', type=float, default=10,
-                        help='Initial TMS artifact window end (TESA default: 10)')
-
-    parser.add_argument('--extended_window_start', type=float, default=-2,
-                        help='Extended TMS artifact window start (TESA default: -2)')
-
-    parser.add_argument('--extended_window_end', type=float, default=15,
-                        help='Extended TMS artifact window end (TESA default: 15)')
-
-    parser.add_argument('--initial_interp_window', type=float, default=1.0,
-                        help='Initial interpolation window (TESA default: 1.0)')
-
-    parser.add_argument('--extended_interp_window', type=float, default=5.0,
-                        help='Extended interpolation window (TESA default: 5.0)')
-
-    parser.add_argument('--interpolation_method', type=str, default='cubic',
-                        choices=['cubic'],
-                        help='Interpolation method (TESA requires cubic)')
 
     parser.add_argument('--second_artifact_removal', action='store_true', default=False,
                     help='Skip the second stage of TMS artifact removal (default: False)')
@@ -944,12 +869,6 @@ if __name__ == "__main__":
     parser.add_argument('--notch_width', type=float, default=None,
                         help='Notch filter width (default: None)')
 
-    parser.add_argument('--raw_notch_freq', type=float, default=50,
-                        help='Notch filter frequency (default: 50)')
-
-    parser.add_argument('--raw_notch_width', type=float, default=2,
-                        help='Notch filter width (default: 2)')
-
     parser.add_argument('--epochs_tmin', type=float, default=-0.8,
                         help='Start time for epochs (default: -0.8)')
 
@@ -965,21 +884,6 @@ if __name__ == "__main__":
     parser.add_argument('--ica_method', type=str, default='fastica',
                         help='ICA method (default: fastica)')
 
-    parser.add_argument('--blink_thresh', type=float, default=2.5,
-                        help='Threshold for blink detection (default: 2.5)')
-
-    parser.add_argument('--lat_eye_thresh', type=float, default=2.0,
-                        help='Threshold for lateral eye movement detection (default: 2.0)')
-
-    parser.add_argument('--noise_thresh', type=float, default=4.0,
-                        help='Threshold for noise detection (default: 4.0)')
-
-    parser.add_argument('--tms_muscle_thresh', type=float, default=2.0,
-                        help='Threshold for TMS muscle artifact (default: 2.0)')
-
-    parser.add_argument('--muscle_thresh', type=float, default=1.0,
-                        help='Threshold for ongoing muscle contamination (default: 0.6)')
-
     parser.add_argument('--parafac_muscle_artifacts', action='store_true', default=False,
                     help='Enable muscle artifact cleaning (default: False)')
 
@@ -992,11 +896,12 @@ if __name__ == "__main__":
     parser.add_argument('--threshold_factor', type=float, default=1.0,
                     help='Threshold factor for muscle artifact cleaning (default: 1.0)')
 
-    parser.add_argument('--first_ica_manual', action='store_true', default=True,
-                        help='Enable manual component selection for first ICA (default: True)')
+    parser.add_argument('--use_icalabel', action='store_true', default=False,
+                        help='Use ICA label for second ICA component classification (default: False)')
 
-    parser.add_argument('--second_ica_manual', action='store_true', default=True,
-                        help='Enable manual component selection for second ICA (default: True)')
+    parser.add_argument('--icalabel_exclude_labels', type=str, nargs='+',
+                        default=["eye", "heart", "muscle", "line_noise", "channel_noise", "unknown"],
+                        help='Labels to exclude in ICA label classification (default: all except brain and other)')
 
     parser.add_argument('--n_components', type=int, default=5,
                     help='Number of components for PARAFAC muscle artifact cleaning (default: 5)')
@@ -1024,6 +929,21 @@ if __name__ == "__main__":
 
     parser.add_argument('--topo_focal_threshold', type=float, default=0.2,
                                 help='Threshold for focal area detection (default: 0.2)')
+
+    parser.add_argument('--no_select_with_nn', action='store_true', default=False,
+                                help='Disable automatic neural network component selection (enabled by default)')
+
+    parser.add_argument('--select_with_topo', action='store_true', default=False,
+                        help='Automatically select components using topography-based classification (default: False)')
+
+    parser.add_argument('--nn_model_path', type=str, default=None,
+                        help='Path to neural network model file (default: use built-in)')
+
+    parser.add_argument('--nn_encoder_path', type=str, default=None,
+                        help='Path to label encoder file (default: use built-in)')
+
+    parser.add_argument('--nn_probability_threshold', type=float, default=0.05,
+                        help='Probability threshold for component exclusion (default: 0.05)')
 
     parser.add_argument('--apply_ssp', action='store_true',
                     help='Apply SSP (default: False)')

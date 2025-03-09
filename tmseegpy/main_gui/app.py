@@ -179,6 +179,12 @@ class TMSEEGApp:
                 'description': 'Analyze TMS-Evoked Potentials',
                 'method': self.render_tep_analysis,
                 'status_key': 'tep_analyzed'
+            },
+            'save_data': {
+                'name': 'Save data',
+                'description': 'Save',
+                'method': self.render_save_data,
+                'status_key': 'data_saved'
             }
         }
 
@@ -342,37 +348,7 @@ class TMSEEGApp:
 
         # Add run button at the bottom
         st.markdown("---")
-        '''
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Run Selected Steps", key="run_pipeline"):
-                # Run only the selected steps
-                if st.session_state.get("run_filter"):
-                    self.render_filtering()
-                if st.session_state.get("run_events"):
-                    self.render_create_events()
-                if st.session_state.get("remove_tms"):
-                    self.render_tms_removal()
-                if st.session_state.get("run_epochs"):
-                    self.render_epoch_creation()
-                if st.session_state.get("run_bad_channels"):
-                    self.render_bad_channel_rejection()
-                if st.session_state.get("run_bad_epochs"):
-                    self.render_bad_epoch_rejection()
-                if st.session_state.get("run_first_ica"):
-                    self.render_first_ica()
-                if st.session_state.get("run_clean_muscle"):
-                    self.render_clean_muscle()
-                if st.session_state.get("run_filter_epochs"):
-                    self.render_filter_epochs()
-                if st.session_state.get("run_second_ica"):
-                    self.render_second_ica()
-                if st.session_state.get("run_ssp"):
-                    self.render_ssp()
-                if st.session_state.get("run_downsample"):
-                    self.render_downsample()
-                if st.session_state.get("run_tep_analysis"):
-                    self.render_tep_analysis()'''
+
         col1, col2 = st.columns(2)
         with col2:
             if st.button("Reset Pipeline", key="reset_pipeline"):
@@ -390,7 +366,6 @@ class TMSEEGApp:
             ("Events Created", state.events_created),
             ("TMS Removal", state.tms_removed),
             ("Epochs Created", state.epochs_created),
-            #("Channels Dropped", state.channels_dropped),
             ("Bad Channels Removed", state.bad_channels_removed),
             ("Bad Epochs Removed", state.bad_epochs_removed),
             ("First ICA", state.first_ica_done),
@@ -414,7 +389,6 @@ class TMSEEGApp:
         💡 **Data Visualization Available Throughout Processing**
         You can view your data at any time during the pipeline by expanding the "Data Visualization Options" section:
         - View Raw Data: Examine the raw EEG signals
-        - View PSD: Check the Power Spectral Density
         - View Epochs: Inspect individual epochs (available after epoch creation)
         """)
 
@@ -434,13 +408,14 @@ class TMSEEGApp:
             - **Dr. Nigel Rogasch** for sanctioning the adaptation of TESA in Python
             - **Dr. Mats Svantesson** (Linköping University Hospital) for many hours of assistance with code, signal processing, and EEG data verification
             - **Dr. Magnus Thordstein** (Linköping University Hospital) for providing access to TMS and TMS-EEG equipment for sample data collection
-            - **Dr. Andrew Wold, PhD** for teaching me how to use the TMS equipment
+            - **Dr. Andrew Wold** for teaching me how to use the TMS equipment
+            - **Dr. Johan Willander** for general support and teaching me about experimental design
             - **Gramfort et al.** for creating MNE-Python, which this program is built upon
 
             This project would not have been possible to complete without the support and contributions of these individuals.
             
-            Author:
-            Alexander Engelmark
+            Author:\n
+            Alexander Engelmark\n
             Medical student and TMS-EEG enthusiast
             """)
         try:
@@ -465,17 +440,14 @@ class TMSEEGApp:
                 self.data_viewer.display_data_info(st.session_state.processing_state.raw)
 
                 with st.expander("Data Visualization Options", expanded=False):
-                    col1, col2, col3, col4, col5 = st.columns(5)
+                    col1, col2, col3, col4, col5 = st.columns(4)
                     with col1:
                         if st.button("View Raw Data"):
                             self.data_viewer.view_raw(st.session_state.processing_state.raw)
                     with col2:
-                        if st.button("View PSD"):
-                            self.data_viewer.plot_psd(st.session_state.processing_state.raw)
-                    with col3:
                         if st.button("View Epochs"):
                             self.data_viewer.view_epochs(st.session_state.processing_state.epochs)
-                    with col4:
+                    with col3:
                         if st.button("View First ICA"):
                             if st.session_state.processing_state.first_ica_done:
                                 self.data_viewer.view_ica_components(
@@ -484,7 +456,7 @@ class TMSEEGApp:
                                 )
                             else:
                                 st.warning("First ICA hasn't been run yet")
-                    with col5:
+                    with col4:
                         if st.button("View Second ICA"):
                             if st.session_state.processing_state.second_ica_done:
                                 self.data_viewer.view_ica_components(
@@ -592,7 +564,7 @@ class TMSEEGApp:
         auto_rename_channels = st.checkbox(
             "Auto-rename channels to match standard nomenclature",
             value=True,
-            help="Automatically rename channel names to match standard naming conventions"
+            help="Some systems name for example zenith channels 'IZ' or 'OZ' instead of 'Iz' and 'Oz' and the renaming makes it compatible with MNE"
         )
 
         # Warning about channel numbers
@@ -608,7 +580,7 @@ class TMSEEGApp:
             "Handling of missing channels",
             options=["Error", "Warn", "Ignore"],
             index=1,
-            help="How to handle channels in your data that aren't in the selected montage",
+            help="How to handle channels in your data that aren't in the selected montage (maybe try to load in MNE first and inspect the raw.info.ch_names if this does not work)",
             horizontal=True
         )
         missing_channel_handling = missing_channel_option.lower()
@@ -659,13 +631,10 @@ class TMSEEGApp:
                         self.data_viewer.display_data_info(raw)
 
                         # Add visualization options
-                        col1, col2 = st.columns(2)
+                        col1, col2 = st.columns(1)
                         with col1:
                             if st.button("View Raw Data"):
                                 self.data_viewer.view_raw(raw)
-                        with col2:
-                            if st.button("View PSD"):
-                                self.data_viewer.plot_psd(raw)
 
                 except Exception as e:
                     st.error(f"Error loading NeurOne data: {str(e)}")
@@ -1236,9 +1205,9 @@ class TMSEEGApp:
                 # Add reference settings
                 ref_method = st.radio(
                     "Reference method",
-                    options=['None', 'Average'],
+                    options=['Average', 'None'],
                     horizontal=True,
-                    help="Choose reference method for the epochs"
+                    help="Choose reference method for the epochs (this is mostly for plotting since the epochs are re-referenced to 'average' before ICA automatically)"
                 )
 
                 # Add option for automatic channel type detection and removal
@@ -1341,7 +1310,7 @@ class TMSEEGApp:
         """Render filtering interface"""
         st.write("Filter Settings")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             l_freq = st.number_input("Low cutoff (Hz)", value=1.0, step=0.1)
         with col2:
@@ -1349,31 +1318,48 @@ class TMSEEGApp:
         with col3:
             notch_freqs_input = st.text_input(
                 "Notch frequencies",
-                value="50",
+                value="50 251 50",
                 help="For IIR: Enter single frequency (e.g., '50')\nFor FIR/spectrum_fit: Enter start stop step (e.g., '50 251 50')"
             )
         with col4:
             filter_design = st.text_input(
-                "Design of the filter (fir, iir or spectrum_fit)",
+                "Design of the bandpass filter (fir, iir or spectrum_fit)",
                 value="iir",
+                help="The ICA classification algorithm from this toolbox is only tested on 1-250 Hz bandpass"
+            )
+
+        with col4:
+            notch_filter_design = st.text_input(
+                "Design of the notch filter (fir, iir or spectrum_fit)",
+                value="fir",
                 help="Note: IIR only accepts single frequency"
             )
 
-        # Convert string input based on filter design
+        # Initialize notch_freqs as None
+        notch_freqs = None
+
+        # Parse and handle notch frequencies based on the filter design
         try:
-            if filter_design.lower() == 'iir':
+            if notch_filter_design.lower() == 'iir':
+                # For IIR, we need a single frequency
                 notch_freqs = float(notch_freqs_input)
-                st.info(f"Will apply highpass filter at {l_freq}, lowpass filter at {h_freq} and notch filter at: {notch_freqs} Hz")
+                st.info(
+                    f"Will apply highpass filter at {l_freq} Hz, lowpass filter at {h_freq} Hz, and notch filter at {notch_freqs} Hz")
             else:
-                start, stop, step = map(float, notch_freqs_input.split())
-                notch_freqs = np.arange(start, stop, step)
-                st.info(f"Will apply highpass filter at {l_freq}, lowpass filter at {h_freq} and notch filters at: {notch_freqs} Hz")
+                # For FIR or spectrum_fit, we can handle a range
+                if ' ' in notch_freqs_input:
+                    # Assume format is "start stop step"
+                    start, stop, step = map(float, notch_freqs_input.split())
+                    notch_freqs = list(np.arange(start, stop, step))
+                else:
+                    # Single frequency
+                    notch_freqs = float(notch_freqs_input)
+                st.info(
+                    f"Will apply highpass filter at {l_freq} Hz, lowpass filter at {h_freq} Hz, and notch filter at {notch_freqs} Hz")
         except ValueError:
-            if filter_design.lower() == 'iir':
-                st.error("Please enter a single frequency for IIR filter")
-            else:
-                st.error("Please enter three numbers: start stop step")
-            notch_freqs = []
+            st.warning("Invalid notch frequency format. Notch filter will not be applied.")
+            # Set notch_freqs to None to skip notch filtering
+            notch_freqs = None
 
         if st.button("Apply Filter", key="apply_filter_button"):
             try:
@@ -1381,7 +1367,7 @@ class TMSEEGApp:
                     self.processor = TMSEEGPreprocessor(st.session_state.processing_state.raw)
 
                 with st.spinner("Applying filters..."):
-                    # First apply bandpass filter
+                    # Apply bandpass filter
                     self.processor.raw.filter(
                         l_freq=l_freq,
                         h_freq=h_freq,
@@ -1395,16 +1381,15 @@ class TMSEEGApp:
                         verbose=True
                     )
 
-                    # Then apply notch filters if frequencies are specified
-                    if notch_freqs is not None and (
-                            isinstance(notch_freqs, (list, np.ndarray)) or isinstance(notch_freqs, (int, float))):
+
+                    # Apply notch filter if frequencies are specified
+                    if notch_freqs is not None:
                         self.processor.raw.notch_filter(
                             freqs=notch_freqs,
                             picks='eeg',
-                            method=filter_design,
+                            method=notch_filter_design,
                             verbose=True
                         )
-
 
                     # Update the raw data in session state
                     st.session_state.processing_state.raw = self.processor.raw
@@ -1521,12 +1506,6 @@ class TMSEEGApp:
                 help="Number of adjacent points to use for smoothing"
             )
 
-            verbose = st.checkbox(
-                "Verbose Output",
-                value=True,
-                help="Show detailed processing information"
-            )
-
         # Add detection settings
         with st.expander("TMS Pulse Detection Settings", expanded=False):
             col1, col2 = st.columns(2)
@@ -1564,9 +1543,6 @@ class TMSEEGApp:
                             if selected_event_codes:
                                 mask = np.isin(self.processor.events[:, 2], selected_event_codes)
                                 events_to_use = self.processor.events[mask]
-                                if verbose:
-                                    st.write(
-                                        f"Using {len(events_to_use)} events out of {len(self.processor.events)} total events")
                             else:
                                 events_to_use = self.processor.events
 
@@ -1574,8 +1550,7 @@ class TMSEEGApp:
                             window=window,
                             smooth_window=smooth_window,
                             span=span,
-                            events=events_to_use,
-                            verbose=verbose
+                            events=events_to_use
                         )
 
                         st.session_state.processing_state.raw = self.processor.raw
@@ -1629,7 +1604,8 @@ class TMSEEGApp:
         st.write("Bad Channel Rejection")
 
         if not st.session_state.processing_state.epochs_created:
-            st.warning("Please create epochs first (you can still plot the raw data and remove channels manually but MNE-FASTER requires epochs for automatic bad channel rejection")
+            st.warning(
+                "Please create epochs first (you can still plot the raw data and remove channels manually but MNE-FASTER requires epochs for automatic bad channel rejection")
             return
 
         if self.processor is None:
@@ -1645,6 +1621,13 @@ class TMSEEGApp:
         if 'dropped_channels' not in st.session_state:
             st.session_state.dropped_channels = []
 
+        # Initialize tracking for previously processed channels
+        if 'previous_auto_bad' not in st.session_state:
+            st.session_state.previous_auto_bad = set()
+
+        if 'previous_manual_bad' not in st.session_state:
+            st.session_state.previous_manual_bad = set()
+
         # Create tabs for automatic and manual rejection
         auto_tab, manual_tab = st.tabs(["Automatic Rejection", "Manual Rejection"])
 
@@ -1656,7 +1639,7 @@ class TMSEEGApp:
                     value=3.0,
                     min_value=1.0,
                     max_value=10.0,
-                    help="Z-score threshold for bad channel detection",
+                    help="Z-score threshold for bad channel detection for MNE-FASTER",
                     key="bad_channels_threshold"
                 )
 
@@ -1664,7 +1647,7 @@ class TMSEEGApp:
                 interpolate = st.checkbox(
                     "Interpolate bad channels",
                     value=False,
-                    help="If checked, bad channels will be interpolated instead of dropped using spline interpolation",
+                    help="If checked, bad channels will be interpolated instead of dropped using spline interpolation (the default as in mne.raw.interpolate_bads()).",
                     key="bad_channels_interpolate"
                 )
 
@@ -1674,6 +1657,9 @@ class TMSEEGApp:
                         # Store channels before removal
                         channels_before = self.processor.epochs.ch_names.copy()
 
+                        # Store the bads before detection
+                        bads_before = set(self.processor.epochs.info.get('bads', []))
+
                         # Remove bad channels
                         self.processor.remove_bad_channels(
                             threshold=threshold, interpolate=interpolate)
@@ -1682,14 +1668,18 @@ class TMSEEGApp:
                         st.session_state.processing_state.epochs = self.processor.epochs
                         st.session_state.processing_state.bad_channels_removed = True
 
-                        # Track newly dropped channels
-                        new_dropped = set(channels_before) - set(self.processor.epochs.ch_names)
-                        st.session_state.dropped_channels.extend(list(new_dropped))
+                        # Get truly new bad channels
+                        current_bad = set(self.processor.epochs.info.get('bads', []))
+                        new_bad_channels = current_bad - bads_before
+                        st.session_state.dropped_channels.extend(list(new_bad_channels))
+
+                        # Store current bad channels for next time
+                        st.session_state.previous_auto_bad.update(new_bad_channels)
 
                         # Show results
                         st.success("Bad channel detection completed!")
-                        if new_dropped:
-                            st.write(f"Dropped channels: {list(new_dropped)}")
+                        if new_bad_channels:
+                            st.write(f"Dropped/interpolated channels: {list(new_bad_channels)}")
 
                         # Display channel statistics
                         st.subheader("Channel Statistics")
@@ -1701,8 +1691,8 @@ class TMSEEGApp:
                             )
                         with col3:
                             st.metric(
-                                "Remaining Channels",
-                                len(self.processor.epochs.ch_names)
+                                "Remaining Good Channels",
+                                len(self.processor.epochs.ch_names) - len(self.processor.epochs.info.get('bads', []))
                             )
 
                         # Store the step completion
@@ -1746,7 +1736,7 @@ class TMSEEGApp:
             interpolate_channels = st.checkbox(
                 "Interpolate channels instead of dropping them",
                 value=True,
-                help="If checked, bad channels will be interpolated using data from neighboring channels"
+                help="If checked, bad channels will be interpolated instead of dropped using spline interpolation (the default as in mne.raw.interpolate_bads())."
             )
 
             # Display previously dropped channels
@@ -1762,6 +1752,10 @@ class TMSEEGApp:
                     try:
                         with st.spinner(
                                 f"{'Interpolating' if interpolate_channels else 'Dropping'} selected channels..."):
+                            # Store selected channels that haven't been processed before
+                            selected_set = set(selected_channels)
+                            new_channels = selected_set - st.session_state.previous_manual_bad
+
                             # Process epochs if available
                             if hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
                                 if interpolate_channels:
@@ -1781,8 +1775,11 @@ class TMSEEGApp:
                                 st.session_state.processing_state.epochs = self.processor.epochs
                                 st.session_state.processing_state.bad_channels_removed = True
 
-                                # Track affected channels
-                                st.session_state.dropped_channels.extend(selected_channels)
+                                # Only add newly processed channels to the tracking list
+                                st.session_state.dropped_channels.extend(list(new_channels))
+
+                                # Update previously processed manual channels
+                                st.session_state.previous_manual_bad.update(new_channels)
 
                                 st.success(f"Successfully {action_text} {len(selected_channels)} channels")
                                 st.write(f"Affected channels: {selected_channels}")
@@ -1806,8 +1803,11 @@ class TMSEEGApp:
                                 st.session_state.processing_state.raw = self.processor.raw
                                 st.session_state.processing_state.channels_dropped = True
 
-                                # Track affected channels
-                                st.session_state.dropped_channels.extend(selected_channels)
+                                # Only add newly processed channels to the tracking list
+                                st.session_state.dropped_channels.extend(list(new_channels))
+
+                                # Update previously processed manual channels
+                                st.session_state.previous_manual_bad.update(new_channels)
 
                                 st.success(f"Successfully {action_text} {len(selected_channels)} channels")
                                 st.write(f"Affected channels: {selected_channels}")
@@ -1859,12 +1859,6 @@ class TMSEEGApp:
                         value=3.0,
                         help="Reject epochs exceeding this threshold"
                     )
-
-                reject_by_annotation = st.checkbox(
-                    "Reject by annotation",
-                    value=False,
-                    help="Reject epochs overlapping with annotations"
-                )
 
             if st.button("Run Automatic Rejection"):
                 try:
@@ -2036,32 +2030,37 @@ class TMSEEGApp:
                     "ICA Method",
                     options=['fastica', 'picard', 'infomax'],
                     index=0,
-                    help="Algorithm used for ICA computation"
+                    help="Algorithm used for ICA computation (fastICA is usually used in the first ICA in the literature)"
                 )
-                # Note: n_components slider is removed and replaced with automatic calculation
+
             with col2:
-                random_state = st.number_input(
-                    "Random state",
-                    value=42,
-                    help="Random seed for reproducibility"
-                )
                 max_iter = st.number_input(
                     "Max iterations",
                     value=500,
                     min_value=100,
-                    help="Maximum number of iterations"
+                    help="Maximum number of iterations for the ICA (should not make to much of a difference)"
                 )
 
         # ICA mode selection with manual as default
         ica_mode = st.radio(
             "ICA Mode",
-            options=['Manual', 'Automatic (Topography)', 'Automatic (Standard)'],
+            options=['Manual', 'NN labeling', 'Automatic (Topography)'],
             index=0,
-            help="Select method for component identification"
+            help="In Manual mode I would recommend using the 'Plot first ICA' under 'Data Visualization' above. The NN labeling uses a neural network to classify components. The topography based algorithm uses the number of peaks, the location of the field as well as the size of field in the projected ICA sources in order to classify them as cortical or artefact."
         )
 
-        # Mode-specific settings
-        if ica_mode == 'Automatic (Topography)':
+        # Mode-specific settings based on selection
+        if ica_mode == 'NN labeling':
+            st.subheader("Neural Network Classification Settings")
+            prob_threshold = st.slider(
+                "Probability Threshold",
+                min_value=0.5,
+                max_value=0.95,
+                value=0.7,
+                step=0.05,
+                help="Minimum probability for component exclusion"
+            )
+        elif ica_mode == 'Automatic (Topography)':
             st.subheader("Topography Detection Settings")
             col1, col2 = st.columns(2)
             with col1:
@@ -2095,40 +2094,6 @@ class TMSEEGApp:
                     help="Threshold for focal activity detection"
                 )
 
-        elif ica_mode == 'Automatic (Standard)':
-            st.subheader("Automatic Detection Settings")
-            col1, col2 = st.columns(2)
-            with col1:
-                tms_muscle_thresh = st.slider(
-                    "TMS-Muscle Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for TMS-muscle artifact detection"
-                )
-                blink_thresh = st.slider(
-                    "Blink Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for eye blink detection"
-                )
-            with col2:
-                muscle_thresh = st.slider(
-                    "Muscle Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for muscle artifact detection"
-                )
-                noise_thresh = st.slider(
-                    "Noise Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for noise detection"
-                )
-
         if st.button("Run First ICA"):
             try:
                 if self.processor is None:
@@ -2138,84 +2103,106 @@ class TMSEEGApp:
                     # Initialize ICA with automatically calculated number of components
                     ica = mne.preprocessing.ICA(
                         method=ica_method,
-                        n_components=n_components,  # Now using the fixed value
+                        n_components=n_components,
                         random_state=random_state,
                         max_iter=max_iter
                     )
 
-                    if ica_mode == 'Manual':
-                        # Fit ICA
-                        ica.fit(self.processor.epochs)
+                    # For all modes, we first fit ICA directly using MNE-Python
+                    ica.fit(self.processor.epochs)
 
-                        # Store ICA in both places
-                        st.session_state.ica_state['current_ica'] = ica
-                        st.session_state.ica_state['ica_computed'] = True
-                        st.session_state.processing_state.first_ica = ica
-                        st.session_state.processing_state.first_ica_done = True
+                    # Store ICA in both places
+                    st.session_state.ica_state['current_ica'] = ica
+                    st.session_state.ica_state['ica_computed'] = True
+                    st.session_state.processing_state.first_ica = ica
+                    st.session_state.processing_state.first_ica_done = True
 
-                        st.success("ICA computation completed successfully!")
-                        st.write(f"Number of components: {ica.n_components_}")
+                    st.success("ICA computation completed successfully!")
+                    st.write(f"Number of components: {ica.n_components_}")
 
-                        st.session_state.ica_state['ica_results'] = {  # Store ICA results in session state
-                            'sources': ica.get_sources(self.processor.epochs),
-                            'n_components': ica.n_components_,
-                            'ica_object': ica  # Store the ICA object itself
-                        }
-                        st.rerun()  # Force rerun to display results
+                    # Handle different ICA modes
+                    if ica_mode == 'NN labeling':
+                        try:
+                            # Import classifier from your package
+                            from tmseegpy.ica_nn_classifier import ICAComponentClassifier, plot_ica_classification, plot_classification_summary
+
+                            # Initialize classifier
+                            classifier = ICAComponentClassifier()
+
+                            # Run classification
+                            results = classifier.classify_ica(ica, self.processor.epochs)
+
+                            # Store results for visualization
+                            st.session_state.ica_nn_results = results
+
+                            # Print component classifications
+                            st.subheader("Component Classifications")
+                            classifications = results['classifications']
+
+                            # Create data for display in a table
+                            classification_data = []
+                            for comp_idx, comp_class in classifications.items():
+                                prob = results['details'][comp_idx]['probability']
+                                classification_data.append({
+                                    "Component": comp_idx,
+                                    "Classification": comp_class,
+                                    "Probability": f"{prob:.2f}"
+                                })
+
+                            # Display as table
+                            st.table(classification_data)
+
+                            # Plot components with classifications
+                            st.subheader("Visualization")
+                            fig = plot_ica_classification(ica, self.processor.epochs, results)
+                            st.pyplot(fig)
+
+                            # Plot classification summary
+                            fig = plot_classification_summary(results)
+                            st.pyplot(fig)
+
+                        except Exception as e:
+                            st.error(f"Error during neural network classification: {str(e)}")
+                            st.error("Detailed error information:")
+                            st.code(traceback.format_exc())
 
                     elif ica_mode == 'Automatic (Topography)':
-                        self.processor.run_ica(
-                            output_dir=st.session_state.processing_state.output_dir,
-                            session_name=st.session_state.processing_state.session_name,
-                            method=ica_method,
-                            n_components=n_components,  # Now using the fixed value
-                            use_topo=True,
-                            topo_edge_threshold=topo_edge_threshold,
-                            topo_zscore_threshold=topo_zscore_threshold,
-                            topo_peak_threshold=topo_peak_threshold,
-                            topo_focal_threshold=topo_focal_threshold
-                        )
-                        st.success("Automatic ICA (Topography) completed!")
+                        # Run topography-based classification separately after ICA fitting
+                        from tmseegpy.ica_topo_classifier import ICATopographyClassifier
 
-                        # Store ICA references
-                        st.session_state.ica_state['current_ica'] = self.processor.ica
-                        st.session_state.ica_state['ica_computed'] = True
-                        st.session_state.processing_state.first_ica = self.processor.ica
-                        st.session_state.processing_state.first_ica_done = True
+                        classifier = ICATopographyClassifier(ica, self.processor.epochs)
+                        classifier.edge_dist_threshold = topo_edge_threshold
+                        classifier.zscore_threshold = topo_zscore_threshold
+                        classifier.peak_count_threshold = topo_peak_threshold
+                        classifier.focal_area_threshold = topo_focal_threshold
 
-                        st.session_state.ica_state['ica_results'] = {  # Store ICA results in session state
-                            'sources': self.processor.ica.get_sources(self.processor.epochs),
-                            'n_components': self.processor.ica.n_components_,
-                            'ica_object': self.processor.ica  # Store the ICA object itself
-                        }
-                        st.rerun()  # Force rerun to display results
+                        results = classifier.classify_all_components()
+                        suggested_exclude = [idx for idx, res in results.items()
+                                             if res['classification'] in ['artifact', 'noise']]
 
-                    else:  # Automatic (Standard)
-                        self.processor.run_ica(
-                            output_dir=st.session_state.processing_state.output_dir,
-                            session_name=st.session_state.processing_state.session_name,
-                            method=ica_method,
-                            n_components=n_components,  # Now using the fixed value
-                            tms_muscle_thresh=tms_muscle_thresh,
-                            blink_thresh=blink_thresh,
-                            muscle_thresh=muscle_thresh,
-                            noise_thresh=noise_thresh,
-                            manual_mode=False
-                        )
-                        st.success("Automatic ICA (Standard) completed!")
+                        if suggested_exclude:
+                            st.write(
+                                f"Topography analysis suggests excluding {len(suggested_exclude)} components: {suggested_exclude}")
 
-                        # Store ICA references
-                        st.session_state.ica_state['current_ica'] = self.processor.ica
-                        st.session_state.ica_state['ica_computed'] = True
-                        st.session_state.processing_state.first_ica = self.processor.ica
-                        st.session_state.processing_state.first_ica_done = True
+                            if st.button("Apply Suggested Components"):
+                                ica.exclude = suggested_exclude
+                                ica.apply(self.processor.epochs)
+                                st.success(f"Excluded {len(suggested_exclude)} components based on topography analysis")
 
-                        st.session_state.ica_state['ica_results'] = {  # Store ICA results in session state
-                            'sources': self.processor.ica.get_sources(self.processor.epochs),
-                            'n_components': self.processor.ica.n_components_,
-                            'ica_object': self.processor.ica  # Store the ICA object itself
-                        }
-                        st.rerun()  # Force rerun to display results
+                                # Update stored values
+                                st.session_state.processing_state.epochs = self.processor.epochs
+                                st.session_state.ica_state['selected_components'] = suggested_exclude
+
+                        else:
+                            st.info("No components were identified for exclusion by topography analysis")
+
+
+                    # Store ICA results for visualization
+                    st.session_state.ica_state['ica_results'] = {
+                        'sources': ica.get_sources(self.processor.epochs),
+                        'n_components': ica.n_components_,
+                        'ica_object': ica
+                    }
 
                     # Store the step completion
                     st.session_state.processing_state.selected_steps['first_ica'] = True
@@ -2304,88 +2291,12 @@ class TMSEEGApp:
         # ICA mode selection with manual as default
         ica_mode = st.radio(
             "ICA Mode",
-            options=['Manual', 'Automatic (Topography)', 'Automatic (Standard)'],
+            options=['Manual', 'Automatic (Topography)'],
             index=0,
             help="Select method for component identification",
             key="second_ica_mode"
         )
 
-        # Mode-specific settings
-        if ica_mode == 'Automatic (Topography)':
-            st.subheader("Topography Detection Settings")
-            col1, col2 = st.columns(2)
-            with col1:
-                topo_edge_threshold = st.slider(
-                    "Edge Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.3,
-                    help="Threshold for edge detection",
-                    key="second_topo_edge"
-                )
-                topo_zscore_threshold = st.slider(
-                    "Z-score Threshold",
-                    min_value=0.0,
-                    max_value=5.0,
-                    value=2.0,
-                    help="Z-score threshold for component detection",
-                    key="second_topo_zscore"
-                )
-            with col2:
-                topo_peak_threshold = st.slider(
-                    "Peak Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.3,
-                    help="Threshold for peak detection",
-                    key="second_topo_peak"
-                )
-                topo_focal_threshold = st.slider(
-                    "Focal Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.3,
-                    help="Threshold for focal activity detection",
-                    key="second_topo_focal"
-                )
-
-        elif ica_mode == 'Automatic (Standard)':
-            st.subheader("Automatic Detection Settings")
-            col1, col2 = st.columns(2)
-            with col1:
-                tms_muscle_thresh = st.slider(
-                    "TMS-Muscle Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for TMS-muscle artifact detection",
-                    key="second_tms_muscle"
-                )
-                blink_thresh = st.slider(
-                    "Blink Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for eye blink detection",
-                    key="second_blink"
-                )
-            with col2:
-                muscle_thresh = st.slider(
-                    "Muscle Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for muscle artifact detection",
-                    key="second_muscle"
-                )
-                noise_thresh = st.slider(
-                    "Noise Threshold",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.7,
-                    help="Threshold for noise detection",
-                    key="second_noise"
-                )
 
         if st.button("Run Second ICA", key="run_second_ica_button"):
             try:
@@ -2421,46 +2332,32 @@ class TMSEEGApp:
                         }
                         st.rerun()  # Force rerun to display results
 
-                    elif ica_mode == 'Automatic (Topography)':
-                        self.processor.run_ica(
-                            output_dir=st.session_state.processing_state.output_dir,
-                            session_name=st.session_state.processing_state.session_name,
-                            method=ica_method,
-                            n_components=n_components if n_components > 0 else None,
-                            use_topo=True,
-                            topo_edge_threshold=topo_edge_threshold,
-                            topo_zscore_threshold=topo_zscore_threshold,
-                            topo_peak_threshold=topo_peak_threshold,
-                            topo_focal_threshold=topo_focal_threshold
-                        )
-                        st.success("Automatic Second ICA (Topography) completed!")
+                    elif ica_mode == 'Automatic (ICA_Label)':
+                        from mne_icalabel import label_components
 
-                        # Store ICA references
-                        st.session_state.second_ica_state['current_ica'] = self.processor.ica
-                        st.session_state.second_ica_state['ica_computed'] = True
-                        st.session_state.processing_state.second_ica = self.processor.ica
-                        st.session_state.processing_state.second_ica_done = True
+                        print("\nUsing ICA label classification for second ICA...")
 
-                        st.session_state.second_ica_state['ica_results'] = {  # Store ICA results in session state
-                            'sources': self.processor.ica.get_sources(self.processor.epochs),
-                            'n_components': self.processor.ica.n_components_,
-                            'ica_object': self.processor.ica  # Store the ICA object itself
-                        }
-                        st.rerun()  # Force rerun to display results
+                            # Set default exclude labels if not provided
 
-                    else:  # Automatic (Standard)
-                        self.processor.run_ica(
-                            output_dir=st.session_state.processing_state.output_dir,
-                            session_name=st.session_state.processing_state.session_name,
-                            method=ica_method,
-                            n_components=n_components if n_components > 0 else None,
-                            tms_muscle_thresh=tms_muscle_thresh,
-                            blink_thresh=blink_thresh,
-                            muscle_thresh=muscle_thresh,
-                            noise_thresh=noise_thresh,
-                            manual_mode=False
-                        )
-                        st.success("Automatic Second ICA (Standard) completed!")
+                        icalabel_exclude_labels = ["eye", "heart", "muscle", "line_noise", "channel_noise",
+                                                       "unknown"]
+
+                        ic_labels = label_components(self.processor.epochs, ica, method="iclabel")
+
+                        print("\nComponent classifications:")
+                        for idx, label in enumerate(ic_labels["labels"]):
+                            print(f"  Component {idx}: {label} (prob: {ic_labels['scores'][idx]:.2f})")
+
+                        # Determine components to exclude
+                        exclude_idx = [idx for idx, label in enumerate(ic_labels["labels"])
+                                       if label in icalabel_exclude_labels]
+
+                        if exclude_idx:
+                            print(
+                                f"\nExcluding {len(exclude_idx)} components based on ICA label classification: {exclude_idx}")
+                            ica.apply(self.processor.epochs, exclude=exclude_idx)
+                            selected_second_ica_components = exclude_idx
+                        st.success("Automatic Second ICA (ICA_label) completed!")
 
                         # Store ICA references
                         st.session_state.second_ica_state['current_ica'] = self.processor.ica
@@ -2874,21 +2771,6 @@ class TMSEEGApp:
                     max_value=500.0,
                     step=0.1,
                     help="Low-pass filter cutoff frequency. Set to 0 to disable."
-                )
-
-            # Advanced settings
-            with st.expander("Advanced Settings"):
-
-                show_filter_response = st.checkbox(
-                    "Show filter response",
-                    value=True,
-                    help="Display the frequency response of the filter"
-                )
-
-                show_before_after = st.checkbox(
-                    "Show before/after comparison",
-                    value=True,
-                    help="Display comparison plots before and after filtering"
                 )
 
             if st.button("Apply Filters"):
