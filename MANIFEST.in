@@ -1,0 +1,2 @@
+include tmseegpy/models/*.keras
+include tmseegpy/models/*.pkl

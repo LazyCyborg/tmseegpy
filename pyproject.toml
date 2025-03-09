@@ -93,3 +93,6 @@ packages = [
     "tmseegpy.models"
 ]
 
+[tool.setuptools.package-data]
+"tmseegpy.models" = ["*.keras", "*.pkl"]
+
