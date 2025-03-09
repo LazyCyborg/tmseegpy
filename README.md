@@ -186,12 +186,6 @@ This step is designed to detect and remove TMS-evoked muscle artifacts in EEG da
 
 Tangwiriyasakul, C., Premoli, I., Spyrou, L., Chin, R. F., Escudero, J., & Richardson, M. P. (2019). Tensor decomposition of TMS-induced EEG oscillations reveals data-driven profiles of antiepileptic drug effects. Scientific Reports, 9(1). https://doi.org/10.1038/s41598-019-53565-9
 
-#### What it does 
-
-- Artifact Detection: Uses Non-negative PARAFAC tensor decomposition to detect muscle artifacts in EEG epochs by thresholding components based on a 15 ms time window.
-- Reconstruction: Uses Tucker decomposition to remove the detected artifacts by reconstructing the epoched data.
-- Threshold Optimization: Includes a method to find the optimal detection threshold based on a target detection rate.
-
 ### Special Thanks to:
 
 - **Dr. Silvia Casarotto** for kindly sharing code and verifying the preprocessing output
