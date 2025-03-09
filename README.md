@@ -111,13 +111,11 @@ Example:
 from tmseegpy.preproc import TMSEEGPreprocessor
 from tmseegpy.preproc import detect_tms_artifacts
 
-processor = TMSEEGPreprocessor(raw=raw)
+preproc = TMSEEGPreprocessor(raw=raw)
 
 events = detect_tms_artifacts(raw=raw)
 
-processor.fix_tms_artifact(events=events)
-
-processor.run_ica(use_topo=True, manual_mode=False) ## For using automatic topography based classification of TMS-artifacts (I would however recommend to always inspect ICA components)
+preproc.fix_tms_artifact(events=events)
 
 
 ```
