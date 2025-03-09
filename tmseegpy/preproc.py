@@ -420,54 +420,11 @@ class TMSEEGPreprocessor:
         event_id : dict, optional
             Event IDs to use
         """
-        # If no events provided, try to find them
-        if events is None:
-            print("\nNo events provided, attempting to find events...")
-            try:
-                # First try STI 014
-                if 'STI 014' in self.raw.ch_names:
-                    events = mne.find_events(self.raw, stim_channel='STI 014')
-                    if len(events) > 0:
-                        print(f"Found {len(events)} events from STI 014 channel")
-                        # Create event_id if not provided
-                        if event_id is None:
-                            unique_events = np.unique(events[:, 2])
-                            event_id = {str(code): code for code in unique_events}
-
-                # If no events found, try other common stim channels
-                if events is None or len(events) == 0:
-                    common_stim_channels = ['STIM', 'STI101', 'trigger', 'STI 001']
-                    for ch in common_stim_channels:
-                        if ch in self.raw.ch_names:
-                            print(f"Trying channel {ch}...")
-                            events = mne.find_events(self.raw, stim_channel=ch)
-                            if len(events) > 0:
-                                print(f"Found {len(events)} events from {ch} channel")
-                                if event_id is None:
-                                    unique_events = np.unique(events[:, 2])
-                                    event_id = {str(code): code for code in unique_events}
-                                break
-
-                # If still no events, try annotations
-                if events is None or len(events) == 0:
-                    if len(self.raw.annotations) > 0:
-                        print("Trying to get events from annotations...")
-                        events, event_id = mne.events_from_annotations(self.raw)
-                        if len(events) > 0:
-                            print(f"Found {len(events)} events from annotations")
-
-            except Exception as e:
-                print(f"Error finding events: {str(e)}")
 
         # Verify we have events
         if events is None or len(events) == 0:
             raise ValueError("No events found in the data. Cannot create epochs.")
 
-        # Verify we have event_id
-        if event_id is None:
-            print("No event_id provided, creating from unique event codes...")
-            unique_events = np.unique(events[:, 2])
-            event_id = {str(code): code for code in unique_events}
 
         print(f"\nCreating epochs with:")
         print(f"Number of events: {len(events)}")
@@ -480,17 +437,6 @@ class TMSEEGPreprocessor:
         self.events = events
         self.event_id = event_id
 
-        if amplitude_threshold is not None:
-            print(f"Amplitude rejection threshold: {amplitude_threshold}")
-            reject = dict(eeg=amplitude_threshold)
-            reject_tmin = 0.15
-            reject_tmax = 0.3
-
-        else:
-            reject = None
-            reject_tmin = None
-            reject_tmax = None
-
         # Create epochs
         self.epochs = mne.Epochs(
             self.raw,
@@ -502,9 +448,6 @@ class TMSEEGPreprocessor:
             reject_by_annotation=True,
             detrend=0,
             preload=True,
-            reject=reject,
-            reject_tmin=reject_tmin,
-            reject_tmax=reject_tmax,
             verbose=True
         )
 

@@ -43,24 +43,13 @@ The GUI application (HePoTEP) provides an interactive way to load data, configur
 
 ### Running the GUI:
 
-After installing tmseegpy, you can run the graphical interface in two ways:
+After installing tmseegpy, you can run the graphical interface.
 
-### Option 1: Command Line
 Open a terminal or command prompt and run:
 
    ```bash
    tmseegpy-gui
    ```
-
-### Option 2: Create a Desktop Shortcut
-Run the following command to create a desktop shortcut:
-
-   ```bash
-  python -m tmseegpy.gui_launcher --create-shortcut
-  
-  chmod +x ~/Desktop/TMSeegPy.command
-   ```
-
 
 ### Command-Line Arguments
 Run:
@@ -71,8 +60,7 @@ Run:
 
 for full list of command line arguments and default values. The CLI-version is mostly built so that experienced user can run batch processing of large datasets.
 
-Note that, if run in fully automatic mode the code uses MNE-FASTER for both channel and epoch rejection and uses either an adapted version of the TESA classification algorithm of ICA-components 
-or my own classification algorithm which classifies components based on the topography and number of peaks in the components. This means that a lot of cortical activity can be 
+Note that, if run in fully automatic mode the code uses MNE-FASTER for both channel and epoch rejection and uses either a simple classification model (trained with Tensorflow) that was trained on ca 1200 TMS-EEG ICA components or my own classification algorithm which classifies components based on the topography and number of peaks in the components. This means that a lot of cortical activity can be 
 removed and artifacts can remain which probably makes the final result unreliable due to the low SNR of TEPs. However, it might be useful as a quick first pass of a large dataset. 
 
 ### Example Usage
@@ -136,13 +124,13 @@ data/
 - The `--data_dir` argument should point to the directory containing your TMS data (e.g., `data/`).
 - Each session should be in its own subdirectory under `TMSEEG/`.
 
-Or if using EDF or other formats that are directly compatible with MNE-Python
+Or if using Brainvision or other formats that are directly compatible with MNE-Python
 ```
 data/
 └── TMSEEG/
-    ├── session1.edf
+    ├── session1.vhdr
     │    
-    └──session2.edf/
+    └──session2.vhdr/
 
 ```
 

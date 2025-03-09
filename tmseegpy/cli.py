@@ -38,9 +38,6 @@ def main():
     process_parser.add_argument('--no_pcist', action='store_true', default=False,
                         help='Skip PCIst calculation and only preprocess (default: False)')
 
-    process_parser.add_argument('--eeglab_montage_units', type=str, default='auto',
-                        help='Units for EEGLAB channel positions (default: auto)')
-
     process_parser.add_argument('--stim_channel', type=str, default='STI 014',
                         help='Name of the stimulus channel (default: STI 014)')
 
@@ -49,10 +46,6 @@ def main():
 
     process_parser.add_argument('--random_seed', type=int, default=42,
                         help='Random seed for reproducibility (default: 42)')
-
-    process_parser.add_argument('--substitute_zero_events_with', type=int, default=10,
-                        help='Value to substitute zero events with (default: 10)')
-
 
     process_parser.add_argument('--auto_detect_artifacts', action='store_true', default=False,
                         help='Use automatic artifact detection instead of triggers (default: False)')
@@ -243,9 +236,6 @@ def main():
 
     process_parser.add_argument('--response_end', type=int, default=299,
                         help='End of response window in ms (default: 299)')
-
-    process_parser.add_argument('--amplitude_threshold', type=float, default=300.0,
-                        help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
 
     process_parser.add_argument('--k', type=float, default=1.2,
                         help='PCIst parameter k (default: 1.2)')

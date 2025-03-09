@@ -69,7 +69,7 @@ class ProcessingState:
     })
 
 
-class TMSEEGApp:
+class TEPApp:
     """Main application class for TMS-EEG processing"""
 
     def __init__(self):
@@ -522,6 +522,18 @@ class TMSEEGApp:
     def render_load_data(self):
         """Render load data interface"""
         st.write("Load Data")
+
+        processing_mode = st.radio(
+            "Processing Mode",
+            options=["Manual Processing", "Automatic Batch Processing"],
+            horizontal=True,
+            help="Choose between step-by-step manual processing or automatic batch processing"
+        )
+
+        if processing_mode == "Automatic Batch Processing":
+            self.render_automatic_processing()
+            return
+
         st.info("""
         💾 **Supported Data Formats**:
         - BrainVision (.vhdr, .eeg, .vmrk)
@@ -1597,7 +1609,7 @@ class TMSEEGApp:
         if st.session_state.processing_state.tms_removed:
             st.info("✅ TMS artifact removal has been completed")
 
-    # Updates for bad_channel_rejection method in TMSEEGApp class
+    # Updates for bad_channel_rejection method in TEPApp class
 
     def render_bad_channel_rejection(self):
         """Render bad channel rejection interface with manual rejection option"""
@@ -1823,7 +1835,7 @@ class TMSEEGApp:
             if st.session_state.processing_state.bad_channels_removed:
                 st.info("✅ Bad channel rejection has been completed")
 
-    # Updates for bad_epoch_rejection method in TMSEEGApp class
+    # Updates for bad_epoch_rejection method in TEPApp class
 
     def render_bad_epoch_rejection(self):
         """Render bad epoch rejection interface with manual rejection option"""
@@ -2104,7 +2116,6 @@ class TMSEEGApp:
                     ica = mne.preprocessing.ICA(
                         method=ica_method,
                         n_components=n_components,
-                        random_state=random_state,
                         max_iter=max_iter
                     )
 
@@ -3096,4 +3107,998 @@ class TMSEEGApp:
             st.error("Detailed error information:")
             import traceback
             st.code(traceback.format_exc())
+
+    def render_automatic_processing(self):
+        """Render the automatic batch processing interface with all configuration options."""
+        st.write("## Automatic Batch Processing")
+
+        st.info("""
+            This mode allows you to run the complete TMS-EEG preprocessing pipeline on multiple files automatically.
+            Configure the parameters below, select your data directory, and click 'Run Pipeline'.
+        """)
+
+        # Initialize parameter dictionary in session state if not already present
+        if 'auto_params' not in st.session_state:
+            st.session_state.auto_params = {}
+
+        # Data Source Configuration
+        st.subheader("Data Source Configuration")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            input_dir = st.text_input(
+                "Input Directory",
+                value=st.session_state.auto_params.get('data_dir', str(Path.cwd() / 'data')),
+                help="Directory containing TMS-EEG data files"
+            )
+            st.session_state.auto_params['data_dir'] = input_dir
+
+        with col2:
+            data_format = st.selectbox(
+                "Data Format",
+                options=['neurone', 'brainvision', 'edf', 'cnt', 'eeglab', 'auto'],
+                index=1,  # Default to brainvision
+                help="Format of the input files"
+            )
+            st.session_state.auto_params['data_format'] = data_format
+
+        # Output Configuration
+        st.subheader("Output Configuration")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            output_dir = st.text_input(
+                "Output Directory",
+                value=st.session_state.auto_params.get('output_dir', str(Path.cwd() / 'output')),
+                help="Directory where processed results will be saved"
+            )
+            st.session_state.auto_params['output_dir'] = output_dir
+
+        with col2:
+            save_options = st.multiselect(
+                "Save Options",
+                options=["Save raw data", "Save preprocessing steps", "Save final preprocessed epochs"],
+                default=["Save final preprocessed epochs"],
+                help="Select what to save during processing"
+            )
+            st.session_state.auto_params['save_raw_data'] = "Save raw data" in save_options
+            st.session_state.auto_params['save_preproc'] = "Save preprocessing steps" in save_options
+            st.session_state.auto_params['no_preproc_output'] = "Save final preprocessed epochs" not in save_options
+
+        # Parameters in expandable sections
+        with st.expander("Event Detection Parameters", expanded=False):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                stim_channel = st.text_input(
+                    "Stimulus Channel",
+                    value=st.session_state.auto_params.get('stim_channel', 'STI 014'),
+                    help="Channel name containing trigger events"
+                )
+                st.session_state.auto_params['stim_channel'] = stim_channel
+
+                auto_detect = st.checkbox(
+                    "Auto-detect Artifacts",
+                    value=st.session_state.auto_params.get('auto_detect_artifacts', False),
+                    help="Automatically detect TMS artifacts based on amplitude"
+                )
+                st.session_state.auto_params['auto_detect_artifacts'] = auto_detect
+
+            with col2:
+                if auto_detect:
+                    threshold_std = st.number_input(
+                        "Detection Threshold (std)",
+                        value=st.session_state.auto_params.get('artifact_threshold_std', 10.0),
+                        min_value=1.0,
+                        max_value=50.0,
+                        help="Standard deviations above mean for artifact detection"
+                    )
+                    st.session_state.auto_params['artifact_threshold_std'] = threshold_std
+
+                    min_distance = st.number_input(
+                        "Minimum Distance (ms)",
+                        value=st.session_state.auto_params.get('min_artifact_distance_ms', 50),
+                        min_value=10,
+                        max_value=500,
+                        help="Minimum distance between detected artifacts in milliseconds"
+                    )
+                    st.session_state.auto_params['min_artifact_distance_ms'] = min_distance
+
+        with st.expander("Montage and Channel Settings", expanded=False):
+            # List of available montages
+            montage_options = [
+                'standard_1005', 'standard_1020', 'standard_alphabetic',
+                'standard_postfixed', 'standard_prefixed', 'standard_primed',
+                'biosemi16', 'biosemi32', 'biosemi64', 'biosemi128', 'biosemi160',
+                'easycap-M1', 'easycap-M10', 'easycap-M43',
+                'GSN-HydroCel-32', 'GSN-HydroCel-64_1.0', 'GSN-HydroCel-129',
+                'mgh60', 'mgh70'
+            ]
+
+            montage = st.selectbox(
+                "EEG Montage",
+                options=montage_options,
+                index=montage_options.index('easycap-M1') if 'easycap-M1' in montage_options else 0,
+                help="Montage that matches your EEG cap setup"
+            )
+            st.session_state.auto_params['montage_name'] = montage
+
+            if data_format == 'eeglab':
+                montage_units = st.selectbox(
+                    "EEGLAB Montage Units",
+                    options=['auto', 'mm', 'cm', 'm'],
+                    index=0,
+                    help="Units used in EEGLAB for channel positions"
+                )
+                st.session_state.auto_params['eeglab_montage_units'] = montage_units
+
+        with st.expander("Filtering Parameters", expanded=False):
+            col1, col2 = st.columns(2)
+
+            # Raw filtering
+            st.subheader("Raw Data Filtering")
+            filter_raw = st.checkbox(
+                "Apply Filter to Raw Data",
+                value=st.session_state.auto_params.get('filter_raw', True),
+                help="Filter raw data before epoching"
+            )
+            st.session_state.auto_params['filter_raw'] = filter_raw
+
+            if filter_raw:
+                col1, col2 = st.columns(2)
+                with col1:
+                    raw_l_freq = st.number_input(
+                        "Raw High-pass (Hz)",
+                        value=st.session_state.auto_params.get('raw_l_freq', 0.1),
+                        min_value=0.0,
+                        max_value=100.0,
+                        step=0.1,
+                        help="High-pass filter cutoff for raw data"
+                    )
+                    st.session_state.auto_params['raw_l_freq'] = raw_l_freq
+
+                with col2:
+                    raw_h_freq = st.number_input(
+                        "Raw Low-pass (Hz)",
+                        value=st.session_state.auto_params.get('raw_h_freq', 250.0),
+                        min_value=0.0,
+                        max_value=1000.0,
+                        step=0.1,
+                        help="Low-pass filter cutoff for raw data"
+                    )
+                    st.session_state.auto_params['raw_h_freq'] = raw_h_freq
+
+            # Epoch filtering
+            st.subheader("Epoch Filtering")
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                filter_method = st.radio(
+                    "Epoch Filter Method",
+                    options=["MNE", "SciPy", "None"],
+                    index=1,  # Default to SciPy
+                    help="Method to use for filtering epochs"
+                )
+                st.session_state.auto_params['mne_filter_epochs'] = filter_method == "MNE"
+                st.session_state.auto_params['scipy_filter_epochs'] = filter_method == "SciPy"
+
+            if filter_method != "None":
+                with col2:
+                    l_freq = st.number_input(
+                        "Epoch High-pass (Hz)",
+                        value=st.session_state.auto_params.get('l_freq', 1.0),
+                        min_value=0.0,
+                        max_value=100.0,
+                        step=0.1,
+                        help="High-pass filter cutoff for epochs"
+                    )
+                    st.session_state.auto_params['l_freq'] = l_freq
+
+                    notch_freq = st.number_input(
+                        "Notch Frequency (Hz)",
+                        value=st.session_state.auto_params.get('notch_freq', 50.0),
+                        min_value=0.0,
+                        max_value=500.0,
+                        step=1.0,
+                        help="Frequency for notch filter (usually power line frequency). Set to 0 to disable."
+                    )
+                    st.session_state.auto_params['notch_freq'] = notch_freq if notch_freq > 0 else None
+
+                with col3:
+                    h_freq = st.number_input(
+                        "Epoch Low-pass (Hz)",
+                        value=st.session_state.auto_params.get('h_freq', 45.0),
+                        min_value=0.0,
+                        max_value=500.0,
+                        step=0.1,
+                        help="Low-pass filter cutoff for epochs"
+                    )
+                    st.session_state.auto_params['h_freq'] = h_freq
+
+                    if notch_freq > 0:
+                        notch_width = st.number_input(
+                            "Notch Width (Hz)",
+                            value=st.session_state.auto_params.get('notch_width', 2.0),
+                            min_value=0.1,
+                            max_value=10.0,
+                            step=0.1,
+                            help="Width of the notch filter"
+                        )
+                        st.session_state.auto_params['notch_width'] = notch_width
+                    else:
+                        st.session_state.auto_params['notch_width'] = None
+
+        with st.expander("Epoching Parameters", expanded=False):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                epochs_tmin = st.number_input(
+                    "Epoch Start Time (s)",
+                    value=st.session_state.auto_params.get('epochs_tmin', -0.8),
+                    min_value=-2.0,
+                    max_value=0.0,
+                    step=0.1,
+                    help="Start time for epochs relative to events (t=0) in seconds"
+                )
+                st.session_state.auto_params['epochs_tmin'] = epochs_tmin
+
+            with col2:
+                epochs_tmax = st.number_input(
+                    "Epoch End Time (s)",
+                    value=st.session_state.auto_params.get('epochs_tmax', 0.8),
+                    min_value=0.0,
+                    max_value=2.0,
+                    step=0.1,
+                    help="End time for epochs relative to events in seconds"
+                )
+                st.session_state.auto_params['epochs_tmax'] = epochs_tmax
+
+
+        with st.expander("Bad Channel/Epoch Rejection Parameters", expanded=False):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                bad_ch_thresh = st.number_input(
+                    "Bad Channel Threshold",
+                    value=st.session_state.auto_params.get('bad_channels_threshold', 3.0),
+                    min_value=1.0,
+                    max_value=10.0,
+                    step=0.1,
+                    help="Z-score threshold for bad channel detection (higher = less strict)"
+                )
+                st.session_state.auto_params['bad_channels_threshold'] = bad_ch_thresh
+
+            with col2:
+                bad_ep_thresh = st.number_input(
+                    "Bad Epoch Threshold",
+                    value=st.session_state.auto_params.get('bad_epochs_threshold', 3.0),
+                    min_value=1.0,
+                    max_value=10.0,
+                    step=0.1,
+                    help="Z-score threshold for bad epoch detection (higher = less strict)"
+                )
+                st.session_state.auto_params['bad_epochs_threshold'] = bad_ep_thresh
+
+        with st.expander("ICA Parameters", expanded=False):
+            # First ICA
+            st.subheader("First ICA")
+
+            first_ica_enabled = not st.checkbox(
+                "Skip First ICA",
+                value=st.session_state.auto_params.get('no_first_ica', False),
+                help="Skip the first ICA step"
+            )
+            st.session_state.auto_params['no_first_ica'] = not first_ica_enabled
+
+            if first_ica_enabled:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    ica_method = st.selectbox(
+                        "First ICA Method",
+                        options=['fastica', 'infomax', 'picard'],
+                        index=0,
+                        help="Algorithm for ICA computation"
+                    )
+                    st.session_state.auto_params['ica_method'] = ica_method
+
+                    select_with_nn = not st.checkbox(
+                        "Disable Neural Network Component Selection",
+                        value=st.session_state.auto_params.get('no_select_with_nn', False),
+                        help="Disable automatic component selection using neural network"
+                    )
+                    st.session_state.auto_params['no_select_with_nn'] = not select_with_nn
+
+                with col2:
+                    select_with_topo = st.checkbox(
+                        "Use Topography-based Selection",
+                        value=st.session_state.auto_params.get('select_with_topo', False),
+                        help="Enable automatic component selection using topography analysis"
+                    )
+                    st.session_state.auto_params['select_with_topo'] = select_with_topo
+
+                if select_with_topo:
+                    st.subheader("Topography Detection Settings")
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        topo_edge = st.number_input(
+                            "Edge Threshold",
+                            value=st.session_state.auto_params.get('topo_edge_threshold', 0.15),
+                            min_value=0.0,
+                            max_value=1.0,
+                            step=0.01,
+                            help="Threshold for edge detection in topography"
+                        )
+                        st.session_state.auto_params['topo_edge_threshold'] = topo_edge
+
+                        topo_zscore = st.number_input(
+                            "Z-score Threshold",
+                            value=st.session_state.auto_params.get('topo_zscore_threshold', 3.5),
+                            min_value=0.0,
+                            max_value=10.0,
+                            step=0.1,
+                            help="Z-score threshold for focal point detection"
+                        )
+                        st.session_state.auto_params['topo_zscore_threshold'] = topo_zscore
+
+                    with col2:
+                        topo_peak = st.number_input(
+                            "Peak Count Threshold",
+                            value=st.session_state.auto_params.get('topo_peak_threshold', 3.0),
+                            min_value=0.0,
+                            max_value=10.0,
+                            step=0.1,
+                            help="Peak count threshold for artifact detection"
+                        )
+                        st.session_state.auto_params['topo_peak_threshold'] = topo_peak
+
+                        topo_focal = st.number_input(
+                            "Focal Area Threshold",
+                            value=st.session_state.auto_params.get('topo_focal_threshold', 0.2),
+                            min_value=0.0,
+                            max_value=1.0,
+                            step=0.01,
+                            help="Z-score threshold for focal area detection"
+                        )
+                        st.session_state.auto_params['topo_focal_threshold'] = topo_focal
+
+                # Add neural network specific settings
+                if select_with_nn:
+                    st.subheader("Neural Network Classification Settings")
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        nn_prob_threshold = st.number_input(
+                            "NN Probability Exclusion Threshold",
+                            value=st.session_state.auto_params.get('nn_probability_threshold', 0.05),
+                            min_value=0.01,
+                            max_value=0.99,
+                            step=0.01,
+                            help="From som experience this can be set pretty low since the actual classifications of the NN as artefact or not is most important. This is since the classifications stem from training data which has been manually labeled."
+                        )
+                        st.session_state.auto_params['nn_probability_threshold'] = nn_prob_threshold
+
+                    with col2:
+                        use_custom_model = st.checkbox(
+                            "Use Custom NN Model",
+                            value=st.session_state.auto_params.get('use_custom_nn_model', False),
+                            help="Use a custom neural network model instead of the built-in one"
+                        )
+                        st.session_state.auto_params['use_custom_nn_model'] = use_custom_model
+
+                    if use_custom_model:
+                        nn_model_path = st.text_input(
+                            "Custom NN Model Path",
+                            value=st.session_state.auto_params.get('nn_model_path', ''),
+                            help="Path to custom neural network model file"
+                        )
+                        st.session_state.auto_params['nn_model_path'] = nn_model_path if nn_model_path else None
+
+                        nn_encoder_path = st.text_input(
+                            "Custom Label Encoder Path",
+                            value=st.session_state.auto_params.get('nn_encoder_path', ''),
+                            help="Path to custom label encoder file"
+                        )
+                        st.session_state.auto_params['nn_encoder_path'] = nn_encoder_path if nn_encoder_path else None
+
+            # PARAFAC for muscle artifacts
+            st.subheader("PARAFAC Muscle Artifact Removal")
+
+            parafac_enabled = st.checkbox(
+                "Enable PARAFAC Muscle Artifact Cleaning",
+                value=st.session_state.auto_params.get('parafac_muscle_artifacts', False),
+                help="Clean muscle artifacts using PARAFAC tensor decomposition"
+            )
+            st.session_state.auto_params['parafac_muscle_artifacts'] = parafac_enabled
+
+            if parafac_enabled:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    muscle_start = st.number_input(
+                        "Muscle Window Start (ms)",
+                        value=st.session_state.auto_params.get('muscle_window_start', 5.0),
+                        min_value=0.0,
+                        max_value=100.0,
+                        step=1.0,
+                        help="Start time of muscle artifact window in milliseconds"
+                    )
+                    st.session_state.auto_params['muscle_window_start'] = muscle_start / 1000.0  # Convert to seconds
+
+                    threshold = st.number_input(
+                        "Threshold Factor",
+                        value=st.session_state.auto_params.get('threshold_factor', 1.0),
+                        min_value=0.1,
+                        max_value=5.0,
+                        step=0.1,
+                        help="Factor for threshold calculation in artifact detection"
+                    )
+                    st.session_state.auto_params['threshold_factor'] = threshold
+
+                with col2:
+                    muscle_end = st.number_input(
+                        "Muscle Window End (ms)",
+                        value=st.session_state.auto_params.get('muscle_window_end', 30.0),
+                        min_value=0.0,
+                        max_value=200.0,
+                        step=1.0,
+                        help="End time of muscle artifact window in milliseconds"
+                    )
+                    st.session_state.auto_params['muscle_window_end'] = muscle_end / 1000.0  # Convert to seconds
+
+                    n_components = st.number_input(
+                        "Number of Components",
+                        value=st.session_state.auto_params.get('n_components', 5),
+                        min_value=1,
+                        max_value=100,
+                        step=1,
+                        help="Number of components for PARAFAC decomposition"
+                    )
+                    st.session_state.auto_params['n_components'] = n_components
+
+            # Second ICA
+            st.subheader("Second ICA")
+
+            second_ica_enabled = not st.checkbox(
+                "Skip Second ICA",
+                value=st.session_state.auto_params.get('no_second_ica', False),
+                help="Skip the second ICA step"
+            )
+            st.session_state.auto_params['no_second_ica'] = not second_ica_enabled
+
+            if second_ica_enabled:
+                second_ica_method = st.selectbox(
+                    "Second ICA Method",
+                    options=['infomax', 'fastica', 'picard'],
+                    index=0,
+                    help="Algorithm for second ICA computation"
+                )
+                st.session_state.auto_params['second_ica_method'] = second_ica_method
+
+                # ICA Label exclusion options
+                icalabel_options = ["eye", "heart", "muscle", "line_noise", "channel_noise", "unknown"]
+                exclude_labels = st.multiselect(
+                    "ICA Label Exclusion Categories",
+                    options=icalabel_options,
+                    default=icalabel_options,
+                    help="Component types to exclude in ICA label classification"
+                )
+                st.session_state.auto_params['icalabel_exclude_labels'] = exclude_labels
+
+        with st.expander("SSP and CSD Parameters", expanded=False):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                ssp_enabled = st.checkbox(
+                    "Apply SSP (Signal Subspace Projection)",
+                    value=st.session_state.auto_params.get('apply_ssp', False),
+                    help="Apply SSP for noise reduction"
+                )
+                st.session_state.auto_params['apply_ssp'] = ssp_enabled
+
+                if ssp_enabled:
+                    n_eeg_comp = st.number_input(
+                        "Number of SSP Components",
+                        value=st.session_state.auto_params.get('ssp_n_eeg', 2),
+                        min_value=1,
+                        max_value=10,
+                        step=1,
+                        help="Number of SSP components to compute for EEG"
+                    )
+                    st.session_state.auto_params['ssp_n_eeg'] = n_eeg_comp
+
+            with col2:
+                csd_enabled = st.checkbox(
+                    "Apply CSD (Current Source Density)",
+                    value=st.session_state.auto_params.get('apply_csd', False),
+                    help="Apply CSD transformation"
+                )
+                st.session_state.auto_params['apply_csd'] = csd_enabled
+
+                if csd_enabled:
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        lambda2 = st.number_input(
+                            "Lambda²",
+                            value=st.session_state.auto_params.get('lambda2', 1e-5),
+                            format="%.1e",
+                            help="Regularization parameter for CSD"
+                        )
+                        st.session_state.auto_params['lambda2'] = lambda2
+
+                    with col2:
+                        stiffness = st.number_input(
+                            "Stiffness",
+                            value=st.session_state.auto_params.get('stiffness', 4),
+                            min_value=1,
+                            max_value=10,
+                            step=1,
+                            help="Stiffness parameter for CSD transformation"
+                        )
+                        st.session_state.auto_params['stiffness'] = stiffness
+
+        with st.expander("Downsampling Parameters", expanded=False):
+            final_sfreq = st.number_input(
+                "Final Sampling Frequency (Hz)",
+                value=st.session_state.auto_params.get('final_sfreq', 725.0),
+                min_value=100.0,
+                max_value=2000.0,
+                step=25.0,
+                help="Target sampling frequency after final downsampling"
+            )
+            st.session_state.auto_params['final_sfreq'] = final_sfreq
+
+        with st.expander("TEP Analysis Parameters", expanded=False):
+            analyze_teps = st.checkbox(
+                "Analyze TEPs",
+                value=st.session_state.auto_params.get('analyze_teps', True),
+                help="Perform TMS-Evoked Potential analysis"
+            )
+            st.session_state.auto_params['analyze_teps'] = analyze_teps
+
+            if analyze_teps:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    tep_analysis = st.selectbox(
+                        "Analysis Type",
+                        options=['gmfa', 'roi', 'both'],
+                        index=0,  # Default to GMFA
+                        help="Type of TEP analysis to perform"
+                    )
+                    st.session_state.auto_params['tep_analysis_type'] = tep_analysis
+
+                    if tep_analysis in ['roi', 'both']:
+                        roi_channels = st.text_input(
+                            "ROI Channels (space separated)",
+                            value=" ".join(st.session_state.auto_params.get('tep_roi_channels', ['C3', 'C4'])),
+                            help="Channels to use for ROI analysis (space separated)"
+                        )
+                        st.session_state.auto_params['tep_roi_channels'] = roi_channels.split()
+
+                with col2:
+                    peak_mode = st.selectbox(
+                        "Peak Detection Mode",
+                        options=[None, 'pos', 'neg', 'abs'],
+                        index=3,  # Default to abs
+                        format_func=lambda x: 'Auto (from component)' if x is None else x,
+                        help="Method for peak detection"
+                    )
+                    st.session_state.auto_params['peak_mode'] = peak_mode
+
+                    tep_method = st.selectbox(
+                        "Peak Method",
+                        options=['largest', 'centre'],
+                        index=0,
+                        help="Method for selecting peaks"
+                    )
+                    st.session_state.auto_params['tep_method'] = tep_method
+
+                # Peak windows
+                st.subheader("TEP Component Windows")
+
+                use_custom_windows = st.checkbox(
+                    "Use Custom Component Windows",
+                    value=st.session_state.auto_params.get('manual_windows', False),
+                    help="Override default component windows with custom ones"
+                )
+                st.session_state.auto_params['manual_windows'] = use_custom_windows
+
+                if use_custom_windows:
+                    # Default TEP component windows
+                    default_windows = {
+                        'N15': (10, 20),
+                        'P30': (20, 40),
+                        'N45': (40, 55),
+                        'P60': (50, 70),
+                        'N100': (70, 150),
+                        'P180': (150, 240)
+                    }
+
+                    # Initialize peak_windows in session state if not already present
+                    if 'peak_windows' not in st.session_state.auto_params:
+                        st.session_state.auto_params['peak_windows'] = [
+                            f"{start},{end}" for start, end in default_windows.values()
+                        ]
+
+                    # Create a DataFrame for editing windows
+                    window_data = []
+                    for i, (name, (start, end)) in enumerate(default_windows.items()):
+                        try:
+                            if i < len(st.session_state.auto_params['peak_windows']):
+                                custom_window = st.session_state.auto_params['peak_windows'][i]
+                                custom_start, custom_end = map(float, custom_window.split(','))
+                            else:
+                                custom_start, custom_end = start, end
+
+                            window_data.append({
+                                "Component": name,
+                                "Start (ms)": custom_start,
+                                "End (ms)": custom_end
+                            })
+                        except:
+                            window_data.append({
+                                "Component": name,
+                                "Start (ms)": start,
+                                "End (ms)": end
+                            })
+
+                    # Display as editable table
+                    edited_df = st.data_editor(
+                        pd.DataFrame(window_data),
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Component": st.column_config.TextColumn(
+                                "Component", disabled=True
+                            ),
+                            "Start (ms)": st.column_config.NumberColumn(
+                                "Start (ms)", min_value=0, max_value=500, step=1
+                            ),
+                            "End (ms)": st.column_config.NumberColumn(
+                                "End (ms)", min_value=0, max_value=500, step=1
+                            ),
+                        },
+                    )
+
+                    # Update peak_windows in session state from edited DataFrame
+                    peak_windows = []
+                    for _, row in edited_df.iterrows():
+                        start = row["Start (ms)"]
+                        end = row["End (ms)"]
+                        peak_windows.append(f"{start},{end}")
+
+                    st.session_state.auto_params['peak_windows'] = peak_windows
+
+                # Additional TEP options
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    show_channel_peaks = not st.checkbox(
+                        "Disable Channel Peak Display",
+                        value=st.session_state.auto_params.get('no_channel_peaks', False),
+                        help="Disable displaying individual channel peaks"
+                    )
+                    st.session_state.auto_params['no_channel_peaks'] = not show_channel_peaks
+
+                    tep_samples = st.number_input(
+                        "Number of Samples for Peak Detection",
+                        value=st.session_state.auto_params.get('tep_samples', 5),
+                        min_value=1,
+                        max_value=20,
+                        step=1,
+                        help="Number of samples to use for peak detection"
+                    )
+                    st.session_state.auto_params['tep_samples'] = tep_samples
+
+                with col2:
+                    save_validation = st.checkbox(
+                        "Save Validation Summary",
+                        value=st.session_state.auto_params.get('save_validation', False),
+                        help="Save TEP validation summary"
+                    )
+                    st.session_state.auto_params['save_validation'] = save_validation
+
+        with st.expander("PCIst Analysis Parameters", expanded=False):
+            pcist_enabled = not st.checkbox(
+                "Skip PCIst Calculation",
+                value=st.session_state.auto_params.get('no_pcist', False),
+                help="Skip PCIst (Perturbational Complexity Index) calculation"
+            )
+            st.session_state.auto_params['no_pcist'] = not pcist_enabled
+
+            if pcist_enabled:
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    baseline_start = st.number_input(
+                        "Baseline Start (ms)",
+                        value=st.session_state.auto_params.get('baseline_start', -400),
+                        min_value=-1000,
+                        max_value=0,
+                        step=10,
+                        help="Start time for baseline window in milliseconds"
+                    )
+                    st.session_state.auto_params['baseline_start'] = baseline_start
+
+                    response_start = st.number_input(
+                        "Response Start (ms)",
+                        value=st.session_state.auto_params.get('response_start', 0),
+                        min_value=0,
+                        max_value=500,
+                        step=10,
+                        help="Start time for response window in milliseconds"
+                    )
+                    st.session_state.auto_params['response_start'] = response_start
+
+                with col2:
+                    baseline_end = st.number_input(
+                        "Baseline End (ms)",
+                        value=st.session_state.auto_params.get('baseline_end', -50),
+                        min_value=-1000,
+                        max_value=0,
+                        step=10,
+                        help="End time for baseline window in milliseconds"
+                    )
+                    st.session_state.auto_params['baseline_end'] = baseline_end
+
+                    response_end = st.number_input(
+                        "Response End (ms)",
+                        value=st.session_state.auto_params.get('response_end', 300),
+                        min_value=0,
+                        max_value=1000,
+                        step=10,
+                        help="End time for response window in milliseconds"
+                    )
+                    st.session_state.auto_params['response_end'] = response_end
+
+                # Advanced PCIst parameters
+                st.subheader("Advanced PCIst Parameters")
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    k_value = st.number_input(
+                        "k",
+                        value=st.session_state.auto_params.get('k', 1.2),
+                        min_value=0.1,
+                        max_value=10.0,
+                        step=0.1,
+                        help="k parameter for PCIst calculation"
+                    )
+                    st.session_state.auto_params['k'] = k_value
+
+                with col2:
+                    min_snr = st.number_input(
+                        "Minimum SNR",
+                        value=st.session_state.auto_params.get('min_snr', 1.1),
+                        min_value=0.1,
+                        max_value=10.0,
+                        step=0.1,
+                        help="Minimum signal-to-noise ratio"
+                    )
+                    st.session_state.auto_params['min_snr'] = min_snr
+
+                with col3:
+                    max_var = st.number_input(
+                        "Maximum Variance (%)",
+                        value=st.session_state.auto_params.get('max_var', 99.0),
+                        min_value=50.0,
+                        max_value=100.0,
+                        step=0.1,
+                        help="Maximum variance explained (%)"
+                    )
+                    st.session_state.auto_params['max_var'] = max_var
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    embed = st.checkbox(
+                        "Enable Embedding",
+                        value=st.session_state.auto_params.get('embed', False),
+                        help="Enable embedding for PCIst calculation"
+                    )
+                    st.session_state.auto_params['embed'] = embed
+
+                    research = st.checkbox(
+                        "Enable Research Statistics",
+                        value=st.session_state.auto_params.get('research', False),
+                        help="Generate detailed research statistics"
+                    )
+                    st.session_state.auto_params['research'] = research
+
+                with col2:
+                    n_steps = st.number_input(
+                        "Number of Steps",
+                        value=st.session_state.auto_params.get('n_steps', 100),
+                        min_value=10,
+                        max_value=1000,
+                        step=10,
+                        help="Number of steps for PCIst calculation"
+                    )
+                    st.session_state.auto_params['n_steps'] = n_steps
+
+        # Configuration management
+        st.subheader("Configuration Management")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            config_name = st.text_input(
+                "Configuration Name",
+                value="default_config",
+                help="Name to save or load configuration"
+            )
+
+        with col2:
+            if st.button("Save Configuration"):
+                # Convert to regular dict for JSON serialization
+                config_data = dict(st.session_state.auto_params)
+
+                # Save to file
+                import json
+                import os
+
+                config_dir = Path("configs")
+                config_dir.mkdir(exist_ok=True)
+
+                config_path = config_dir / f"{config_name}.json"
+
+                with open(config_path, "w") as f:
+                    json.dump(config_data, f, indent=2)
+
+                st.success(f"Configuration saved to {config_path}")
+
+        with col3:
+            # Get list of existing configs
+            config_dir = Path("configs")
+            if config_dir.exists():
+                config_files = list(config_dir.glob("*.json"))
+                config_names = [f.stem for f in config_files]
+
+                if config_names:
+                    selected_config = st.selectbox(
+                        "Load Configuration",
+                        options=[""] + config_names,
+                        index=0,
+                        help="Select a saved configuration to load"
+                    )
+
+                    if selected_config and st.button("Load"):
+                        config_path = config_dir / f"{selected_config}.json"
+
+                        try:
+                            import json
+                            with open(config_path, "r") as f:
+                                loaded_config = json.load(f)
+
+                            # Update session state
+                            st.session_state.auto_params.update(loaded_config)
+                            st.success(f"Configuration '{selected_config}' loaded")
+                            st.rerun()  # Refresh to show loaded values
+                        except Exception as e:
+                            st.error(f"Error loading configuration: {str(e)}")
+                else:
+                    st.info("No saved configurations found")
+
+        # Run pipeline button
+        st.markdown("---")
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            if st.button("Run", key="run_auto_pipeline", type="primary", use_container_width=True):
+                with st.spinner("Running preprocessing pipeline..."):
+                    self._run_pipeline_with_params(st.session_state.auto_params)
+
+        with col2:
+            if st.button("Reset All Parameters", key="reset_auto_params"):
+                st.session_state.auto_params = {}
+                st.rerun()
+
+    def _run_pipeline_with_params(self, params):
+        """
+        Run the TMS-EEG pipeline with the provided parameters.
+
+        Parameters
+        ----------
+        params : dict
+            Dictionary of parameters for the pipeline
+        """
+        import sys
+        import argparse
+        import importlib
+        from pathlib import Path
+
+        try:
+            # Create a temporary directory for outputs if needed
+            output_dir = Path(params.get('output_dir', 'output'))
+            output_dir.mkdir(exist_ok=True, parents=True)
+
+            # Import the process_subjects function from run.py
+            module_name = "tmseegpy.run"
+            run_module = importlib.import_module(module_name)
+            process_subjects = run_module.process_subjects
+
+            # Create an argparse Namespace object with all parameters
+            args = argparse.Namespace(**params)
+
+            # Set up a progress bar and message area
+            progress_bar = st.progress(0)
+            status_message = st.empty()
+
+            # Define a callback function to update progress
+            current_progress = [0]
+
+            def status_callback(message, progress=None):
+                status_message.text(message)
+                if progress is not None:
+                    current_progress[0] = progress
+                    progress_bar.progress(progress)
+
+            # Run the preprocessing pipeline
+            status_message.text("Starting preprocessing pipeline...")
+            results = process_subjects(args, status_callback=status_callback)
+
+            # Show success message
+            if results:
+                status_message.success("Processing complete!")
+                st.balloons()
+
+                # Display TEP plots if available
+                self._display_tep_results(output_dir)
+            else:
+                status_message.warning("Processing completed but no results were returned.")
+
+        except Exception as e:
+            st.error(f"Error running pipeline: {str(e)}")
+            st.error("Detailed error information:")
+            import traceback
+            st.code(traceback.format_exc())
+
+    def _display_tep_results(self, output_dir):
+        """
+        Display TEP analysis results from the output directory.
+
+        Parameters
+        ----------
+        output_dir : Path or str
+            Directory containing TEP analysis results
+        """
+        from pathlib import Path
+
+        # Find TEP plot files
+        output_dir = Path(output_dir)
+        tep_files = list(output_dir.glob("*_tep_*.png"))
+
+        if tep_files:
+            st.subheader("TMS-Evoked Potentials")
+
+            # Group files by session
+            sessions = {}
+            for f in tep_files:
+                session = f.stem.split('_tep_')[0]
+                if session not in sessions:
+                    sessions[session] = []
+                sessions[session].append(f)
+
+            # Display results for each session
+            for session, files in sessions.items():
+                with st.expander(f"Session: {session}", expanded=True):
+                    for file in files:
+                        st.image(str(file), caption=file.stem)
+        else:
+            st.info("No TEP analysis plots found in the output directory.")
+
+        # Check for PCIst results
+        pcist_files = list(output_dir.glob("pcist_*.png"))
+
+        if pcist_files:
+            st.subheader("Perturbational Complexity Index (PCIst)")
+
+            for file in pcist_files:
+                with st.expander(f"PCIst: {file.stem}", expanded=True):
+                    st.image(str(file))
 

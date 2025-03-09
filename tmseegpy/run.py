@@ -261,8 +261,7 @@ def process_subjects(args, status_callback=None):
     loader = TMSEEGLoader(
         data_path=TMS_DATA_PATH,
         format=args.data_format,
-        substitute_zero_events_with=args.substitute_zero_events_with,
-        eeglab_montage_units=args.eeglab_montage_units,
+        substitute_zero_events_with=10,
         verbose=True
     )
 
@@ -301,40 +300,32 @@ def process_subjects(args, status_callback=None):
             else:
                 # Look for events in annotations
                 print("Looking for events in annotations...")
-                if len(raw.annotations) > 0:
+                if len(raw.annotations) > 1:
                     # Get unique annotation descriptions
-                    unique_descriptions = set(raw.annotations.description)
-                    print(f"Found annotation types: {unique_descriptions}")
+                    try:
+                        print("Trying fallback event extraction with Stimulus/A annotation...")
+                        events, event_dict = mne.events_from_annotations(raw, event_id={'Stimulus/A': 1})
+                        if events is not None and len(events) > 0:
+                            print(f"Found {len(events)} events from Stimulus/A annotations")
+                    except Exception as e:
+                        print(f"Error with Stimulus/A fallback: {str(e)}")
 
-                    # For TMS-EEG we typically want 'Stimulation' or similar annotations
-                    tms_annotations = ['Stimulation', 'TMS', 'R128', 'Response']
-
-                    # Create mapping for event IDs
-                    event_id = {}
-                    for desc in unique_descriptions:
-                        # Look for TMS-related annotations
-                        if any(tms_str.lower() in desc.lower() for tms_str in tms_annotations):
-                            event_id[desc] = args.substitute_zero_events_with
-
-                    if event_id:
-                        print(f"Using event mapping for TMS events: {event_id}")
-                        events, _ = mne.events_from_annotations(raw, event_id=event_id)
+                else:
+                    print("No TMS-related annotations found, checking stim channels...")
+                    # Try to find stim channels
+                    stim_channels = mne.pick_types(raw.info, stim=True, exclude=[])
+                    if len(stim_channels) > 0:
+                        stim_ch_name = raw.ch_names[stim_channels[0]]
+                        print(f"Using detected stim channel: {stim_ch_name}")
+                        events = mne.find_events(raw, stim_channel=stim_ch_name)
                     else:
-                        print("No TMS-related annotations found, checking stim channels...")
-                        # Try to find stim channels
-                        stim_channels = mne.pick_types(raw.info, stim=True, exclude=[])
-                        if len(stim_channels) > 0:
-                            stim_ch_name = raw.ch_names[stim_channels[0]]
-                            print(f"Using detected stim channel: {stim_ch_name}")
-                            events = mne.find_events(raw, stim_channel=stim_ch_name)
-                        else:
-                            # Try common stim channel names
-                            common_stim_names = ['STI 014', 'STIM', 'STI101', 'trigger', 'STI 001']
-                            for ch_name in common_stim_names:
-                                if ch_name in raw.ch_names:
-                                    print(f"Using stim channel: {ch_name}")
-                                    events = mne.find_events(raw, stim_channel=ch_name)
-                                    break
+                        # Try common stim channel names
+                        common_stim_names = ['STI 014', 'STIM', 'STI101', 'trigger', 'STI 001']
+                        for ch_name in common_stim_names:
+                            if ch_name in raw.ch_names:
+                                print(f"Using stim channel: {ch_name}")
+                                events = mne.find_events(raw, stim_channel=ch_name)
+                                break
 
             if events is not None and len(events) > 0:
                 print(f"Found {len(events)} trigger-based events")
@@ -421,10 +412,8 @@ def process_subjects(args, status_callback=None):
         #if args.save_preproc:
           #  save_raw_data(raw, args.output_dir, step_name='raw_f',)
 
-        events = mne.find_events(raw, stim_channel=args.stim_channel)
-
         print("\nCreating epochs...")
-        processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None, amplitude_threshold=args.amplitude_threshold,
+        processor.create_epochs(tmin=args.epochs_tmin, tmax=args.epochs_tmax, baseline=None,
                                 events=events)
         epochs = processor.epochs
 
@@ -808,17 +797,11 @@ if __name__ == "__main__":
     parser.add_argument('--no_pcist', action='store_true', default=False,
                     help='Skip PCIst calculation and only preprocess (default: False)')
 
-    parser.add_argument('--eeglab_montage_units', type=str, default='auto',
-                   help='Units for EEGLAB channel positions (default: auto)')
-
     parser.add_argument('--stim_channel', type=str, default='STI 014',
                     help='Name of the stimulus channel (default: STI 014)')
 
     parser.add_argument('--save_preproc', action='store_true', default=False,
                     help='Save plots between preprocessing steps (default: False)')
-
-    parser.add_argument('--substitute_zero_events_with', type=int, default=10,
-                        help='Value to substitute zero events with (default: 10)')
 
     parser.add_argument('--final_sfreq', type=float, default=725,
                         help='Final downsampling frequency (default: 725)')
@@ -1012,9 +995,6 @@ if __name__ == "__main__":
 
     parser.add_argument('--response_end', type=int, default=299,
                         help='End of response window in ms (default: 299)')
-
-    parser.add_argument('--amplitude_threshold', type=float, default=300.0,
-                    help='Threshold for epoch rejection based on peak-to-peak amplitude in µV (default: 300.0)')
 
     parser.add_argument('--k', type=float, default=1.2,
                         help='PCIst parameter k (default: 1.2)')

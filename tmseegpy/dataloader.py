@@ -21,19 +21,17 @@ class TMSEEGLoader:
                  data_path: Union[str, Path],
                  format: str = 'auto',
                  substitute_zero_events_with: int = 10,
-                 eeglab_montage_units: str = 'auto',
                  verbose: bool = False):
         """Initialize loader."""
         self.data_path = Path(data_path)
         self.format = format.lower()
         self.substitute_zero_events_with = substitute_zero_events_with
-        self.eeglab_montage_units = eeglab_montage_units
         self.verbose = verbose
 
         if not self.data_path.exists():
             raise ValueError(f"Path does not exist: {self.data_path}")
 
-        # Initialize containers
+        # /Users/alexe/Kaggle/TMSEEG_Control/ouize containers
         self.sessions = []
         self.raw_list = []
         self.session_info = []
@@ -117,7 +115,8 @@ class TMSEEGLoader:
                     print(f"Loading {file_path}")
                 raw = self._load_single_file(file_path)
                 if raw is not None:
-                    if not isinstance(raw, mne.io.Raw):
+                    # Use a more flexible check - mne.io.Raw is often a parent class
+                    if not isinstance(raw, mne.io.BaseRaw):
                         print(f"Warning: Loaded data from {file_path} is not an MNE Raw object")
                         continue
                     self.raw_list.append(raw)
@@ -139,7 +138,13 @@ class TMSEEGLoader:
         """Load a single data file"""
         try:
             if file_path.suffix.lower() in ('.vhdr', '.eeg', '.vmrk'):
-                return mne.io.read_raw_brainvision(file_path, preload=True)
+                raw = mne.io.read_raw_brainvision(file_path, preload=True)
+                # MNE might return a specific subclass of Raw, not directly mne.io.Raw
+                if hasattr(raw, 'get_data'):  # Basic check if it's a Raw-like object
+                    return raw
+                else:
+                    print(f"Warning: BrainVision file didn't return a valid Raw object: {type(raw)}")
+                    return None
             elif file_path.suffix.lower() == '.edf':
                 return mne.io.read_raw_edf(file_path, preload=True)
             elif file_path.suffix.lower() == '.cnt':
@@ -148,7 +153,6 @@ class TMSEEGLoader:
                 return mne.io.read_raw_eeglab(
                     file_path,
                     preload=True,
-                    montage_units=self.eeglab_montage_units
                 )
             elif file_path.suffix.lower() == '.ses':
                 rec = Recording(str(file_path))
