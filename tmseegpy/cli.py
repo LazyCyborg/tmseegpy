@@ -2,7 +2,7 @@
 
 import sys
 import threading
-from tmseegpy.run import process_subjects, setup_qt_plugin_path
+from tmseegpy.run import process_subjects
 import argparse
 from pathlib import Path
 

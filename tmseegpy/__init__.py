@@ -20,12 +20,7 @@ import mne
 if _is_in_jupyter():
     matplotlib.use('module://matplotlib_inline.backend_inline')
     mne.viz.set_browser_backend("matplotlib")
-else:
-    matplotlib.use('QtAgg')
-    mne.viz.set_browser_backend("qt")
-    plt.rcParams['figure.figsize'] = [8, 6]
 
-# Now import all components
 
 from .clean import *
 from .pcist import *

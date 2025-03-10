@@ -10,11 +10,7 @@ import tempfile
 import os
 import sys
 import platform
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QPushButton, QLabel, QComboBox,
-                             QSpinBox, QDoubleSpinBox, QCheckBox)
-from PyQt6.QtCore import Qt
-import pyqtgraph as pg
+
 import threading
 from typing import Union
 from scipy import signal
