@@ -10,7 +10,7 @@ authors = [
     {name = "LazyCyborg", email = "hjarneko@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = "=3.11"
 license = {text = "MIT"}
 
 classifiers = [
@@ -33,7 +33,7 @@ dependencies = [
     # Machine learning
     "scikit-learn>=1.4.0",
     "tensorly>=0.8.0",
-    "tensorflow",
+    "tensorflow>=2.15.0",
 
     # Visualization
     "matplotlib>=3.9.2",
@@ -65,7 +65,6 @@ dependencies = [
     # GUI
     "streamlit>=1.24.0",
     "plotly>=5.13.0",
-    "pyqtgraph>=0.13.0"
 ]
 
 
