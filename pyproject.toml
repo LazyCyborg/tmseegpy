@@ -10,7 +10,7 @@ authors = [
     {name = "LazyCyborg", email = "hjarneko@gmail.com"}
 ]
 readme = "README.md"
-requires-python = "=3.11"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 
 classifiers = [
