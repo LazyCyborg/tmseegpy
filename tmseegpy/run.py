@@ -4,39 +4,6 @@ from pathlib import Path
 import sys
 
 
-# Automatically set up Qt plugin path
-def setup_qt_plugin_path():
-    try:
-        conda_prefix = os.environ.get('CONDA_PREFIX')
-        if conda_prefix:
-            possible_plugin_paths = [
-                # macOS conda paths
-                Path(conda_prefix) / "lib" / "python3.11" / "site-packages" / "PyQt6" / "Qt6" / "plugins" / "platforms",
-                Path(conda_prefix) / "lib" / "python3.11" / "site-packages" / "PyQt6" / "Qt6" / "plugins",
-                # Additional macOS-specific paths
-                Path(conda_prefix) / "lib" / "python3.11" / "site-packages" / "PyQt6-Qt6" / "plugins" / "platforms",
-                Path(conda_prefix) / "lib" / "python3.11" / "site-packages" / "PyQt6-Qt6" / "Qt6" / "plugins" / "platforms",
-                # Windows path
-                Path(conda_prefix) / "Library" / "plugins" / "platforms",
-            ]
-
-            for path in possible_plugin_paths:
-                if path.exists():
-                    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(path)
-                    print(f"Set QT_QPA_PLATFORM_PLUGIN_PATH to: {path}")
-                    return  # Exit after first valid path
-
-            # Fallback to PyQt6 direct path
-            import PyQt6
-            qt_path = Path(PyQt6.__file__).parent / "Qt6" / "plugins" / "platforms"
-            if qt_path.exists():
-                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(qt_path)
-                print(f"Set QT_QPA_PLATFORM_PLUGIN_PATH to: {qt_path}")
-    except Exception as e:
-        print(f"Warning: Could not automatically set Qt plugin path: {e}")
-
-
-
 
 def _is_in_jupyter():
     """Check if we're running in a Jupyter notebook"""
@@ -47,10 +14,6 @@ def _is_in_jupyter():
         return False
     except ImportError:
         return False
-
-# Only call setup_qt_plugin_path if we're not in a notebook
-if not _is_in_jupyter():
-    setup_qt_plugin_path()
 
 import numpy as np
 import matplotlib.pyplot as plt
