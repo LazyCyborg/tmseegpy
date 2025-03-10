@@ -190,7 +190,7 @@ def main():
     process_parser.add_argument('--save_raw_data', action='store_true',
                     help='Save initial raw eeg as .fif (default: False)')
 
-    process_parser.add_argument('--analyze_teps', action='store_true', default=True,
+    process_parser.add_argument('--analyze_teps', type=bool, default=True,
                         help='Find TEPs that normally exist (default: True)')
 
     process_parser.add_argument('--save_validation', action='store_true',

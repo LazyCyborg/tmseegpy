@@ -949,7 +949,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_raw_data', action='store_true',
                     help='Save initial raw eeg as .fif (default: False)')
 
-    parser.add_argument('--analyze_teps', action='store_true', default=True,
+    parser.add_argument('--analyze_teps', type=bool, default=True,
                 help='Find TEPs that normally exist (default: True)')
 
     parser.add_argument('--peak_mode', type=str, default=None,

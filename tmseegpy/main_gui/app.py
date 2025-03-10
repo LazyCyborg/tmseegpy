@@ -385,6 +385,33 @@ class TEPApp:
         """Run the application"""
         st.title("HePoTEP (Heuristic Processing of TMS-Evoked Potentials)")
 
+        if 'showing_results' not in st.session_state:
+            st.session_state.showing_results = False
+
+        if st.session_state.showing_results:
+            # If we're in results mode, display the results from the saved output directory
+            if 'output_directory' in st.session_state:
+                self._display_tep_results(st.session_state.output_directory)
+
+                # Add a button to return to the main interface
+                if st.button("Return to Main Interface"):
+                    st.session_state.showing_results = False
+                    # Clear other result-related state
+                    if 'output_directory' in st.session_state:
+                        del st.session_state.output_directory
+                    if 'epoch_files' in st.session_state:
+                        del st.session_state.epoch_files
+                    if 'selected_epoch_file' in st.session_state:
+                        del st.session_state.selected_epoch_file
+                    st.rerun()  # Rerun to show the main interface
+            else:
+                # If output directory is not set but we're in results mode, reset
+                st.session_state.showing_results = False
+                st.rerun()
+
+            # Return early to prevent the rest of the UI from rendering
+            return
+
         st.info("""
         💡 **Data Visualization Available Throughout Processing**
         You can view your data at any time during the pipeline by expanding the "Data Visualization Options" section:
@@ -466,12 +493,10 @@ class TEPApp:
                             else:
                                 st.warning("Second ICA hasn't been run yet")
 
-                # Force pipeline interface to show
                 st.markdown("---")
                 st.header("Processing Pipeline")
-                #st.write("Debug: About to render pipeline interface")
                 self.render_pipeline_interface()
-                #st.write("Debug: Pipeline interface should be visible")
+
 
         except Exception as e:
             st.error(f"Application error: {str(e)}")
@@ -2943,69 +2968,281 @@ class TEPApp:
             import traceback
             st.code(traceback.format_exc())
 
+    def render_tep_analysis(self, batch_mode=False, epochs=None):
+        """
+        Render TEP analysis interface with interactive Plotly visualization
 
-    def render_tep_analysis(self):
-        """Render TEP analysis interface with interactive Plotly visualization"""
-
+        Parameters
+        ----------
+        batch_mode : bool
+            Whether this method is being called from batch processing mode
+        epochs : mne.Epochs, optional
+            Optional epochs object to use instead of processor's epochs
+        """
         import plotly.graph_objects as go
         from scipy import signal
 
-        st.write("TEP Analysis")
+        if not batch_mode:
+            st.write("TEP Analysis")
 
-        if not st.session_state.processing_state.epochs_created:
-            st.warning("Please create epochs first")
-            return
+            # If epochs provided directly, use those; otherwise check processor
+            if epochs is not None:
+                current_epochs = epochs
+            elif self.processor is not None and hasattr(self.processor, 'epochs') and self.processor.epochs is not None:
+                current_epochs = self.processor.epochs
+            else:
+                if not st.session_state.processing_state.epochs_created:
+                    st.warning("Please create epochs first")
+                    return
 
-        if self.processor is None or self.processor.epochs is None:
-            st.warning("No epochs available for analysis")
-            return
+                if self.processor is None or not hasattr(self.processor, 'epochs') or self.processor.epochs is None:
+                    st.warning("No epochs available for analysis")
+                    return
+
+                current_epochs = self.processor.epochs
 
         try:
-            # Get evoked response
-            evoked = self.processor.epochs.average()
+            # Get evoked response - in batch mode we're just configuring settings
+            evoked = None if batch_mode else current_epochs.average()
 
-            # Channel selection
-            st.subheader("Channel Selection")
-            all_channels = evoked.ch_names
+            # In batch mode, we're just collecting parameters
+            if batch_mode:
+                st.subheader("TEP Analysis Configuration")
 
-            # Add "Select All" and "Clear All" buttons in the same row
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Select All Channels"):
-                    st.session_state.selected_channels = all_channels
-            with col2:
-                if st.button("Clear All Channels"):
-                    st.session_state.selected_channels = []
+                # Enable/disable TEP analysis
+                analyze_teps = st.checkbox(
+                    "Analyze TEPs",
+                    value=st.session_state.auto_params.get('analyze_teps', True),
+                    help="Perform TMS-Evoked Potential analysis"
+                )
+                st.session_state.auto_params['analyze_teps'] = analyze_teps
+
+                if not analyze_teps:
+                    return  # Skip the rest if TEP analysis is disabled
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    tep_analysis_type = st.selectbox(
+                        "Analysis Type",
+                        options=['gmfa', 'roi', 'both'],
+                        index=0,  # Default to GMFA
+                        help="Type of TEP analysis to perform"
+                    )
+                    st.session_state.auto_params['tep_analysis_type'] = tep_analysis_type
+
+                    if tep_analysis_type in ['roi', 'both']:
+                        roi_channels_str = st.text_input(
+                            "ROI Channels (space separated)",
+                            value=" ".join(st.session_state.auto_params.get('tep_roi_channels', ['C3', 'C4'])),
+                            help="Channels to use for ROI analysis (space separated)"
+                        )
+                        st.session_state.auto_params['tep_roi_channels'] = roi_channels_str.split()
+
+                with col2:
+                    peak_mode = st.selectbox(
+                        "Peak Detection Mode",
+                        options=[None, 'pos', 'neg', 'abs'],
+                        index=3,  # Default to abs
+                        format_func=lambda x: 'Auto (from component)' if x is None else x,
+                        help="Method for peak detection"
+                    )
+                    st.session_state.auto_params['peak_mode'] = peak_mode
+
+                    tep_method = st.selectbox(
+                        "Peak Method",
+                        options=['largest', 'centre'],
+                        index=0,
+                        help="Method for selecting peaks"
+                    )
+                    st.session_state.auto_params['tep_method'] = tep_method
+
+                # Component window configuration
+                st.subheader("TEP Component Windows")
+
+                use_custom_windows = st.checkbox(
+                    "Use Custom Component Windows",
+                    value=st.session_state.auto_params.get('manual_windows', False),
+                    help="Override default component windows with custom ones"
+                )
+                st.session_state.auto_params['manual_windows'] = use_custom_windows
+
+                if use_custom_windows:
+                    # Default TEP component windows
+                    default_windows = {
+                        'N15': (10, 20),
+                        'P30': (20, 40),
+                        'N45': (40, 55),
+                        'P60': (50, 70),
+                        'N100': (70, 150),
+                        'P180': (150, 240)
+                    }
+
+                    # Initialize peak_windows in session state if not already present
+                    if 'peak_windows' not in st.session_state.auto_params:
+                        st.session_state.auto_params['peak_windows'] = [
+                            f"{start},{end}" for start, end in default_windows.values()
+                        ]
+
+                    # Create a DataFrame for editing windows
+                    window_data = []
+                    for i, (name, (start, end)) in enumerate(default_windows.items()):
+                        try:
+                            if i < len(st.session_state.auto_params['peak_windows']):
+                                custom_window = st.session_state.auto_params['peak_windows'][i]
+                                custom_start, custom_end = map(float, custom_window.split(','))
+                            else:
+                                custom_start, custom_end = start, end
+
+                            window_data.append({
+                                "Component": name,
+                                "Start (ms)": custom_start,
+                                "End (ms)": custom_end
+                            })
+                        except:
+                            window_data.append({
+                                "Component": name,
+                                "Start (ms)": start,
+                                "End (ms)": end
+                            })
+
+                    # Display as editable table
+                    edited_df = st.data_editor(
+                        pd.DataFrame(window_data),
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Component": st.column_config.TextColumn("Component", disabled=True),
+                            "Start (ms)": st.column_config.NumberColumn("Start (ms)", min_value=0, max_value=500,
+                                                                        step=1),
+                            "End (ms)": st.column_config.NumberColumn("End (ms)", min_value=0, max_value=500, step=1),
+                        },
+                    )
+
+                    # Update peak_windows in session state from edited DataFrame
+                    peak_windows = []
+                    for _, row in edited_df.iterrows():
+                        start = row["Start (ms)"]
+                        end = row["End (ms)"]
+                        peak_windows.append(f"{start},{end}")
+
+                    st.session_state.auto_params['peak_windows'] = peak_windows
+                else:
+                    # Ensure peak_windows is set to empty list if not using custom windows
+                    if 'peak_windows' not in st.session_state.auto_params:
+                        st.session_state.auto_params['peak_windows'] = []
+
+                # Additional TEP options
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    show_channel_peaks = not st.checkbox(
+                        "Disable Channel Peak Display",
+                        value=st.session_state.auto_params.get('no_channel_peaks', False),
+                        help="Disable displaying individual channel peaks"
+                    )
+                    st.session_state.auto_params['no_channel_peaks'] = not show_channel_peaks
+
+                    tep_samples = st.number_input(
+                        "Number of Samples for Peak Detection",
+                        value=st.session_state.auto_params.get('tep_samples', 5),
+                        min_value=1,
+                        max_value=20,
+                        step=1,
+                        help="Number of samples to use for peak detection"
+                    )
+                    st.session_state.auto_params['tep_samples'] = tep_samples
+
+                with col2:
+                    save_validation = st.checkbox(
+                        "Save Validation Summary",
+                        value=st.session_state.auto_params.get('save_validation', False),
+                        help="Save TEP validation summary"
+                    )
+                    st.session_state.auto_params['save_validation'] = save_validation
+
+                    show_interactive_plot = st.checkbox(
+                        "Show Interactive Plot in Batch Results",
+                        value=st.session_state.auto_params.get('show_interactive_tep', True),
+                        help="Display interactive TEP plot in batch processing results"
+                    )
+                    st.session_state.auto_params['show_interactive_tep'] = show_interactive_plot
+
+                return  # We're done with batch mode
+
+            # Regular mode (not batch) - actual visualization
+            # Use a unique session key based on the epochs object
+            session_key = f"tep_manual_{id(current_epochs)}"
 
             # Initialize selected channels in session state if not exists
-            if 'selected_channels' not in st.session_state:
-                st.session_state.selected_channels = ['Cz']  # Default to Cz
+            if f"{session_key}_channels" not in st.session_state:
+                st.session_state[f"{session_key}_channels"] = ['Cz'] if 'Cz' in evoked.ch_names else [
+                    evoked.ch_names[0]]
 
-            # Multiselect for channels
-            selected_channels = st.multiselect(
-                "Select channels to display",
-                options=all_channels,
-                default=st.session_state.selected_channels
-            )
-            st.session_state.selected_channels = selected_channels
+            # Initialize time range if not exists
+            if f"{session_key}_tmin" not in st.session_state:
+                st.session_state[f"{session_key}_tmin"] = -300
+            if f"{session_key}_tmax" not in st.session_state:
+                st.session_state[f"{session_key}_tmax"] = 600
 
-            # Time window selection
-            st.subheader("Time Window")
-            col1, col2 = st.columns(2)
-            with col1:
-                tmin = st.number_input(
-                    "Start time (ms)",
-                    value=-300,
-                    min_value=int(evoked.times[0] * 1000),
-                    max_value=int(evoked.times[-1] * 1000)
+            # Use a form to prevent rerunning on channel selection changes
+            with st.form(f"tep_visualization_form_{session_key}"):
+                st.subheader("Channel Selection")
+                all_channels = evoked.ch_names
+
+                # Channel selection buttons
+                col1, col2 = st.columns(2)
+                with col1:
+                    select_all = st.form_submit_button("Select All Channels")
+                    if select_all:
+                        st.session_state[f"{session_key}_channels"] = all_channels
+                with col2:
+                    clear_all = st.form_submit_button("Clear All Channels")
+                    if clear_all:
+                        st.session_state[f"{session_key}_channels"] = []
+
+                # Multiselect for channels
+                selected_channels = st.multiselect(
+                    "Select channels to display",
+                    options=all_channels,
+                    default=st.session_state[f"{session_key}_channels"]
                 )
-            with col2:
-                tmax = st.number_input(
-                    "End time (ms)",
-                    value=600,
-                    min_value=int(evoked.times[0] * 1000),
-                    max_value=int(evoked.times[-1] * 1000)
+
+                # Time window selection
+                st.subheader("Time Window")
+                col1, col2 = st.columns(2)
+                with col1:
+                    tmin = st.number_input(
+                        "Start time (ms)",
+                        value=st.session_state[f"{session_key}_tmin"],
+                        min_value=int(evoked.times[0] * 1000),
+                        max_value=int(evoked.times[-1] * 1000)
+                    )
+                with col2:
+                    tmax = st.number_input(
+                        "End time (ms)",
+                        value=st.session_state[f"{session_key}_tmax"],
+                        min_value=int(evoked.times[0] * 1000),
+                        max_value=int(evoked.times[-1] * 1000)
+                    )
+
+                # Show peak info checkbox
+                show_peaks = st.checkbox(
+                    "Show Peak Information",
+                    value=False
                 )
+
+                # Submit button for the form
+                submitted = st.form_submit_button("Update Visualization")
+                if submitted:
+                    st.session_state[f"{session_key}_channels"] = selected_channels
+                    st.session_state[f"{session_key}_tmin"] = tmin
+                    st.session_state[f"{session_key}_tmax"] = tmax
+
+            # Display visualization based on current settings
+            selected_channels = st.session_state[f"{session_key}_channels"]
+            tmin = st.session_state[f"{session_key}_tmin"]
+            tmax = st.session_state[f"{session_key}_tmax"]
 
             # Create Plotly figure
             if selected_channels:
@@ -3068,39 +3305,104 @@ class TEPApp:
                 st.plotly_chart(fig, use_container_width=True)
 
                 # Display peak information
-                if st.checkbox("Show Peak Information"):
+                if show_peaks:
                     st.subheader("Peak Analysis")
+                    peak_data = []
+
                     for ch in selected_channels:
                         ch_idx = evoked.ch_names.index(ch)
                         data = evoked.data[ch_idx, time_mask] * 1e6
                         times = evoked.times[time_mask] * 1000
 
                         # Find peaks
-                        peak_times = []
-                        peak_amplitudes = []
-
                         # Find positive peaks
                         pos_peaks = signal.find_peaks(data)[0]
                         for peak in pos_peaks:
-                            peak_times.append(times[peak])
-                            peak_amplitudes.append(data[peak])
+                            peak_data.append({
+                                "Channel": ch,
+                                "Type": "Positive",
+                                "Latency (ms)": times[peak],
+                                "Amplitude (µV)": data[peak]
+                            })
 
                         # Find negative peaks
                         neg_peaks = signal.find_peaks(-data)[0]
                         for peak in neg_peaks:
-                            peak_times.append(times[peak])
-                            peak_amplitudes.append(data[peak])
+                            peak_data.append({
+                                "Channel": ch,
+                                "Type": "Negative",
+                                "Latency (ms)": times[peak],
+                                "Amplitude (µV)": data[peak]
+                            })
 
-                        # Sort by time
-                        peaks = sorted(zip(peak_times, peak_amplitudes))
-
-                        # Display peaks
-                        st.write(f"Channel: {ch}")
-                        peak_df = pd.DataFrame(peaks, columns=['Latency (ms)', 'Amplitude (µV)'])
+                    # Sort by channel and time
+                    if peak_data:
+                        peak_df = pd.DataFrame(peak_data).sort_values(by=["Channel", "Latency (ms)"])
                         st.dataframe(peak_df)
+
+                    # Identify TEP components
+                    st.subheader("Standard TEP Components")
+
+                    # Define standard TEP component windows
+                    tep_components = {
+                        'N15': {'window': (10, 20), 'polarity': 'Negative'},
+                        'P30': {'window': (20, 40), 'polarity': 'Positive'},
+                        'N45': {'window': (40, 55), 'polarity': 'Negative'},
+                        'P60': {'window': (50, 70), 'polarity': 'Positive'},
+                        'N100': {'window': (70, 150), 'polarity': 'Negative'},
+                        'P180': {'window': (150, 240), 'polarity': 'Positive'}
+                    }
+
+                    component_data = []
+                    for ch in selected_channels:
+                        ch_idx = evoked.ch_names.index(ch)
+                        data = evoked.data[ch_idx, :] * 1e6
+                        times = evoked.times * 1000
+
+                        for comp_name, comp_info in tep_components.items():
+                            window_start, window_end = comp_info['window']
+                            polarity = comp_info['polarity']
+
+                            # Skip if window is outside displayed range
+                            if window_end < tmin or window_start > tmax:
+                                continue
+
+                            # Find indices for time window
+                            win_mask = (times >= window_start) & (times <= window_end)
+                            win_data = data[win_mask]
+                            win_times = times[win_mask]
+
+                            if len(win_data) == 0:
+                                continue
+
+                            # Find peak based on polarity
+                            if polarity == 'Positive':
+                                peak_idx = np.argmax(win_data)
+                            else:
+                                peak_idx = np.argmin(win_data)
+
+                            peak_lat = win_times[peak_idx]
+                            peak_amp = win_data[peak_idx]
+
+                            component_data.append({
+                                "Channel": ch,
+                                "Component": comp_name,
+                                "Latency (ms)": peak_lat,
+                                "Amplitude (µV)": peak_amp
+                            })
+
+                    # Display TEP component data
+                    if component_data:
+                        comp_df = pd.DataFrame(component_data).sort_values(by=["Component", "Channel"])
+                        st.dataframe(comp_df)
 
             else:
                 st.warning("Please select at least one channel to display")
+
+            # Only update the processing state if this is being called from the regular pipeline
+            if not epochs:
+                st.session_state.processing_state.selected_steps['tep_analysis'] = True
+                st.session_state.processing_state.tep_analyzed = True
 
         except Exception as e:
             st.error(f"Error in TEP analysis: {str(e)}")
@@ -3114,7 +3416,7 @@ class TEPApp:
 
         st.info("""
             This mode allows you to run the complete TMS-EEG preprocessing pipeline on multiple files automatically.
-            Configure the parameters below, select your data directory, and click 'Run Pipeline'.
+            Configure the parameters below, select your data directory, and click 'Run'.
         """)
 
         # Initialize parameter dictionary in session state if not already present
@@ -3127,9 +3429,9 @@ class TEPApp:
 
         with col1:
             input_dir = st.text_input(
-                "Input Directory",
+                "Input Directory (has to be the parent dir of a directory named TMSEEG)",
                 value=st.session_state.auto_params.get('data_dir', str(Path.cwd() / 'data')),
-                help="Directory containing TMS-EEG data files"
+                help="Has to be named TMSEEG and contain individual EEG files of all subjects for the processing to work (hopefully in the next subject this will be a bit more intuitive)"
             )
             st.session_state.auto_params['data_dir'] = input_dir
 
@@ -3658,6 +3960,18 @@ class TEPApp:
             )
             st.session_state.auto_params['analyze_teps'] = analyze_teps
 
+
+            # Initialize peak_windows to None by default - THIS IS CRITICAL TO PREVENT THE ERROR
+            if 'peak_windows' not in st.session_state.auto_params:
+                st.session_state.auto_params['peak_windows'] = None
+
+            show_interactive = st.checkbox(
+                "Show Interactive Visualization in Results",
+                value=st.session_state.auto_params.get('show_interactive_tep', True),
+                help="Enable interactive TEP visualization (by Silvia Casarotto) in batch processing results"
+            )
+            st.session_state.auto_params['show_interactive_tep'] = show_interactive
+
             if analyze_teps:
                 col1, col2 = st.columns(2)
 
@@ -3717,18 +4031,21 @@ class TEPApp:
                         'P180': (150, 240)
                     }
 
-                    # Initialize peak_windows in session state if not already present
-                    if 'peak_windows' not in st.session_state.auto_params:
-                        st.session_state.auto_params['peak_windows'] = [
-                            f"{start},{end}" for start, end in default_windows.values()
-                        ]
+                    # Initialize peak_windows as empty list if not already present
+                    peak_windows_list = []
+
+                    if isinstance(st.session_state.auto_params.get('peak_windows'), list):
+                        peak_windows_list = st.session_state.auto_params['peak_windows']
+                    else:
+                        # Create default windows
+                        peak_windows_list = [f"{start},{end}" for start, end in default_windows.values()]
 
                     # Create a DataFrame for editing windows
                     window_data = []
                     for i, (name, (start, end)) in enumerate(default_windows.items()):
                         try:
-                            if i < len(st.session_state.auto_params['peak_windows']):
-                                custom_window = st.session_state.auto_params['peak_windows'][i]
+                            if i < len(peak_windows_list):
+                                custom_window = peak_windows_list[i]
                                 custom_start, custom_end = map(float, custom_window.split(','))
                             else:
                                 custom_start, custom_end = start, end
@@ -3771,6 +4088,9 @@ class TEPApp:
                         peak_windows.append(f"{start},{end}")
 
                     st.session_state.auto_params['peak_windows'] = peak_windows
+                else:
+                    # If not using custom windows, set peak_windows to empty list (not None)
+                    st.session_state.auto_params['peak_windows'] = []
 
                 # Additional TEP options
                 col1, col2 = st.columns(2)
@@ -3800,6 +4120,10 @@ class TEPApp:
                         help="Save TEP validation summary"
                     )
                     st.session_state.auto_params['save_validation'] = save_validation
+            else:
+                # Even if TEP analysis is disabled, ensure peak_windows is defined
+                # to prevent the error when processing
+                st.session_state.auto_params['peak_windows'] = []
 
         with st.expander("PCIst Analysis Parameters", expanded=False):
             pcist_enabled = not st.checkbox(
@@ -4013,9 +4337,87 @@ class TEPApp:
         from pathlib import Path
 
         try:
+            # Make a copy of the parameters to avoid modifying the original
+            params_copy = params.copy()
+
+            # Define all required parameters with default values
+            # These match the defaults in argparse definitions from run.py
+            required_params = {
+                # ICA Topography parameters
+                'topo_edge_threshold': 0.15,
+                'topo_zscore_threshold': 3.5,
+                'topo_peak_threshold': 3.0,
+                'topo_focal_threshold': 0.2,
+
+                # ICA controls
+                'select_with_topo': False,
+                'no_select_with_nn': False,
+                'no_first_ica': False,
+                'no_second_ica': False,
+
+                # NN parameters
+                'nn_probability_threshold': 0.05,
+                'nn_model_path': None,
+                'nn_encoder_path': None,
+
+                # Second ICA
+                'second_ica_method': 'infomax',
+                'icalabel_exclude_labels': ["eye", "heart", "muscle", "line_noise", "channel_noise", "unknown"],
+
+                # TEP parameters
+                'analyze_teps': True,
+                'tep_analysis_type': 'gmfa',
+                'tep_roi_channels': ['C3', 'C4'],
+                'tep_method': 'largest',
+                'tep_samples': 5,
+                'peak_mode': 'abs',
+                'no_channel_peaks': False,
+                'manual_windows': False,
+                'save_validation': False,
+
+                # PCIst parameters
+                'no_pcist': False,
+                'baseline_start': -400,
+                'baseline_end': -50,
+                'response_start': 0,
+                'response_end': 300,
+                'k': 1.2,
+                'min_snr': 1.1,
+                'max_var': 99.0,
+                'embed': False,
+                'n_steps': 100,
+                'research': False,
+
+                # PARAFAC parameters
+                'parafac_muscle_artifacts': False,
+                'muscle_window_start': 0.005,
+                'muscle_window_end': 0.030,
+                'threshold_factor': 1.0,
+                'n_components': 5,
+
+                # SSP parameters
+                'apply_ssp': False,
+                'ssp_n_eeg': 2,
+
+                # CSD parameters
+                'apply_csd': False,
+                'lambda2': 1e-5,
+                'stiffness': 4,
+
+                # Ensure peak_windows is always defined
+                'peak_windows': []
+            }
+
+            # Add default values for any missing parameters
+            for param, default in required_params.items():
+                if param not in params_copy:
+                    params_copy[param] = default
+
             # Create a temporary directory for outputs if needed
-            output_dir = Path(params.get('output_dir', 'output'))
+            output_dir = Path(params_copy.get('output_dir', 'output'))
             output_dir.mkdir(exist_ok=True, parents=True)
+
+            st.session_state.output_directory = str(output_dir)
 
             # Import the process_subjects function from run.py
             module_name = "tmseegpy.run"
@@ -4023,7 +4425,7 @@ class TEPApp:
             process_subjects = run_module.process_subjects
 
             # Create an argparse Namespace object with all parameters
-            args = argparse.Namespace(**params)
+            args = argparse.Namespace(**params_copy)
 
             # Set up a progress bar and message area
             progress_bar = st.progress(0)
@@ -4039,7 +4441,7 @@ class TEPApp:
                     progress_bar.progress(progress)
 
             # Run the preprocessing pipeline
-            status_message.text("Starting preprocessing pipeline...")
+            status_message.text("Hopefully some TEPs will appear soon...")
             results = process_subjects(args, status_callback=status_callback)
 
             # Show success message
@@ -4068,6 +4470,11 @@ class TEPApp:
             Directory containing TEP analysis results
         """
         from pathlib import Path
+        import mne
+
+        # Set this flag to indicate we're in the results display mode
+        # and make sure it persists across reruns
+        st.session_state.showing_results = True
 
         # Find TEP plot files
         output_dir = Path(output_dir)
@@ -4093,12 +4500,490 @@ class TEPApp:
             st.info("No TEP analysis plots found in the output directory.")
 
         # Check for PCIst results
-        pcist_files = list(output_dir.glob("pcist_*.png"))
+       # pcist_files = list(output_dir.glob("pcist_*.png"))
 
-        if pcist_files:
-            st.subheader("Perturbational Complexity Index (PCIst)")
+       # if pcist_files:
+         #   st.subheader("Perturbational Complexity Index (PCIst)")
 
-            for file in pcist_files:
-                with st.expander(f"PCIst: {file.stem}", expanded=True):
-                    st.image(str(file))
+         #   for file in pcist_files:
+        #        with st.expander(f"PCIst: {file.stem}", expanded=True):
+           #         st.image(str(file))
 
+        # Add interactive visualization option
+        st.subheader("Interactive TEP Analysis")
+
+        show_interactive = st.session_state.auto_params.get('show_interactive_tep', True)
+
+        if show_interactive:
+            # Save the output directory in session state to maintain it between reruns
+            st.session_state.output_directory = str(output_dir)
+
+            # Find all the preprocessed epoch files
+            epoch_files = list(output_dir.glob("*_preproc-epo.fif"))
+
+            if epoch_files:
+                # Store the file list in session state to maintain it between reruns
+                if 'epoch_files' not in st.session_state:
+                    st.session_state.epoch_files = {file.name: str(file) for file in epoch_files}
+
+                # Save the currently selected file in session state if not already set
+                if 'selected_epoch_file' not in st.session_state:
+                    st.session_state.selected_epoch_file = list(st.session_state.epoch_files.keys())[0]
+
+                # Function to handle file selection without causing full rerun
+                def on_file_select():
+                    # This function intentionally does nothing - the selection is stored in session state
+                    pass
+
+                # Allow user to select a file using session state to maintain selection
+                selected_file = st.selectbox(
+                    "Select an epochs file to visualize:",
+                    options=list(st.session_state.epoch_files.keys()),
+                    key='selected_epoch_file',
+                    on_change=on_file_select
+                )
+
+                # Get the file path from session state
+                file_path = st.session_state.epoch_files[selected_file]
+
+                try:
+                    # Load the epochs directly with a session key based on the file name to ensure
+                    # channel selections persist for each file across reruns
+                    epochs = mne.read_epochs(file_path, preload=True)
+
+                    # Display basic info about the epochs
+                    st.subheader(f"Epochs Information - {selected_file}")
+                    info_cols = st.columns(3)
+                    with info_cols[0]:
+                        st.metric("Number of Epochs", len(epochs))
+                    with info_cols[1]:
+                        st.metric("Number of Channels", len(epochs.ch_names))
+                    with info_cols[2]:
+                        st.metric("Sampling Rate", f"{epochs.info['sfreq']} Hz")
+
+                    # Use the improved visualization function
+                    with st.expander("Interactive TEP Visualization", expanded=True):
+                        # Call the updated visualization function with a title indicating the file
+                        self._visualize_tep_from_epochs(epochs, title=f"TEP Analysis - {selected_file}")
+
+                except Exception as e:
+                    st.error(f"Error loading or processing {file_path}: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc())
+            else:
+                st.info(
+                    "No preprocessed epoch files found. Make sure your batch processing saved the epochs files with '_preproc-epo.fif' suffix.")
+        else:
+            st.info(
+                "Interactive visualization is disabled in the current configuration. Enable it in the TEP Analysis Parameters section of batch processing.")
+
+    def _visualize_tep_from_epochs(self, epochs, title=None):
+        """
+        Standalone method to visualize TEPs from any epochs object without requiring a processor.
+        Fixed version with properly working channel selection and peak display.
+        Added GFP and LMFP visualization options.
+
+        Parameters
+        ----------
+        epochs : mne.Epochs
+            Loaded epochs object to visualize
+        title : str, optional
+            Title for the visualization
+        """
+        import numpy as np
+        import pandas as pd
+        import plotly.graph_objects as go
+        from scipy import signal
+
+        # Get evoked response
+        evoked = epochs.average()
+
+        # Create a unique identifier for this specific epochs object
+        # Using the file name if available, otherwise the object id
+        if hasattr(epochs, 'filename') and epochs.filename:
+            # Extract just the filename without path
+            import os
+            base_name = os.path.basename(epochs.filename)
+            session_key = f"tep_viz_{base_name}"
+        else:
+            session_key = f"tep_viz_{id(epochs)}"
+
+        # Initialize session state for this particular visualization
+        if f"{session_key}_initialized" not in st.session_state:
+            # Default to Cz if available, otherwise first channel
+            default_channel = 'Cz' if 'Cz' in evoked.ch_names else evoked.ch_names[0]
+
+            # Initialize all session state variables for this visualization
+            st.session_state[f"{session_key}_channels"] = [default_channel]
+            st.session_state[f"{session_key}_tmin"] = -300
+            st.session_state[f"{session_key}_tmax"] = 600
+            st.session_state[f"{session_key}_show_peaks"] = False
+            st.session_state[f"{session_key}_initialized"] = True
+            st.session_state[f"{session_key}_show_gfp"] = False
+            st.session_state[f"{session_key}_show_lmfp"] = False
+            st.session_state[f"{session_key}_lmfp_channels"] = [default_channel]
+
+        # Display title if provided
+        if title:
+            st.subheader(title)
+
+        # Create three columns for the control buttons
+        col1, col2, col3 = st.columns(3)
+
+        # Select All button
+        with col1:
+            if st.button("Select All Channels", key=f"{session_key}_select_all"):
+                st.session_state[f"{session_key}_channels"] = evoked.ch_names.copy()
+                st.experimental_rerun()
+
+        # Clear All button
+        with col2:
+            if st.button("Clear All Channels", key=f"{session_key}_clear_all"):
+                st.session_state[f"{session_key}_channels"] = []
+                st.experimental_rerun()
+
+        # Update button (helps ensure changes are applied)
+        with col3:
+            if st.button("Update Plot", key=f"{session_key}_update"):
+                # This button just forces a rerun to apply any changes
+                st.experimental_rerun()
+
+        # Channel selection
+        st.subheader("Channel Selection")
+        selected_channels = st.multiselect(
+            "Select channels to display",
+            options=evoked.ch_names,
+            default=st.session_state[f"{session_key}_channels"],
+            key=f"{session_key}_channel_select"
+        )
+
+        # Update the session state with the new selection
+        # This is crucial - we need to store the selected channels in session state
+        st.session_state[f"{session_key}_channels"] = selected_channels
+
+        # Time window selection
+        st.subheader("Time Window")
+        col1, col2 = st.columns(2)
+        with col1:
+            tmin = st.number_input(
+                "Start time (ms)",
+                value=st.session_state[f"{session_key}_tmin"],
+                min_value=int(evoked.times[0] * 1000),
+                max_value=int(evoked.times[-1] * 1000),
+                key=f"{session_key}_tmin_input"
+            )
+            # Store in session state
+            st.session_state[f"{session_key}_tmin"] = tmin
+
+        with col2:
+            tmax = st.number_input(
+                "End time (ms)",
+                value=st.session_state[f"{session_key}_tmax"],
+                min_value=int(evoked.times[0] * 1000),
+                max_value=int(evoked.times[-1] * 1000),
+                key=f"{session_key}_tmax_input"
+            )
+            # Store in session state
+            st.session_state[f"{session_key}_tmax"] = tmax
+
+        # GFP and LMFP options
+        st.subheader("Field Power Options")
+        col1, col2 = st.columns(2)
+        with col1:
+            show_gfp = st.checkbox(
+                "Show Global Field Power (GFP)",
+                value=st.session_state[f"{session_key}_show_gfp"],
+                key=f"{session_key}_gfp_toggle"
+            )
+            # Store in session state
+            st.session_state[f"{session_key}_show_gfp"] = show_gfp
+
+        with col2:
+            show_lmfp = st.checkbox(
+                "Show Local Mean Field Power (LMFP)",
+                value=st.session_state[f"{session_key}_show_lmfp"],
+                key=f"{session_key}_lmfp_toggle"
+            )
+            # Store in session state
+            st.session_state[f"{session_key}_show_lmfp"] = show_lmfp
+
+        # If LMFP is enabled, show channel selection for LMFP
+        if show_lmfp:
+            # First retrieve from session state to maintain previous selections
+            current_lmfp_channels = st.session_state.get(f"{session_key}_lmfp_channels", [])
+
+            # Use on_change to update the session state
+            def update_lmfp_channels():
+                # This function is called when the multiselect changes
+                pass
+
+            # Use the multiselect with the current value as default
+            lmfp_channels = st.multiselect(
+                "Select channels for LMFP calculation",
+                options=evoked.ch_names,
+                default=current_lmfp_channels,
+                key=f"{session_key}_lmfp_channels_select",
+                on_change=update_lmfp_channels
+            )
+
+            # Immediately update session state with the selected channels
+            st.session_state[f"{session_key}_lmfp_channels"] = lmfp_channels
+
+            # Force a rerun if selections changed to make it "stick"
+            if sorted(current_lmfp_channels) != sorted(lmfp_channels):
+                st.rerun()
+
+        # Show peak info checkbox
+        show_peaks = st.checkbox(
+            "Show Peak Information",
+            value=st.session_state[f"{session_key}_show_peaks"],
+            key=f"{session_key}_peaks_toggle"
+        )
+        # Store in session state
+        st.session_state[f"{session_key}_show_peaks"] = show_peaks
+
+        # Get current settings from session state
+        selected_channels = st.session_state[f"{session_key}_channels"]
+        tmin = st.session_state[f"{session_key}_tmin"]
+        tmax = st.session_state[f"{session_key}_tmax"]
+        show_peaks = st.session_state[f"{session_key}_show_peaks"]
+        show_gfp = st.session_state[f"{session_key}_show_gfp"]
+        show_lmfp = st.session_state[f"{session_key}_show_lmfp"]
+        lmfp_channels = st.session_state[f"{session_key}_lmfp_channels"] if show_lmfp else []
+
+        # Create Plotly figure
+        if selected_channels:
+            # Get channel indices
+            ch_idx = [evoked.ch_names.index(ch) for ch in selected_channels if ch in evoked.ch_names]
+
+            # Time window indices
+            time_mask = (evoked.times * 1000 >= tmin) & (evoked.times * 1000 <= tmax)
+            times = evoked.times[time_mask] * 1000  # Convert to ms
+
+            # Create traces for selected channels
+            traces = []
+            for idx, ch in zip(ch_idx, [selected_channels[i] for i in range(len(ch_idx))]):
+                trace = go.Scatter(
+                    x=times,
+                    y=evoked.data[idx, time_mask] * 1e6,  # Convert to µV
+                    mode='lines',
+                    name=ch,
+                    hovertemplate='Amplitude: %{y:.2f} µV<br>Time: %{x:.2f} ms'
+                )
+                traces.append(trace)
+
+            # Add GFP if selected
+            if show_gfp:
+                # Calculate GFP (standard deviation across all channels)
+                gfp_data = np.std(evoked.data, axis=0, ddof=0) * 1e6  # Convert to µV
+                gfp_trace = go.Scatter(
+                    x=times,
+                    y=gfp_data[time_mask],
+                    mode='lines',
+                    name='GFP',
+                    line=dict(color='red', width=3),
+                    hovertemplate='GFP: %{y:.2f} µV<br>Time: %{x:.2f} ms'
+                )
+                traces.append(gfp_trace)
+
+            # Add LMFP if selected
+            if show_lmfp and lmfp_channels:
+                # Get indices of LMFP channels
+                lmfp_idx = [evoked.ch_names.index(ch) for ch in lmfp_channels if ch in evoked.ch_names]
+                if lmfp_idx:
+                    # Calculate LMFP (standard deviation across selected channels)
+                    lmfp_data = np.std(evoked.data[lmfp_idx, :], axis=0, ddof=0) * 1e6  # Convert to µV
+                    lmfp_trace = go.Scatter(
+                        x=times,
+                        y=lmfp_data[time_mask],
+                        mode='lines',
+                        name=f'LMFP ({len(lmfp_idx)} ch)',
+                        line=dict(color='green', width=3),
+                        hovertemplate='LMFP: %{y:.2f} µV<br>Time: %{x:.2f} ms'
+                    )
+                    traces.append(lmfp_trace)
+
+            # Create layout
+            layout = go.Layout(
+                title='TMS-Evoked Potentials',
+                xaxis=dict(
+                    title='Time (ms)',
+                    showgrid=True,
+                    zeroline=True,
+                    zerolinecolor='lightgray'
+                ),
+                yaxis=dict(
+                    title='Amplitude (µV)',
+                    showgrid=True,
+                    zeroline=True,
+                    zerolinecolor='lightgray'
+                ),
+                hovermode='closest',
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="right",
+                    x=0.99
+                ),
+                width=None,  # Let Streamlit control the width
+                height=600
+            )
+
+            # Create and display figure
+            fig = go.Figure(data=traces, layout=layout)
+
+            # Add a horizontal line at y=0
+            fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray")
+
+            # Add vertical line at t=0 (TMS pulse)
+            fig.add_vline(x=0, line_width=1, line_dash="dash", line_color="red")
+
+            # Show the plot
+            st.plotly_chart(fig, use_container_width=True)
+
+            # If GFP or LMFP is selected, show them in a separate plot
+            if show_gfp or (show_lmfp and lmfp_channels):
+                fp_traces = []
+
+                if show_gfp:
+                    fp_traces.append(go.Scatter(
+                        x=times,
+                        y=gfp_data[time_mask],
+                        mode='lines',
+                        name='GFP',
+                        line=dict(color='red', width=2),
+                        hovertemplate='GFP: %{y:.2f} µV<br>Time: %{x:.2f} ms'
+                    ))
+
+                if show_lmfp and lmfp_idx:
+                    fp_traces.append(go.Scatter(
+                        x=times,
+                        y=lmfp_data[time_mask],
+                        mode='lines',
+                        name=f'LMFP ({", ".join(lmfp_channels)})',
+                        line=dict(color='green', width=2),
+                        hovertemplate='LMFP: %{y:.2f} µV<br>Time: %{x:.2f} ms'
+                    ))
+
+                fp_layout = go.Layout(
+                    title='Field Power Analysis',
+                    xaxis=dict(
+                        title='Time (ms)',
+                        showgrid=True,
+                        zeroline=True,
+                        zerolinecolor='lightgray'
+                    ),
+                    yaxis=dict(
+                        title='Field Power (µV)',
+                        showgrid=True,
+                        zeroline=True,
+                        zerolinecolor='lightgray'
+                    ),
+                    hovermode='closest',
+                    showlegend=True
+                )
+
+                fp_fig = go.Figure(data=fp_traces, layout=fp_layout)
+                fp_fig.add_vline(x=0, line_width=1, line_dash="dash", line_color="black",
+                                 annotation_text="TMS")
+
+                st.plotly_chart(fp_fig, use_container_width=True)
+
+            # Display peak information
+            if show_peaks:
+                st.subheader("Peak Analysis")
+                peak_data = []
+
+                for ch in selected_channels:
+                    if ch not in evoked.ch_names:
+                        continue
+                    ch_idx = evoked.ch_names.index(ch)
+                    data = evoked.data[ch_idx, time_mask] * 1e6
+                    times = evoked.times[time_mask] * 1000
+
+                    # Find peaks
+                    # Find positive peaks
+                    pos_peaks = signal.find_peaks(data)[0]
+                    for peak in pos_peaks:
+                        peak_data.append({
+                            "Channel": ch,
+                            "Type": "Positive",
+                            "Latency (ms)": times[peak],
+                            "Amplitude (µV)": data[peak]
+                        })
+
+                    # Find negative peaks
+                    neg_peaks = signal.find_peaks(-data)[0]
+                    for peak in neg_peaks:
+                        peak_data.append({
+                            "Channel": ch,
+                            "Type": "Negative",
+                            "Latency (ms)": times[peak],
+                            "Amplitude (µV)": data[peak]
+                        })
+
+                # Sort by channel and time
+                if peak_data:
+                    peak_df = pd.DataFrame(peak_data).sort_values(by=["Channel", "Latency (ms)"])
+                    st.dataframe(peak_df)
+
+                # Identify TEP components
+                st.subheader("Standard TEP Components")
+
+                # Define standard TEP component windows
+                tep_components = {
+                    'N15': {'window': (10, 20), 'polarity': 'Negative'},
+                    'P30': {'window': (20, 40), 'polarity': 'Positive'},
+                    'N45': {'window': (40, 55), 'polarity': 'Negative'},
+                    'P60': {'window': (50, 70), 'polarity': 'Positive'},
+                    'N100': {'window': (70, 150), 'polarity': 'Negative'},
+                    'P180': {'window': (150, 240), 'polarity': 'Positive'}
+                }
+
+                component_data = []
+                for ch in selected_channels:
+                    if ch not in evoked.ch_names:
+                        continue
+                    ch_idx = evoked.ch_names.index(ch)
+                    data = evoked.data[ch_idx, :] * 1e6
+                    times = evoked.times * 1000
+
+                    for comp_name, comp_info in tep_components.items():
+                        window_start, window_end = comp_info['window']
+                        polarity = comp_info['polarity']
+
+                        # Skip if window is outside displayed range
+                        if window_end < tmin or window_start > tmax:
+                            continue
+
+                        # Find indices for time window
+                        win_mask = (times >= window_start) & (times <= window_end)
+                        win_data = data[win_mask]
+                        win_times = times[win_mask]
+
+                        if len(win_data) == 0:
+                            continue
+
+                        # Find peak based on polarity
+                        if polarity == 'Positive':
+                            peak_idx = np.argmax(win_data)
+                        else:
+                            peak_idx = np.argmin(win_data)
+
+                        peak_lat = win_times[peak_idx]
+                        peak_amp = win_data[peak_idx]
+
+                        component_data.append({
+                            "Channel": ch,
+                            "Component": comp_name,
+                            "Latency (ms)": peak_lat,
+                            "Amplitude (µV)": peak_amp
+                        })
+
+                # Display TEP component data
+                if component_data:
+                    comp_df = pd.DataFrame(component_data).sort_values(by=["Component", "Channel"])
+                    st.dataframe(comp_df)
+        else:
+            st.warning("Please select at least one channel to display")

@@ -38,16 +38,10 @@ dependencies = [
     # Visualization
     "matplotlib>=3.9.2",
     "seaborn>=0.12.0",
-    "plotly>=5.13.0",  # Added for interactive plots
-
-    # GUI
-    "PyQt6>=6.4.0",
-    "PyQt6-Qt6",
-    "PyQt6-sip",
-    "pyqtgraph>=0.13.0",  # Added for real-time plotting
+    "plotly>=5.13.0",
 
     # Streamlit GUI
-    "streamlit>=1.24.0",  # Added for GUI
+    "streamlit>=1.24.0",
 
     # Utils
     "tqdm",
