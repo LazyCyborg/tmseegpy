@@ -14,7 +14,8 @@ class TMSEEGLoader:
         'edf': ('.edf',),
         'cnt': ('.cnt',),
         'eeglab': ('.set', '.fdt'),
-        'auto': ('.ses', '.vhdr', '.edf', '.cnt', '.set')
+        'curry': ('.cdt', '.cef', '.dat', '.dap', '.rs3'),  # Add Curry format
+        'auto': ('.ses', '.vhdr', '.edf', '.cnt', '.set', '.cdt', '.cef', '.dat', '.dap', '.rs3')
     }
 
     def __init__(self,
@@ -48,6 +49,9 @@ class TMSEEGLoader:
             for fmt, extensions in self.SUPPORTED_FORMATS.items():
                 if fmt != 'auto' and ext in extensions:
                     return fmt
+            # Check for compound extensions
+            if self.data_path.name.lower().endswith(('.cdt.dpa', '.cdt.cef')):
+                return 'curry'
         else:
             # Look for known file types in directory
             for fmt, extensions in self.SUPPORTED_FORMATS.items():
@@ -55,6 +59,9 @@ class TMSEEGLoader:
                     for ext in extensions:
                         if any(self.data_path.glob(f"**/*{ext}")):
                             return fmt
+            # Check for compound extensions in directory
+            if any(self.data_path.glob("**/*.cdt.dpa")) or any(self.data_path.glob("**/*.cdt.cef")):
+                return 'curry'
 
         raise ValueError(f"Could not detect format for {self.data_path}")
 
@@ -73,6 +80,11 @@ class TMSEEGLoader:
         files = []
         for ext in extensions:
             files.extend(self.data_path.glob(f"**/*{ext}"))
+
+        # Add files with compound extensions for Curry format
+        if self.format == 'curry' or self.format == 'auto':
+            files.extend(self.data_path.glob("**/*.cdt.dpa"))
+            files.extend(self.data_path.glob("**/*.cdt.cef"))
 
         # Filter out secondary files
         if self.format == 'eeglab':
@@ -160,6 +172,9 @@ class TMSEEGLoader:
                     return rec.sessions[0].to_mne(
                         substitute_zero_events_with=self.substitute_zero_events_with
                     )
+            elif file_path.suffix.lower() in ('.cdt', '.cef', '.dat', '.dap', '.rs3') or \
+                 file_path.name.lower().endswith(('.cdt.dpa', '.cdt.cef')):  # Handle Curry formats
+                return mne.io.read_raw_curry(file_path, preload=True)
         except Exception as e:
             print(f"Error loading {file_path}: {str(e)}")
             return None

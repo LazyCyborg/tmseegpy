@@ -33,7 +33,7 @@ dependencies = [
     # Machine learning
     "scikit-learn>=1.4.0",
     "tensorly>=0.8.0",
-    "tensorflow>=2.15.0",
+    "pytorch>=2.6",
 
     # Visualization
     "matplotlib>=3.9.2",

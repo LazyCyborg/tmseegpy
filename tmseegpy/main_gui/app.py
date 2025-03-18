@@ -3438,7 +3438,7 @@ class TEPApp:
         with col2:
             data_format = st.selectbox(
                 "Data Format",
-                options=['neurone', 'brainvision', 'edf', 'cnt', 'eeglab', 'auto'],
+                options=['neurone', 'brainvision', 'curry', 'edf', 'cnt', 'eeglab', 'auto'],
                 index=1,  # Default to brainvision
                 help="Format of the input files"
             )
