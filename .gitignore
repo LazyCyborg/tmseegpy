@@ -51,6 +51,7 @@ output_cut/
 output_neo/
 output_test/
 output_copy/
+debug_output/
 output_PARAFAC/
 for_neurophysiologists/
 PCIst_output/
