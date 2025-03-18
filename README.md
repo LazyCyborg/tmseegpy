@@ -65,7 +65,7 @@ removed and artifacts can remain which probably makes the final result unreliabl
 
 ### Example Usage
 
-To run the pipeline with default settings with manual ICA component selection using MNEs QT viewer and PyQt6:
+To run the pipeline with default settings:
 
 ```bash
 tmseegpy process --data_dir ./data_dir_with_TMSEEG_folder --output_dir ./your_output_dir
