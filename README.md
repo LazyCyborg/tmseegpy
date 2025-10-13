@@ -152,7 +152,7 @@ And the TMS-artifact removal + ICA classification steps are guided by the open-s
 
 ## Example Pipeline 
 
-Below is the pipeline **I use**, after iterating a lot and verifying that the final EEG looks reasonable (contains typical TEPs and stable PCI-values). It’s primarily tested on recordings from one healthy subject (awake/slightly somnolent). **Use at your own risk**—always visually check data quality.
+Below is the pipeline **I use**, after iterating a lot and verifying that the final EEG looks reasonable (contains typical TEPs and stable PCI-values). It’s primarily tested on recordings from one healthy subject (awake/slightly somnolent). 
 
 ## Notes on Quality Control
 - *Always visually inspect final TMS-EEG waveforms* and confirm TEP latencies/amplitudes are physiologically reasonable.  
